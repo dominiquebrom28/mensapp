@@ -278,10 +278,10 @@ const RegisterScreen = ({users,onRegister,onGoLogin}) => {
     if(pin!==pin2){setErr("PINs komen niet overeen.");return;}
     setLoading(true);
     const pinH=await hashPin(pin);
-    const ok=await onRegister({id:`u-${Date.now()}`,username:username.trim(),pin_hash:pinH,role:"pending",joinedAt:new Date().toISOString(),avatar:Math.floor(Math.random()*8)});
+    const errMsg=await onRegister({id:`u-${Date.now()}`,username:username.trim(),pin_hash:pinH,role:"pending",joinedAt:new Date().toISOString(),avatar:Math.floor(Math.random()*8)});
     setLoading(false);
-    if(ok)setDone(true);
-    else setErr("Er is iets misgegaan. Probeer het opnieuw.");
+    if(!errMsg)setDone(true);
+    else setErr("Fout: "+errMsg);
   };
   if(done)return(
     <AuthShell>
@@ -1763,9 +1763,9 @@ export default function App(){
   const logout=()=>{setCurrentUser(null);localStorage.removeItem("md-session");setActiveId(null);setPageView("home");};
   const register=async u=>{
     const {error}=await supabase.from("users").insert([u]);
-    if(error){console.error("Register error:",error);return false;}
+    if(error){console.error("Register error:",error);return error.message||"Onbekende fout";}
     setUsers(prev=>[...prev,u]);
-    return true;
+    return null;
   };
   const updateUsers=async u=>{await saveUsers(u);if(currentUser){const r=u.find(x=>x.id===currentUser.id);if(r)setCurrentUser(r);}};
   const deleteUser=async id=>{
