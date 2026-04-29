@@ -1747,10 +1747,8 @@ export default function App(){
       setLoaded(true);
     });
 
-    const channel=supabase.channel("users-changes").on("postgres_changes",{event:"*",schema:"public",table:"users"},()=>{
-      supabase.from("users").select("*").then(({data})=>{if(data)setUsers(data);});
-    }).subscribe();
-    return()=>{supabase.removeChannel(channel);};
+    const poll=setInterval(()=>{supabase.from("users").select("*").then(({data})=>{if(data)setUsers(data);});},30000);
+    return()=>clearInterval(poll);
   },[]);
 
   const saveUsers=async u=>{
