@@ -111,6 +111,12 @@ const can = {
 // ─────────────────────────────────────────────────────────────────────────────
 // COUNTDOWN HOOK
 // ─────────────────────────────────────────────────────────────────────────────
+const useIsMobile = () => {
+  const [mobile,setMobile]=useState(typeof window!=="undefined"&&window.innerWidth<640);
+  useEffect(()=>{const h=()=>setMobile(window.innerWidth<640);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
+  return mobile;
+};
+
 const useCountdown = (dateStr,startTime="12:00") => {
   const [t,setT]=useState({});
   useEffect(()=>{
@@ -327,25 +333,87 @@ const PendingScreen = ({user,onLogout}) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // NAV
 // ─────────────────────────────────────────────────────────────────────────────
-const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,pendingCount}) => (
-  <nav style={{position:"fixed",top:0,left:0,right:0,zIndex:200,background:"rgba(15,11,7,.94)",backdropFilter:"blur(14px)",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 1.2rem",height:58,gap:12}}>
-    <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
-      {view!=="home"&&<button onClick={onBack} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Back</button>}
-      <div onClick={onHome} style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer"}}>
-        {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":eventName}
-      </div>
+const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,pendingCount,notifications,notifLastRead,onMarkNotifRead}) => {
+  const [menuOpen,setMenuOpen]=useState(false);
+  const [notifOpen,setNotifOpen]=useState(false);
+  const isMobile=useIsMobile();
+  const unread=notifications.filter(n=>n.timestamp>notifLastRead).length;
+  const typeIcon={rsvp:"📅",faq:"❓",answer:"💬",photo:"📷"};
+  const timeAgo=ts=>{const d=Date.now()-new Date(ts);if(d<60000)return"zojuist";if(d<3600000)return`${Math.floor(d/60000)} min geleden`;if(d<86400000)return`${Math.floor(d/3600000)} uur geleden`;return`${Math.floor(d/86400000)} d geleden`;};
+  useEffect(()=>{
+    if(!notifOpen&&!menuOpen)return;
+    const close=()=>{setNotifOpen(false);setMenuOpen(false);};
+    document.addEventListener("click",close);
+    return()=>document.removeEventListener("click",close);
+  },[notifOpen,menuOpen]);
+  const notifList=(
+    <div>
+      <div style={{padding:"10px 14px",borderBottom:"1px solid var(--border)",fontSize:".75rem",color:"var(--muted)",fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>Activiteit</div>
+      {notifications.length===0
+        ?<div style={{padding:"2rem",textAlign:"center",color:"var(--muted)",fontSize:".83rem"}}>Nog geen activiteit</div>
+        :notifications.map(n=>(
+          <div key={n.id} style={{padding:"10px 14px",borderBottom:"1px solid var(--border)",display:"flex",gap:10,alignItems:"flex-start"}}>
+            <span style={{fontSize:"1rem",flexShrink:0}}>{typeIcon[n.type]||"•"}</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:".83rem",color:"var(--cream)",wordBreak:"break-word"}}>{n.message}</div>
+              <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{n.event} · {timeAgo(n.timestamp)}</div>
+            </div>
+          </div>
+        ))
+      }
     </div>
-    <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-      <button onClick={onHof} style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
-      {can.manageUsers(currentUser)&&<button onClick={onAdmin} style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
-      <div style={{display:"flex",alignItems:"center",gap:7,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"5px 12px",cursor:"pointer"}} onClick={onLogout}>
-        <Avatar name={currentUser.username} size={22} index={currentUser.avatar||0}/>
-        <span style={{fontSize:".8rem",color:"var(--cream)"}}>{currentUser.username}</span>
-        <RoleBadge role={currentUser.role}/>
+  );
+  return(
+    <nav style={{position:"fixed",top:0,left:0,right:0,zIndex:200,background:"rgba(15,11,7,.94)",backdropFilter:"blur(14px)",borderBottom:"1px solid var(--border)"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 1.2rem",height:58,gap:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}}>
+          {view!=="home"&&<button onClick={onBack} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Terug</button>}
+          <div onClick={onHome} style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer"}}>
+            {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":eventName}
+          </div>
+        </div>
+        {!isMobile&&(
+          <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+            <button onClick={onHof} style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
+            {can.manageUsers(currentUser)&&<button onClick={onAdmin} style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
+            <div style={{position:"relative"}} onClick={e=>e.stopPropagation()}>
+              <button onClick={()=>{const o=!notifOpen;setNotifOpen(o);setMenuOpen(false);if(o&&unread>0)onMarkNotifRead();}} style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🔔{unread>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}</button>
+              {notifOpen&&<div onClick={e=>e.stopPropagation()} style={{position:"absolute",right:0,top:"calc(100% + 8px)",width:300,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:"var(--radius)",boxShadow:"0 8px 32px rgba(0,0,0,.5)",zIndex:300,maxHeight:360,overflowY:"auto"}}>{notifList}</div>}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:7,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"5px 12px",cursor:"pointer"}} onClick={onLogout}>
+              <Avatar name={currentUser.username} size={22} index={currentUser.avatar||0}/>
+              <span style={{fontSize:".8rem",color:"var(--cream)"}}>{currentUser.username}</span>
+              <RoleBadge role={currentUser.role}/>
+            </div>
+          </div>
+        )}
+        {isMobile&&(
+          <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+            <div style={{position:"relative"}} onClick={e=>e.stopPropagation()}>
+              <button onClick={()=>{const o=!notifOpen;setNotifOpen(o);setMenuOpen(false);if(o&&unread>0)onMarkNotifRead();}} style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"6px 10px",cursor:"pointer",fontSize:"1rem"}}>🔔{unread>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}</button>
+            </div>
+            <button onClick={e=>{e.stopPropagation();setMenuOpen(o=>!o);setNotifOpen(false);}} style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"6px 11px",cursor:"pointer",fontSize:"1.1rem",lineHeight:1}}>
+              {menuOpen?"✕":"☰"}{!menuOpen&&pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}
+            </button>
+          </div>
+        )}
       </div>
-    </div>
-  </nav>
-);
+      {isMobile&&menuOpen&&(
+        <div onClick={e=>e.stopPropagation()} style={{background:"rgba(15,11,7,.98)",borderBottom:"1px solid var(--border)",padding:".8rem 1.2rem",display:"grid",gap:".5rem"}}>
+          <button onClick={()=>{onHof();setMenuOpen(false);}} style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
+          {can.manageUsers(currentUser)&&<button onClick={()=>{onAdmin();setMenuOpen(false);}} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:".7rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{pendingCount}</span>}</button>}
+          <div onClick={()=>{onLogout();setMenuOpen(false);}} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"8px 14px",cursor:"pointer"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}><Avatar name={currentUser.username} size={26} index={currentUser.avatar||0}/><span style={{fontSize:".88rem",color:"var(--cream)"}}>{currentUser.username}</span><RoleBadge role={currentUser.role}/></div>
+            <span style={{fontSize:".78rem",color:"var(--muted)"}}>Uitloggen</span>
+          </div>
+        </div>
+      )}
+      {isMobile&&notifOpen&&(
+        <div onClick={e=>e.stopPropagation()} style={{background:"rgba(15,11,7,.98)",borderBottom:"1px solid var(--border)",maxHeight:300,overflowY:"auto"}}>{notifList}</div>
+      )}
+    </nav>
+  );
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ADMIN PANEL
@@ -1715,6 +1783,37 @@ const NewEventModal=({onSave,onClose})=>{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ACTIVITY DIFF
+// ─────────────────────────────────────────────────────────────────────────────
+const diffEvents=(prev,next)=>{
+  const acts=[];
+  next.forEach(evt=>{
+    const old=prev.find(e=>e.id===evt.id);
+    if(!old)return;
+    (evt.faqs||[]).forEach(faq=>{
+      if(!(old.faqs||[]).find(f=>f.id===faq.id))
+        acts.push({id:faq.id,type:"faq",message:`${faq.askedBy} stelde een vraag`,event:evt.name,timestamp:faq.askedAt});
+    });
+    (evt.faqs||[]).forEach(faq=>{
+      const oldFaq=(old.faqs||[]).find(f=>f.id===faq.id);
+      if(oldFaq&&!oldFaq.answer&&faq.answer)
+        acts.push({id:`ans-${faq.id}`,type:"answer",message:`${faq.answeredBy} beantwoordde een vraag`,event:evt.name,timestamp:faq.answeredAt});
+    });
+    (evt.attendees||[]).forEach(att=>{
+      const oldAtt=(old.attendees||[]).find(a=>a.name===att.name);
+      if(oldAtt&&oldAtt.status!==att.status)
+        acts.push({id:`rsvp-${att.name}-${evt.id}-${att.status}`,type:"rsvp",message:`${att.name}: ${statusMap[att.status]?.label||att.status}`,event:evt.name,timestamp:new Date().toISOString()});
+    });
+    const oldPhotoIds=new Set((old.photos||[]).map(p=>p.id));
+    (evt.photos||[]).forEach(photo=>{
+      if(!oldPhotoIds.has(photo.id))
+        acts.push({id:photo.id,type:"photo",message:`${photo.uploader} uploadde een foto`,event:evt.name,timestamp:photo.uploadedAt});
+    });
+  });
+  return acts;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // APP ROOT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function App(){
@@ -1727,6 +1826,10 @@ export default function App(){
   const [showAdmin,setShowAdmin]=useState(false);
   const [newEvent,setNewEvent]=useState(false);
   const [loaded,setLoaded]=useState(false);
+  const [notifications,setNotifications]=useState([]);
+  const [notifLastRead,setNotifLastRead]=useState(()=>localStorage.getItem("notif-read")||"");
+  const eventsRef=useRef([]);
+  useEffect(()=>{eventsRef.current=events;},[events]);
 
   useEffect(()=>{
     Promise.all([
@@ -1751,7 +1854,16 @@ export default function App(){
       setLoaded(true);
     });
 
-    const poll=setInterval(()=>{supabase.from("users").select("*").then(({data})=>{if(data)setUsers(data);});},30000);
+    const poll=setInterval(()=>{
+      supabase.from("users").select("*").then(({data})=>{if(data)setUsers(data);});
+      supabase.from("events").select("*").order("date").then(({data})=>{
+        if(data){
+          const newActs=diffEvents(eventsRef.current,data);
+          if(newActs.length)setNotifications(prev=>[...newActs,...prev].slice(0,50));
+          setEvents(data);
+        }
+      });
+    },30000);
     return()=>clearInterval(poll);
   },[]);
 
@@ -1807,7 +1919,7 @@ export default function App(){
   return(
     <div style={{minHeight:"100vh",background:"var(--bg)"}}>
       <GS/>
-      <Nav view={pageView} eventName={activeEvent?.name} onBack={goHome} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onHof={()=>setPageView("hof")} onHome={goHome} pendingCount={users.filter(u=>u.role==="pending").length}/>
+      <Nav view={pageView} eventName={activeEvent?.name} onBack={goHome} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onHof={()=>setPageView("hof")} onHome={goHome} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onMarkNotifRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}}/>
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
         {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser}/>}
         {pageView==="hof"&&<HallOfFame events={events}/>}
