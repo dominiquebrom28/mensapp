@@ -323,7 +323,7 @@ const PendingScreen = ({user,onLogout}) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // NAV
 // ─────────────────────────────────────────────────────────────────────────────
-const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome}) => (
+const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,pendingCount}) => (
   <nav style={{position:"fixed",top:0,left:0,right:0,zIndex:200,background:"rgba(15,11,7,.94)",backdropFilter:"blur(14px)",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 1.2rem",height:58,gap:12}}>
     <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
       {view!=="home"&&<button onClick={onBack} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Back</button>}
@@ -333,7 +333,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome}) 
     </div>
     <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
       <button onClick={onHof} style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
-      {can.manageUsers(currentUser)&&<button onClick={onAdmin} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin</button>}
+      {can.manageUsers(currentUser)&&<button onClick={onAdmin} style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
       <div style={{display:"flex",alignItems:"center",gap:7,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"5px 12px",cursor:"pointer"}} onClick={onLogout}>
         <Avatar name={currentUser.username} size={22} index={currentUser.avatar||0}/>
         <span style={{fontSize:".8rem",color:"var(--cream)"}}>{currentUser.username}</span>
@@ -1746,6 +1746,11 @@ export default function App(){
       if(sessId){const u=allUsers.find(u=>u.id===sessId);if(u)setCurrentUser(u);}
       setLoaded(true);
     });
+
+    const channel=supabase.channel("users-changes").on("postgres_changes",{event:"*",schema:"public",table:"users"},()=>{
+      supabase.from("users").select("*").then(({data})=>{if(data)setUsers(data);});
+    }).subscribe();
+    return()=>{supabase.removeChannel(channel);};
   },[]);
 
   const saveUsers=async u=>{
@@ -1795,7 +1800,7 @@ export default function App(){
   return(
     <div style={{minHeight:"100vh",background:"var(--bg)"}}>
       <GS/>
-      <Nav view={pageView} eventName={activeEvent?.name} onBack={goHome} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onHof={()=>setPageView("hof")} onHome={goHome}/>
+      <Nav view={pageView} eventName={activeEvent?.name} onBack={goHome} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onHof={()=>setPageView("hof")} onHome={goHome} pendingCount={users.filter(u=>u.role==="pending").length}/>
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
         {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser}/>}
         {pageView==="hof"&&<HallOfFame events={events}/>}
