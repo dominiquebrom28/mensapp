@@ -268,42 +268,46 @@ const RegisterScreen = ({users,onRegister,onGoLogin}) => {
   const [pin,setPin]=useState("");
   const [pin2,setPin2]=useState("");
   const [err,setErr]=useState("");
+  const [loading,setLoading]=useState(false);
   const [done,setDone]=useState(false);
   const submit=async()=>{
     setErr("");
-    if(username.trim().length<2){setErr("Username must be at least 2 characters.");return;}
-    if(users.find(u=>u.username.toLowerCase()===username.trim().toLowerCase())){setErr("That name is taken.");return;}
-    if(pin.length<4){setErr("PIN must be at least 4 digits.");return;}
-    if(pin!==pin2){setErr("PINs don't match.");return;}
+    if(username.trim().length<2){setErr("Gebruikersnaam moet minimaal 2 tekens zijn.");return;}
+    if(users.find(u=>u.username.toLowerCase()===username.trim().toLowerCase())){setErr("Deze naam is al bezet.");return;}
+    if(pin.length<4){setErr("PIN moet minimaal 4 cijfers zijn.");return;}
+    if(pin!==pin2){setErr("PINs komen niet overeen.");return;}
+    setLoading(true);
     const pinH=await hashPin(pin);
-    onRegister({id:`u-${Date.now()}`,username:username.trim(),pin_hash:pinH,role:"pending",joinedAt:new Date().toISOString(),avatar:Math.floor(Math.random()*8)});
-    setDone(true);
+    const ok=await onRegister({id:`u-${Date.now()}`,username:username.trim(),pin_hash:pinH,role:"pending",joinedAt:new Date().toISOString(),avatar:Math.floor(Math.random()*8)});
+    setLoading(false);
+    if(ok)setDone(true);
+    else setErr("Er is iets misgegaan. Probeer het opnieuw.");
   };
   if(done)return(
     <AuthShell>
       <Card className="fu" style={{padding:"2rem",textAlign:"center"}}>
         <div style={{fontSize:"3rem",marginBottom:"1rem"}}>⏳</div>
-        <H size="1.4rem">Request sent!</H>
-        <p style={{color:"var(--muted)",fontSize:".88rem",lineHeight:1.7,marginBottom:"1.5rem"}}>Your account is waiting for admin approval. Once approved, log in with your username and PIN.</p>
-        <Btn onClick={onGoLogin} variant="ghost">Back to Login</Btn>
+        <H size="1.4rem">Aanvraag verstuurd!</H>
+        <p style={{color:"var(--muted)",fontSize:".88rem",lineHeight:1.7,marginBottom:"1.5rem"}}>Je account wacht op goedkeuring van de admin. Log daarna in met je gebruikersnaam en PIN.</p>
+        <Btn onClick={onGoLogin} variant="ghost">Terug naar inloggen</Btn>
       </Card>
     </AuthShell>
   );
   return(
     <AuthShell>
       <Card className="fu" style={{padding:"2rem"}}>
-        <H size="1.5rem" style={{textAlign:"center"}}>Request Access</H>
-        <p style={{color:"var(--muted)",fontSize:".83rem",textAlign:"center",marginBottom:"1.4rem",marginTop:"-.4rem"}}>Pick a username & PIN. An admin will approve your account.</p>
+        <H size="1.5rem" style={{textAlign:"center"}}>Toegang aanvragen</H>
+        <p style={{color:"var(--muted)",fontSize:".83rem",textAlign:"center",marginBottom:"1.4rem",marginTop:"-.4rem"}}>Kies een gebruikersnaam & PIN. Een admin keurt je account goed.</p>
         <div style={{display:"grid",gap:".9rem"}}>
-          <div><Lbl>Username</Lbl><Inp value={username} onChange={e=>setUsername(e.target.value)} placeholder="Your first name or nickname" autoFocus/></div>
-          <div><Lbl>PIN (4–6 digits)</Lbl><Inp value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,"").slice(0,6))} placeholder="••••" type="password"/></div>
-          <div><Lbl>Confirm PIN</Lbl><Inp value={pin2} onChange={e=>setPin2(e.target.value.replace(/\D/g,"").slice(0,6))} placeholder="••••" type="password" onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+          <div><Lbl>Gebruikersnaam</Lbl><Inp value={username} onChange={e=>setUsername(e.target.value)} placeholder="Je voornaam of bijnaam" autoFocus/></div>
+          <div><Lbl>PIN (4–6 cijfers)</Lbl><Inp value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,"").slice(0,6))} placeholder="••••" type="password"/></div>
+          <div><Lbl>PIN bevestigen</Lbl><Inp value={pin2} onChange={e=>setPin2(e.target.value.replace(/\D/g,"").slice(0,6))} placeholder="••••" type="password" onKeyDown={e=>e.key==="Enter"&&!loading&&submit()}/></div>
           {err&&<div style={{background:"rgba(224,85,85,.1)",border:"1px solid rgba(224,85,85,.3)",borderRadius:"var(--radius-sm)",padding:"9px 13px",color:"var(--red)",fontSize:".83rem"}}>{err}</div>}
-          <Btn onClick={submit} disabled={!username||!pin||!pin2} style={{marginTop:4}}>Request Access</Btn>
+          <Btn onClick={submit} disabled={!username||!pin||!pin2||loading} style={{marginTop:4}}>{loading?"Bezig…":"Toegang aanvragen"}</Btn>
         </div>
       </Card>
       <div style={{textAlign:"center",marginTop:"1.2rem",color:"var(--muted)",fontSize:".83rem"}}>
-        Already approved?{" "}<span onClick={onGoLogin} style={{color:"var(--amber)",cursor:"pointer",textDecoration:"underline"}}>Log in</span>
+        Al goedgekeurd?{" "}<span onClick={onGoLogin} style={{color:"var(--amber)",cursor:"pointer",textDecoration:"underline"}}>Inloggen</span>
       </div>
     </AuthShell>
   );
@@ -1757,7 +1761,12 @@ export default function App(){
   };
   const login=u=>{setCurrentUser(u);localStorage.setItem("md-session",u.id);};
   const logout=()=>{setCurrentUser(null);localStorage.removeItem("md-session");setActiveId(null);setPageView("home");};
-  const register=async u=>{await saveUsers([...users,u]);};
+  const register=async u=>{
+    const {error}=await supabase.from("users").insert([u]);
+    if(error){console.error("Register error:",error);return false;}
+    setUsers(prev=>[...prev,u]);
+    return true;
+  };
   const updateUsers=async u=>{await saveUsers(u);if(currentUser){const r=u.find(x=>x.id===currentUser.id);if(r)setCurrentUser(r);}};
   const deleteUser=async id=>{
     setUsers(u=>u.filter(x=>x.id!==id));
@@ -1790,7 +1799,7 @@ export default function App(){
 
   if(!loaded)return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",color:"var(--muted)",fontFamily:"'DM Sans',sans-serif",background:"var(--bg)"}}><GS/>Loading…</div>;
   if(!currentUser){
-    if(authView==="register")return<RegisterScreen users={users} onRegister={u=>{register(u);setAuthView("login")}} onGoLogin={()=>setAuthView("login")}/>;
+    if(authView==="register")return<RegisterScreen users={users} onRegister={register} onGoLogin={()=>setAuthView("login")}/>;
     return<LoginScreen users={users} onLogin={login} onGoRegister={()=>setAuthView("register")}/>;
   }
   if(currentUser.role==="pending")return<PendingScreen user={currentUser} onLogout={logout}/>;
