@@ -213,7 +213,7 @@ const SEED_EVENTS=[
 ];
 
 const SEED_USERS=[
-  {id:"u-admin",username:"Doom",pin:"1234",role:"admin",joinedAt:"2023-01-01",avatar:0},
+  {id:"u-admin",username:"Doom",pin:"1234",role:"admin",joined_at:"2023-01-01",avatar:0},
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -278,7 +278,7 @@ const RegisterScreen = ({users,onRegister,onGoLogin}) => {
     if(pin!==pin2){setErr("PINs komen niet overeen.");return;}
     setLoading(true);
     const pinH=await hashPin(pin);
-    const errMsg=await onRegister({id:`u-${Date.now()}`,username:username.trim(),pin_hash:pinH,role:"pending",joinedAt:new Date().toISOString(),avatar:Math.floor(Math.random()*8)});
+    const errMsg=await onRegister({id:`u-${Date.now()}`,username:username.trim(),pin_hash:pinH,role:"pending",joined_at:new Date().toISOString(),avatar:Math.floor(Math.random()*8)});
     setLoading(false);
     if(!errMsg)setDone(true);
     else setErr("Fout: "+errMsg);
@@ -374,7 +374,7 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
         {pending.map(u=>(
           <div key={u.id} style={{background:"var(--bg3)",borderRadius:"var(--radius-sm)",padding:"1rem 1.1rem",display:"flex",alignItems:"center",gap:"1rem",flexWrap:"wrap"}}>
             <Avatar name={u.username} size={36} index={u.avatar||0}/>
-            <div style={{flex:1}}><div style={{fontWeight:600,fontSize:".95rem"}}>{u.username}</div><div style={{color:"var(--muted)",fontSize:".75rem"}}>Requested {new Date(u.joinedAt).toLocaleDateString("nl-NL")}</div></div>
+            <div style={{flex:1}}><div style={{fontWeight:600,fontSize:".95rem"}}>{u.username}</div><div style={{color:"var(--muted)",fontSize:".75rem"}}>Requested {new Date(u.joined_at).toLocaleDateString("nl-NL")}</div></div>
             <div style={{display:"flex",gap:6}}>
               <Btn onClick={()=>approve(u.id,"member")} variant="success" size="sm">✓ Approve</Btn>
               <Btn onClick={()=>approve(u.id,"admin")} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"var(--border2)"}}>★ Admin</Btn>
@@ -387,7 +387,7 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
         {approved.map(u=>(
           <div key={u.id} style={{background:"var(--bg3)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",display:"flex",alignItems:"center",gap:"1rem",flexWrap:"wrap"}}>
             <Avatar name={u.username} size={32} index={u.avatar||0}/>
-            <div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:".92rem"}}>{u.username}</span><RoleBadge role={u.role}/></div><div style={{color:"var(--muted)",fontSize:".73rem",marginTop:2}}>Joined {new Date(u.joinedAt).toLocaleDateString("nl-NL")}</div></div>
+            <div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:".92rem"}}>{u.username}</span><RoleBadge role={u.role}/></div><div style={{color:"var(--muted)",fontSize:".73rem",marginTop:2}}>Joined {new Date(u.joined_at).toLocaleDateString("nl-NL")}</div></div>
             <div style={{display:"flex",gap:6}}>
               {u.role==="member"&&<Btn onClick={()=>promote(u.id)} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"var(--border2)",fontSize:".73rem"}}>★ Admin</Btn>}
               {u.role==="admin"&&<Btn onClick={()=>demote(u.id)} variant="ghost" size="sm" style={{fontSize:".73rem"}}>↓ Member</Btn>}
@@ -1740,7 +1740,7 @@ export default function App(){
         await supabase.from("events").insert(SEED_EVENTS);
       }
       if(!usrs?.length){
-        const seeded=await Promise.all(SEED_USERS.map(async u=>({id:u.id,username:u.username,pin_hash:await hashPin(u.pin),role:u.role,joinedAt:u.joinedAt,avatar:u.avatar||0})));
+        const seeded=await Promise.all(SEED_USERS.map(async u=>({id:u.id,username:u.username,pin_hash:await hashPin(u.pin),role:u.role,joined_at:u.joined_at,avatar:u.avatar||0})));
         await supabase.from("users").insert(seeded);
         allUsers=seeded;
       }
