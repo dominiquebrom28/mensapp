@@ -52,6 +52,16 @@ const GS = () => (
     .rsvp-btn{transition:all .2s cubic-bezier(.4,0,.2,1)!important}
     .rsvp-btn:hover{transform:translateY(-1px);filter:brightness(1.1)}
     .rsvp-btn:active{transform:scale(.97)}
+    input:hover,textarea:hover{border-color:rgba(232,148,58,.38)!important}
+    select:hover{border-color:rgba(232,148,58,.38)!important}
+    input:focus,textarea:focus,select:focus{border-color:var(--amber)!important;box-shadow:0 0 0 3px rgba(232,148,58,.13)!important;outline:none!important}
+    .nav-btn{transition:all .18s ease!important}
+    .nav-btn:hover{background:rgba(232,148,58,.12)!important;border-color:rgba(232,148,58,.5)!important;color:var(--amber2)!important}
+    .nav-btn:active{transform:scale(.95)!important}
+    .nav-logout:hover{background:rgba(224,85,85,.12)!important;border-color:rgba(224,85,85,.55)!important}
+    .nav-logout:active{transform:scale(.95)!important}
+    .notif-item{transition:background .15s ease}
+    .notif-item:hover{background:var(--bg4)!important}
   `}</style>
 );
 
@@ -74,7 +84,18 @@ const Btn = ({children,onClick,variant="primary",size="md",style={},disabled=fal
     success:{background:"transparent",color:"var(--green)",border:"1px solid rgba(76,175,125,.3)"},
     gold:{background:"linear-gradient(135deg,var(--gold),var(--amber))",color:"var(--bg)",border:"none"},
   };
-  return <button type={type} onClick={onClick} disabled={disabled} style={{borderRadius:"var(--radius-sm)",cursor:disabled?"not-allowed":"pointer",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s",opacity:disabled?.5:1,...sz[size],...vr[variant],...style}}>{children}</button>;
+  const onEnter=e=>{if(disabled)return;const el=e.currentTarget;
+    if(variant==="primary"){el.style.background="var(--amber2)";el.style.transform="translateY(-1px)";el.style.boxShadow="0 4px 16px rgba(232,148,58,.35)";}
+    else if(variant==="ghost"){el.style.background="rgba(232,148,58,.09)";el.style.borderColor="var(--border2)";}
+    else if(variant==="danger"){el.style.background="rgba(224,85,85,.12)";el.style.borderColor="rgba(224,85,85,.55)";}
+    else if(variant==="subtle"){el.style.background="var(--bg4)";el.style.borderColor="var(--border2)";}
+    else if(variant==="success"){el.style.background="rgba(76,175,125,.12)";el.style.borderColor="rgba(76,175,125,.55)";}
+    else if(variant==="gold"){el.style.filter="brightness(1.12)";el.style.transform="translateY(-1px)";el.style.boxShadow="0 4px 18px rgba(201,146,42,.35)";}
+  };
+  const onLeave=e=>{const el=e.currentTarget;el.style.background="";el.style.transform="";el.style.boxShadow="";el.style.borderColor="";el.style.filter="";};
+  const onDown=e=>{if(!disabled)e.currentTarget.style.transform="scale(.96)";};
+  const onUp=e=>{if(!disabled)e.currentTarget.style.transform="";};
+  return <button type={type} onClick={onClick} disabled={disabled} onMouseEnter={onEnter} onMouseLeave={onLeave} onMouseDown={onDown} onMouseUp={onUp} style={{borderRadius:"var(--radius-sm)",cursor:disabled?"not-allowed":"pointer",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s",opacity:disabled?.5:1,...sz[size],...vr[variant],...style}}>{children}</button>;
 };
 const Inp = ({value,onChange,placeholder,style={},type="text",multiline=false,onKeyDown,autoFocus=false,rows=3}) => {
   const base={background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%",outline:"none"};
@@ -402,7 +423,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
       {notifications.length===0
         ?<div style={{padding:"2rem",textAlign:"center",color:"var(--muted)",fontSize:".83rem"}}>Nog geen activiteit</div>
         :notifications.map(n=>(
-          <div key={n.id} style={{padding:"10px 14px",borderBottom:"1px solid var(--border)",display:"flex",gap:10,alignItems:"flex-start"}}>
+          <div key={n.id} className="notif-item" style={{padding:"10px 14px",borderBottom:"1px solid var(--border)",display:"flex",gap:10,alignItems:"flex-start"}}>
             <span style={{fontSize:"1rem",flexShrink:0}}>{typeIcon[n.type]||"•"}</span>
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontSize:".83rem",color:"var(--cream)",wordBreak:"break-word"}}>{n.message}</div>
@@ -417,18 +438,18 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
     <nav style={{position:"fixed",top:0,left:0,right:0,zIndex:200,background:"rgba(15,11,7,.94)",backdropFilter:"blur(14px)",borderBottom:"1px solid var(--border)"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 1.2rem",height:58,gap:12}}>
         <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}}>
-          {view!=="home"&&<button onClick={onBack} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Terug</button>}
-          <div onClick={onHome} style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer"}}>
+          {view!=="home"&&<button onClick={onBack} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Terug</button>}
+          <div onClick={onHome} onMouseEnter={e=>e.currentTarget.style.opacity=".72"} onMouseLeave={e=>e.currentTarget.style.opacity=""} style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer",transition:"opacity .15s"}}>
             {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":eventName}
           </div>
         </div>
         {!isMobile&&(
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-            <button onClick={onMembers} style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>👥 Lads</button>
-            <button onClick={onHof} style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
-            {can.manageUsers(currentUser)&&<button onClick={onAdmin} style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
+            <button onClick={onMembers} className="nav-btn" style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>👥 Lads</button>
+            <button onClick={onHof} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
+            {can.manageUsers(currentUser)&&<button onClick={onAdmin} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
             <div style={{position:"relative"}} onClick={e=>e.stopPropagation()}>
-              <button onClick={()=>{const o=!notifOpen;setNotifOpen(o);setMenuOpen(false);if(o&&unread>0)onMarkNotifRead();}} style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🔔{unread>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}</button>
+              <button onClick={()=>{const o=!notifOpen;setNotifOpen(o);setMenuOpen(false);if(o&&unread>0)onMarkNotifRead();}} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🔔{unread>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}</button>
               {notifOpen&&<div onClick={e=>e.stopPropagation()} style={{position:"absolute",right:0,top:"calc(100% + 8px)",width:300,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:"var(--radius)",boxShadow:"0 8px 32px rgba(0,0,0,.5)",zIndex:300,maxHeight:360,overflowY:"auto"}}>{notifList}</div>}
             </div>
             <div style={{display:"flex",alignItems:"center",gap:7,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"5px 12px"}}>
@@ -436,15 +457,15 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
               <span style={{fontSize:".8rem",color:"var(--cream)"}}>{currentUser.username}</span>
               <RoleBadge role={currentUser.role}/>
             </div>
-            <button onClick={onLogout} style={{background:"transparent",border:"1px solid rgba(224,85,85,.3)",borderRadius:8,color:"var(--red)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>Uitloggen</button>
+            <button onClick={onLogout} className="nav-logout" style={{background:"transparent",border:"1px solid rgba(224,85,85,.3)",borderRadius:8,color:"var(--red)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s ease"}}>Uitloggen</button>
           </div>
         )}
         {isMobile&&(
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
             <div style={{position:"relative"}} onClick={e=>e.stopPropagation()}>
-              <button onClick={()=>{const o=!notifOpen;setNotifOpen(o);setMenuOpen(false);if(o&&unread>0)onMarkNotifRead();}} style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"6px 10px",cursor:"pointer",fontSize:"1rem"}}>🔔{unread>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}</button>
+              <button onClick={()=>{const o=!notifOpen;setNotifOpen(o);setMenuOpen(false);if(o&&unread>0)onMarkNotifRead();}} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"6px 10px",cursor:"pointer",fontSize:"1rem"}}>🔔{unread>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}</button>
             </div>
-            <button onClick={e=>{e.stopPropagation();setMenuOpen(o=>!o);setNotifOpen(false);}} style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"6px 11px",cursor:"pointer",fontSize:"1.1rem",lineHeight:1}}>
+            <button onClick={e=>{e.stopPropagation();setMenuOpen(o=>!o);setNotifOpen(false);}} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"6px 11px",cursor:"pointer",fontSize:"1.1rem",lineHeight:1}}>
               {menuOpen?"✕":"☰"}{!menuOpen&&pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}
             </button>
           </div>
@@ -452,12 +473,12 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
       </div>
       {isMobile&&menuOpen&&(
         <div onClick={e=>e.stopPropagation()} style={{background:"rgba(15,11,7,.98)",borderBottom:"1px solid var(--border)",padding:".8rem 1.2rem",display:"grid",gap:".5rem"}}>
-          <button onClick={()=>{onMembers();setMenuOpen(false);}} style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>👥 Lads</button>
-          <button onClick={()=>{onHof();setMenuOpen(false);}} style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
-          {can.manageUsers(currentUser)&&<button onClick={()=>{onAdmin();setMenuOpen(false);}} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:".7rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{pendingCount}</span>}</button>}
+          <button onClick={()=>{onMembers();setMenuOpen(false);}} className="nav-btn" style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>👥 Lads</button>
+          <button onClick={()=>{onHof();setMenuOpen(false);}} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
+          {can.manageUsers(currentUser)&&<button onClick={()=>{onAdmin();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:".7rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{pendingCount}</span>}</button>}
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"8px 14px"}}>
             <div style={{display:"flex",alignItems:"center",gap:8}}><Avatar name={currentUser.username} size={26} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/><span style={{fontSize:".88rem",color:"var(--cream)"}}>{currentUser.username}</span><RoleBadge role={currentUser.role}/></div>
-            <button onClick={()=>{onLogout();setMenuOpen(false);}} style={{background:"transparent",border:"1px solid rgba(224,85,85,.3)",borderRadius:8,color:"var(--red)",padding:"6px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>Uitloggen</button>
+            <button onClick={()=>{onLogout();setMenuOpen(false);}} className="nav-logout" style={{background:"transparent",border:"1px solid rgba(224,85,85,.3)",borderRadius:8,color:"var(--red)",padding:"6px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s ease"}}>Uitloggen</button>
           </div>
         </div>
       )}
@@ -488,7 +509,10 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
       </div>
       {pending.length>0&&<div style={{background:"rgba(232,148,58,.1)",border:"1px solid var(--border2)",borderRadius:"var(--radius-sm)",padding:"10px 14px",marginBottom:"1.2rem",display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:"1.2rem"}}>⏳</span><span style={{color:"var(--amber2)",fontSize:".88rem",fontWeight:600}}>{pending.length} pending approval{pending.length>1?"s":""}</span></div>}
       <div style={{display:"flex",gap:".3rem",borderBottom:"1px solid var(--border)",marginBottom:"1.2rem"}}>
-        {["pending","users"].map(t=><button key={t} onClick={()=>setTab(t)} style={{background:"none",border:"none",borderBottom:tab===t?"2px solid var(--amber)":"2px solid transparent",color:tab===t?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"7px 16px",fontFamily:"var(--font-b)",fontWeight:tab===t?600:400,fontSize:".85rem",marginBottom:-1,transition:"color .15s"}}>{t==="pending"?"Pending":"All Users"}{t==="pending"&&pending.length>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:10,padding:"1px 6px",fontSize:".68rem",marginLeft:6}}>{pending.length}</span>}</button>)}
+        {["pending","users"].map(t=><button key={t} onClick={()=>setTab(t)}
+          onMouseEnter={e=>{if(tab!==t){e.currentTarget.style.color="var(--amber)";e.currentTarget.style.background="rgba(232,148,58,.06)";}}}
+          onMouseLeave={e=>{e.currentTarget.style.color="";e.currentTarget.style.background="";}}
+          style={{background:"none",border:"none",borderBottom:tab===t?"2px solid var(--amber)":"2px solid transparent",color:tab===t?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"7px 16px",fontFamily:"var(--font-b)",fontWeight:tab===t?600:400,fontSize:".85rem",marginBottom:-1,transition:"color .15s,background .15s",borderRadius:"6px 6px 0 0"}}>{t==="pending"?"Pending":"All Users"}{t==="pending"&&pending.length>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:10,padding:"1px 6px",fontSize:".68rem",marginLeft:6}}>{pending.length}</span>}</button>)}
       </div>
       {tab==="pending"&&<div style={{display:"grid",gap:".8rem"}}>
         {pending.length===0&&<div style={{color:"var(--muted)",fontSize:".88rem",textAlign:"center",padding:"2rem"}}>No pending requests 🎉</div>}
@@ -1143,7 +1167,10 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
 
       <div className="fu1" style={{display:"flex",gap:".2rem",borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
         {TABS.map(t=>(
-          <button key={t} onClick={()=>setTab(t)} style={{background:"none",border:"none",borderBottom:tab===t?"2px solid var(--amber)":"2px solid transparent",color:tab===t?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"8px 14px",whiteSpace:"nowrap",fontFamily:"var(--font-b)",fontWeight:tab===t?600:400,fontSize:".83rem",marginBottom:-1,transition:"color .15s"}}>{t}</button>
+          <button key={t} onClick={()=>setTab(t)}
+            onMouseEnter={e=>{if(tab!==t){e.currentTarget.style.color="var(--amber)";e.currentTarget.style.background="rgba(232,148,58,.06)";}}}
+            onMouseLeave={e=>{e.currentTarget.style.color="";e.currentTarget.style.background="";}}
+            style={{background:"none",border:"none",borderBottom:tab===t?"2px solid var(--amber)":"2px solid transparent",color:tab===t?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"8px 14px",whiteSpace:"nowrap",fontFamily:"var(--font-b)",fontWeight:tab===t?600:400,fontSize:".83rem",marginBottom:-1,transition:"color .15s,background .15s",borderRadius:"6px 6px 0 0"}}>{t}</button>
         ))}
       </div>
 
@@ -1841,7 +1868,10 @@ const PollsTab=({evt,onUpdate,currentUser,isPast,users=[]})=>{
                 const isWinner=opt.votes.length===maxV&&opt.votes.length>0;
                 const clickable=can.vote(currentUser)&&!isPast&&!poll.closed;
                 return(
-                  <div key={i} onClick={()=>clickable&&vote(poll.id,i)} style={{borderRadius:10,overflow:"hidden",position:"relative",border:myVote?"1px solid var(--amber)":"1px solid var(--border)",cursor:clickable?"pointer":"default",transition:"border-color .15s"}}>
+                  <div key={i} onClick={()=>clickable&&vote(poll.id,i)}
+                    onMouseEnter={e=>{if(clickable){e.currentTarget.style.borderColor=myVote?"var(--amber2)":"var(--border2)";e.currentTarget.style.transform="translateX(2px)";}}}
+                    onMouseLeave={e=>{e.currentTarget.style.borderColor="";e.currentTarget.style.transform="";}}
+                    style={{borderRadius:10,overflow:"hidden",position:"relative",border:myVote?"1px solid var(--amber)":"1px solid var(--border)",cursor:clickable?"pointer":"default",transition:"border-color .2s,transform .18s"}}>
                     <div style={{position:"absolute",inset:0,background:myVote?"rgba(232,148,58,.12)":"rgba(255,255,255,.02)",width:pct+"%",transition:"width .35s ease"}}/>
                     <div style={{position:"relative",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px"}}>
                       <div style={{display:"flex",alignItems:"center",gap:7}}>
