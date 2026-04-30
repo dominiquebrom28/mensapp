@@ -85,6 +85,8 @@ const Btn = ({children,onClick,variant="primary",size="md",style={},disabled=fal
     gold:{background:"linear-gradient(135deg,var(--gold),var(--amber))",color:"var(--bg)",border:"none"},
   };
   const onEnter=e=>{if(disabled)return;const el=e.currentTarget;
+    // Save current inline values so onLeave can restore them exactly
+    el._saved={bg:el.style.background,tr:el.style.transform,sh:el.style.boxShadow,bc:el.style.borderColor,fi:el.style.filter};
     if(variant==="primary"){el.style.background="var(--amber2)";el.style.transform="translateY(-1px)";el.style.boxShadow="0 4px 16px rgba(232,148,58,.35)";}
     else if(variant==="ghost"){el.style.background="rgba(232,148,58,.09)";el.style.borderColor="var(--border2)";}
     else if(variant==="danger"){el.style.background="rgba(224,85,85,.12)";el.style.borderColor="rgba(224,85,85,.55)";}
@@ -92,9 +94,12 @@ const Btn = ({children,onClick,variant="primary",size="md",style={},disabled=fal
     else if(variant==="success"){el.style.background="rgba(76,175,125,.12)";el.style.borderColor="rgba(76,175,125,.55)";}
     else if(variant==="gold"){el.style.filter="brightness(1.12)";el.style.transform="translateY(-1px)";el.style.boxShadow="0 4px 18px rgba(201,146,42,.35)";}
   };
-  const onLeave=e=>{const el=e.currentTarget;el.style.background="";el.style.transform="";el.style.boxShadow="";el.style.borderColor="";el.style.filter="";};
-  const onDown=e=>{if(!disabled)e.currentTarget.style.transform="scale(.96)";};
-  const onUp=e=>{if(!disabled)e.currentTarget.style.transform="";};
+  const onLeave=e=>{const el=e.currentTarget;const s=el._saved||{};
+    el.style.background=s.bg??"";el.style.transform=s.tr??"";el.style.boxShadow=s.sh??"";el.style.borderColor=s.bc??"";el.style.filter=s.fi??"";
+  };
+  // Save the pre-press transform (may be a hover transform) so onUp restores to it
+  const onDown=e=>{if(!disabled){const el=e.currentTarget;el._preTr=el.style.transform;el.style.transform="scale(.96)";}};
+  const onUp=e=>{if(!disabled){const el=e.currentTarget;el.style.transform=el._preTr??"";}}
   return <button type={type} onClick={onClick} disabled={disabled} onMouseEnter={onEnter} onMouseLeave={onLeave} onMouseDown={onDown} onMouseUp={onUp} style={{borderRadius:"var(--radius-sm)",cursor:disabled?"not-allowed":"pointer",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s",opacity:disabled?.5:1,...sz[size],...vr[variant],...style}}>{children}</button>;
 };
 const Inp = ({value,onChange,placeholder,style={},type="text",multiline=false,onKeyDown,autoFocus=false,rows=3}) => {
@@ -510,8 +515,8 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
       {pending.length>0&&<div style={{background:"rgba(232,148,58,.1)",border:"1px solid var(--border2)",borderRadius:"var(--radius-sm)",padding:"10px 14px",marginBottom:"1.2rem",display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:"1.2rem"}}>⏳</span><span style={{color:"var(--amber2)",fontSize:".88rem",fontWeight:600}}>{pending.length} pending approval{pending.length>1?"s":""}</span></div>}
       <div style={{display:"flex",gap:".3rem",borderBottom:"1px solid var(--border)",marginBottom:"1.2rem"}}>
         {["pending","users"].map(t=><button key={t} onClick={()=>setTab(t)}
-          onMouseEnter={e=>{if(tab!==t){e.currentTarget.style.color="var(--amber)";e.currentTarget.style.background="rgba(232,148,58,.06)";}}}
-          onMouseLeave={e=>{e.currentTarget.style.color="";e.currentTarget.style.background="";}}
+          onMouseEnter={e=>{if(tab!==t){const el=e.currentTarget;el._sc=el.style.color;el._sb=el.style.background;el.style.color="var(--amber)";el.style.background="rgba(232,148,58,.06)";}}}
+          onMouseLeave={e=>{const el=e.currentTarget;el.style.color=el._sc??"";el.style.background=el._sb??"";}}
           style={{background:"none",border:"none",borderBottom:tab===t?"2px solid var(--amber)":"2px solid transparent",color:tab===t?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"7px 16px",fontFamily:"var(--font-b)",fontWeight:tab===t?600:400,fontSize:".85rem",marginBottom:-1,transition:"color .15s,background .15s",borderRadius:"6px 6px 0 0"}}>{t==="pending"?"Pending":"All Users"}{t==="pending"&&pending.length>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:10,padding:"1px 6px",fontSize:".68rem",marginLeft:6}}>{pending.length}</span>}</button>)}
       </div>
       {tab==="pending"&&<div style={{display:"grid",gap:".8rem"}}>
@@ -1168,8 +1173,8 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
       <div className="fu1" style={{display:"flex",gap:".2rem",borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
         {TABS.map(t=>(
           <button key={t} onClick={()=>setTab(t)}
-            onMouseEnter={e=>{if(tab!==t){e.currentTarget.style.color="var(--amber)";e.currentTarget.style.background="rgba(232,148,58,.06)";}}}
-            onMouseLeave={e=>{e.currentTarget.style.color="";e.currentTarget.style.background="";}}
+            onMouseEnter={e=>{if(tab!==t){const el=e.currentTarget;el._sc=el.style.color;el._sb=el.style.background;el.style.color="var(--amber)";el.style.background="rgba(232,148,58,.06)";}}}
+            onMouseLeave={e=>{const el=e.currentTarget;el.style.color=el._sc??"";el.style.background=el._sb??"";}}
             style={{background:"none",border:"none",borderBottom:tab===t?"2px solid var(--amber)":"2px solid transparent",color:tab===t?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"8px 14px",whiteSpace:"nowrap",fontFamily:"var(--font-b)",fontWeight:tab===t?600:400,fontSize:".83rem",marginBottom:-1,transition:"color .15s,background .15s",borderRadius:"6px 6px 0 0"}}>{t}</button>
         ))}
       </div>
