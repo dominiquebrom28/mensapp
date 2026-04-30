@@ -71,6 +71,7 @@ const Avatar = ({name,size=32,index=0,photoUrl="",style={}}) => {
   const animal=ANIMALS[index%ANIMALS.length];
   return <div style={{width:size,height:size,borderRadius:"50%",flexShrink:0,background:animal.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.5,border:"2px solid var(--bg2)",...style}}>{animal.emoji}</div>;
 };
+const getUA=(name,users=[])=>{const u=users.find(x=>x.username?.toLowerCase()===name?.toLowerCase());return{index:u?.animal_avatar??u?.avatar??0,photoUrl:u?.photo_url||""};};
 const Modal = ({children,onClose,maxWidth=500}) => (
   <div className="ov" onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
     <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth,maxHeight:"92vh",overflowY:"auto"}}>
@@ -403,7 +404,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
         </div>
         {!isMobile&&(
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-            <button onClick={onMembers} style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>👥 Leden</button>
+            <button onClick={onMembers} style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>👥 Lads</button>
             <button onClick={onHof} style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
             {can.manageUsers(currentUser)&&<button onClick={onAdmin} style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
             <div style={{position:"relative"}} onClick={e=>e.stopPropagation()}>
@@ -431,7 +432,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
       </div>
       {isMobile&&menuOpen&&(
         <div onClick={e=>e.stopPropagation()} style={{background:"rgba(15,11,7,.98)",borderBottom:"1px solid var(--border)",padding:".8rem 1.2rem",display:"grid",gap:".5rem"}}>
-          <button onClick={()=>{onMembers();setMenuOpen(false);}} style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>👥 Leden</button>
+          <button onClick={()=>{onMembers();setMenuOpen(false);}} style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>👥 Lads</button>
           <button onClick={()=>{onHof();setMenuOpen(false);}} style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
           {can.manageUsers(currentUser)&&<button onClick={()=>{onAdmin();setMenuOpen(false);}} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:".7rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{pendingCount}</span>}</button>}
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"8px 14px"}}>
@@ -503,7 +504,7 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // HALL OF FAME
 // ─────────────────────────────────────────────────────────────────────────────
-const HallOfFame = ({events}) => {
+const HallOfFame = ({events,users=[]}) => {
   const allAttendees = {};
   const allWins = {};
   let totalEvents = events.length;
@@ -557,7 +558,7 @@ const HallOfFame = ({events}) => {
           <div style={{display:"flex",justifyContent:"center",gap:"1rem",flexWrap:"wrap"}}>
             {perfect.map((p,i)=>(
               <div key={p.name} style={{display:"flex",alignItems:"center",gap:8}}>
-                <Avatar name={p.name} size={38} index={i}/>
+                <Avatar name={p.name} size={38} {...getUA(p.name,users)}/>
                 <div>
                   <div style={{fontWeight:600,fontSize:".95rem"}}>{p.name}</div>
                   <div style={{fontSize:".72rem",color:"var(--amber)"}}>All {totalEvents} events</div>
@@ -578,7 +579,7 @@ const HallOfFame = ({events}) => {
               const h=[120,160,90][realIdx];
               return(
                 <div key={p.name} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
-                  <Avatar name={p.name} size={40} index={realIdx}/>
+                  <Avatar name={p.name} size={40} {...getUA(p.name,users)}/>
                   <div style={{fontWeight:600,fontSize:".9rem"}}>{p.name}</div>
                   <div style={{fontSize:"1.2rem"}}>{podiumEmojis[realIdx]}</div>
                   <div style={{width:80,height:h,background:podiumColors[realIdx]+"33",border:`2px solid ${podiumColors[realIdx]}`,borderRadius:"8px 8px 0 0",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column"}}>
@@ -594,7 +595,7 @@ const HallOfFame = ({events}) => {
           {attendance.map((a,i)=>(
             <div key={a.name} style={{display:"flex",alignItems:"center",gap:"1rem",background:"var(--bg2)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",border:"1px solid var(--border)"}}>
               <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:i<3?podiumColors[i]:"var(--muted2)",minWidth:28,textAlign:"center"}}>{i+1}</div>
-              <Avatar name={a.name} size={32} index={i}/>
+              <Avatar name={a.name} size={32} {...getUA(a.name,users)}/>
               <div style={{flex:1}}>
                 <div style={{fontWeight:600,fontSize:".9rem"}}>{a.name}</div>
                 <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>
@@ -627,7 +628,7 @@ const HallOfFame = ({events}) => {
               <div key={w.name} style={{background:"var(--bg2)",borderRadius:"var(--radius-sm)",border:"1px solid var(--border)",overflow:"hidden"}}>
                 <div style={{display:"flex",alignItems:"center",gap:"1rem",padding:".9rem 1.1rem",cursor:"pointer"}} onClick={e=>{const d=e.currentTarget.nextSibling;d.style.display=d.style.display==="none"?"block":"none";}}>
                   <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:i<3?podiumColors[i]:"var(--muted2)",minWidth:28,textAlign:"center"}}>{i+1}</div>
-                  <Avatar name={w.name} size={32} index={i}/>
+                  <Avatar name={w.name} size={32} {...getUA(w.name,users)}/>
                   <div style={{flex:1}}><div style={{fontWeight:600,fontSize:".9rem"}}>{w.name}</div><div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{w.count} award{w.count!==1?"s":""}</div></div>
                   <div style={{background:"var(--gold)22",border:"1px solid var(--gold)44",borderRadius:8,padding:"4px 12px",fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--gold)"}}>{w.count}</div>
                 </div>
@@ -655,7 +656,7 @@ const HallOfFame = ({events}) => {
             {quizBoard.map((p,i)=>(
               <div key={p.name} style={{display:"flex",alignItems:"center",gap:"1rem",background:"var(--bg2)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",border:"1px solid var(--border)"}}>
                 <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:i<3?podiumColors[i]:"var(--muted2)",minWidth:28,textAlign:"center"}}>{i+1}</div>
-                <Avatar name={p.name} size={32} index={i}/>
+                <Avatar name={p.name} size={32} {...getUA(p.name,users)}/>
                 <div style={{flex:1}}><div style={{fontWeight:600,fontSize:".9rem"}}>{p.name}</div><div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{p.quizzes} quiz{p.quizzes!==1?"zes":""} played</div></div>
                 <div style={{background:"rgba(91,155,213,.15)",border:"1px solid rgba(91,155,213,.3)",borderRadius:8,padding:"4px 12px",fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--blue)"}}>{p.total}</div>
               </div>
@@ -706,7 +707,7 @@ const MembersPage=({users,events,onOpenMember,currentUser})=>{
   });
   return(
     <div>
-      <H style={{marginBottom:"1.5rem"}}>👥 Leden</H>
+      <H style={{marginBottom:"1.5rem"}}>👥 Lads</H>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:"1rem"}}>
         {members.map(u=><MemberCard key={u.id} user={u} events={events} onClick={()=>onOpenMember(u.id)} isMe={u.id===currentUser.id}/>)}
       </div>
@@ -840,7 +841,7 @@ const EditProfileModal=({user,onSave,onClose})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────────────────────────────────────
-const Home = ({events,onOpen,onNew,currentUser}) => {
+const Home = ({events,onOpen,onNew,currentUser,users=[]}) => {
   const upcoming=events.filter(e=>!e.archived).sort((a,b)=>new Date(a.date)-new Date(b.date));
   const past=events.filter(e=>e.archived).sort((a,b)=>new Date(b.date)-new Date(a.date));
   return(
@@ -856,19 +857,19 @@ const Home = ({events,onOpen,onNew,currentUser}) => {
           {can.editEvent(currentUser)&&<Btn onClick={onNew} size="sm">+ New Event</Btn>}
         </div>
         {upcoming.length===0&&<Card style={{textAlign:"center",padding:"2.5rem",color:"var(--muted)"}}>No upcoming events yet.</Card>}
-        <div style={{display:"grid",gap:"1rem"}}>{upcoming.map(e=><EventCard key={e.id} evt={e} onOpen={onOpen} currentUser={currentUser}/>)}</div>
+        <div style={{display:"grid",gap:"1rem"}}>{upcoming.map(e=><EventCard key={e.id} evt={e} onOpen={onOpen} currentUser={currentUser} users={users}/>)}</div>
       </div>
       {past.length>0&&(
         <div className="fu2">
           <H>Past Events</H>
-          <div style={{display:"grid",gap:".8rem"}}>{past.map(e=><EventCard key={e.id} evt={e} onOpen={onOpen} compact currentUser={currentUser}/>)}</div>
+          <div style={{display:"grid",gap:".8rem"}}>{past.map(e=><EventCard key={e.id} evt={e} onOpen={onOpen} compact currentUser={currentUser} users={users}/>)}</div>
         </div>
       )}
     </div>
   );
 };
 
-const EventCard = ({evt,onOpen,compact=false,currentUser}) => {
+const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
   const going=evt.attendees.filter(a=>["went","going"].includes(a.status)).length;
   const countdown=useCountdown(evt.date,evt.start_time);
   const myStatus=evt.attendees.find(a=>a.name.toLowerCase()===currentUser?.username.toLowerCase())?.status;
@@ -913,7 +914,7 @@ const EventCard = ({evt,onOpen,compact=false,currentUser}) => {
       </div>
       {!compact&&(
         <div style={{display:"flex",alignItems:"center",marginTop:"1rem"}}>
-          <div style={{display:"flex"}}>{evt.attendees.slice(0,6).map((a,i)=><div key={i} style={{marginLeft:i===0?0:-8}}><Avatar name={a.name} size={26} index={i}/></div>)}</div>
+          <div style={{display:"flex"}}>{evt.attendees.slice(0,6).map((a,i)=><div key={i} style={{marginLeft:i===0?0:-8}}><Avatar name={a.name} size={26} {...getUA(a.name,users)}/></div>)}</div>
           <div style={{marginLeft:10,fontSize:".76rem",color:"var(--muted)"}}>{evt.attendees.map(a=>a.name).join(", ")}</div>
         </div>
       )}
@@ -986,9 +987,9 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
       </div>
 
       <div className="fu2">
-        {tab==="Overview"             &&<OverviewTab evt={evt} onUpdate={onUpdate} isPast={isPast} currentUser={currentUser}/>}
-        {tab==="Polls"                &&<PollsTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast}/>}
-        {tab==="Quiz"                 &&<QuizTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast}/>}
+        {tab==="Overview"             &&<OverviewTab evt={evt} onUpdate={onUpdate} isPast={isPast} currentUser={currentUser} users={users}/>}
+        {tab==="Polls"                &&<PollsTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users}/>}
+        {tab==="Quiz"                 &&<QuizTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users}/>}
         {tab==="Photos"               &&<PhotosTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast}/>}
         {tab==="FAQ"                  &&<FAQTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
@@ -1002,7 +1003,7 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // OVERVIEW TAB — Member RSVP + Schedule
 // ─────────────────────────────────────────────────────────────────────────────
-const OverviewTab=({evt,onUpdate,isPast,currentUser})=>{
+const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[]})=>{
   const [editSched,setEditSched]=useState(false);
   const statusOpts=isPast?["went","absent"]:["going","maybe","not coming"];
   const colorOf=s=>statusMap[s]?.color??"var(--muted)";
@@ -1106,7 +1107,7 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser})=>{
             return(
               <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--bg3)",borderRadius:10,padding:"9px 12px",border:isMe?"1px solid var(--border2)":"1px solid transparent"}}>
                 <div style={{display:"flex",alignItems:"center",gap:9}}>
-                  <Avatar name={a.name} size={28} index={i}/>
+                  <Avatar name={a.name} size={28} {...getUA(a.name,users)}/>
                   <div><span style={{fontWeight:500,fontSize:".86rem"}}>{a.name}</span>{isMe&&<span style={{fontSize:".68rem",color:"var(--amber)",marginLeft:6}}>you</span>}</div>
                 </div>
                 {canChange?(
@@ -1135,7 +1136,7 @@ const normalizeQuiz=q=>q.rounds?q:{
   rounds:[{id:"r0",title:"Round 1",theme:"",questions:q.questions||[]}],
 };
 
-const QuizTab=({evt,onUpdate,currentUser,isPast})=>{
+const QuizTab=({evt,onUpdate,currentUser,isPast,users=[]})=>{
   const [view,setView]=useState("list");
   const [activeQuiz,setActiveQuiz]=useState(null);
   const [hostState,setHostState]=useState(null);
@@ -1229,7 +1230,7 @@ const QuizTab=({evt,onUpdate,currentUser,isPast})=>{
         {sortedScores.map(([name,score],i)=>(
           <div key={name} style={{display:"flex",alignItems:"center",gap:10,background:"var(--bg3)",borderRadius:8,padding:compact?"7px 12px":"10px 14px",border:!compact&&i===0?"1px solid var(--gold)":"1px solid var(--border)"}}>
             <div style={{fontFamily:"var(--font-h)",fontSize:compact?".9rem":"1.1rem",color:["var(--gold)","var(--muted)","#cd7f32"][i]||"var(--muted2)",minWidth:28,textAlign:"center"}}>{["🥇","🥈","🥉"][i]||`${i+1}.`}</div>
-            <Avatar name={name} size={compact?24:28} index={i}/>
+            <Avatar name={name} size={compact?24:28} {...getUA(name,users)}/>
             <div style={{flex:1,fontWeight:600,fontSize:compact?".88rem":".95rem"}}>{name}</div>
             <div style={{fontFamily:"var(--font-h)",color:"var(--amber)",fontSize:compact?"1rem":"1.1rem"}}>{score}</div>
           </div>
@@ -1579,7 +1580,7 @@ const QuizBuilder=({onSave,onCancel})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // POLLS TAB
 // ─────────────────────────────────────────────────────────────────────────────
-const PollsTab=({evt,onUpdate,currentUser,isPast})=>{
+const PollsTab=({evt,onUpdate,currentUser,isPast,users=[]})=>{
   const [creating,setCreating]=useState(false);
   const [newPoll,setNewPoll]=useState({title:"",emoji:"📊",options:["",""]});
   const savePolls=p=>onUpdate({...evt,polls:p});
@@ -1640,7 +1641,7 @@ const PollsTab=({evt,onUpdate,currentUser,isPast})=>{
                         <span style={{fontWeight:myVote?600:400,color:myVote?"var(--amber2)":"var(--cream)",fontSize:".87rem"}}>{opt.label}</span>
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:9}}>
-                        <div style={{display:"flex"}}>{opt.votes.slice(0,5).map((v,vi)=><div key={vi} style={{marginLeft:vi===0?0:-6}}><Avatar name={v} size={20} index={vi}/></div>)}{opt.votes.length>5&&<span style={{fontSize:".68rem",color:"var(--muted)",marginLeft:4,alignSelf:"center"}}>+{opt.votes.length-5}</span>}</div>
+                        <div style={{display:"flex"}}>{opt.votes.slice(0,5).map((v,vi)=><div key={vi} style={{marginLeft:vi===0?0:-6}}><Avatar name={v} size={20} {...getUA(v,users)}/></div>)}{opt.votes.length>5&&<span style={{fontSize:".68rem",color:"var(--muted)",marginLeft:4,alignSelf:"center"}}>+{opt.votes.length-5}</span>}</div>
                         <span style={{color:"var(--amber)",fontWeight:700,fontSize:".86rem",minWidth:32,textAlign:"right"}}>{pct}%</span>
                       </div>
                     </div>
@@ -2195,8 +2196,8 @@ export default function App(){
       <GS/>
       <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onMarkNotifRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}}/>
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
-        {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser}/>}
-        {pageView==="hof"&&<HallOfFame events={events}/>}
+        {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users}/>}
+        {pageView==="hof"&&<HallOfFame events={events} users={users}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
         {pageView==="event"&&activeEvent&&<EventPage evt={activeEvent} onUpdate={updateEvent} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users}/>}
