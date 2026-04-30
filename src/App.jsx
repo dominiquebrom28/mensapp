@@ -143,6 +143,33 @@ const statusMap={
   going:{color:"var(--green)",label:"Going"},maybe:{color:"var(--amber)",label:"Maybe"},
   "not coming":{color:"var(--red)",label:"Out"},went:{color:"var(--blue)",label:"Attended"},absent:{color:"var(--muted2)",label:"Absent"},
 };
+const ANIMALS=[
+  {name:"Beer",   emoji:"🐻",bg:"linear-gradient(135deg,#8B4513,#D2691E)"},
+  {name:"Vos",    emoji:"🦊",bg:"linear-gradient(135deg,#c0392b,#e8943a)"},
+  {name:"Kikker", emoji:"🐸",bg:"linear-gradient(135deg,#27ae60,#52c41a)"},
+  {name:"Pinguïn",emoji:"🐧",bg:"linear-gradient(135deg,#2c3e50,#4a6278)"},
+  {name:"Uil",    emoji:"🦉",bg:"linear-gradient(135deg,#6B3FA0,#9B59B6)"},
+  {name:"Leeuw",  emoji:"🦁",bg:"linear-gradient(135deg,#c9922a,#f5b866)"},
+  {name:"Wolf",   emoji:"🐺",bg:"linear-gradient(135deg,#485460,#808e9b)"},
+  {name:"Konijn", emoji:"🐰",bg:"linear-gradient(135deg,#a55eea,#d980fa)"},
+  {name:"Koala",  emoji:"🐨",bg:"linear-gradient(135deg,#0984e3,#74b9ff)"},
+  {name:"Panda",  emoji:"🐼",bg:"linear-gradient(135deg,#2d3436,#636e72)"},
+];
+const computeMemberStats=(username,events)=>{
+  const n=username.toLowerCase();
+  const attended=events.filter(e=>e.archived&&(e.attendees||[]).some(a=>a.name.toLowerCase()===n&&a.status==="went"));
+  const mensdays=attended.filter(e=>e.type!=="weekend").length;
+  const weekends=attended.filter(e=>e.type==="weekend").length;
+  let quizWins=0;
+  events.forEach(e=>{(e.quizzes||[]).forEach(q=>{
+    if(!q.scores||!Object.keys(q.scores).length)return;
+    const max=Math.max(...Object.values(q.scores));
+    if(max>0&&q.scores[username]===max)quizWins++;
+  });});
+  const mentions=[];
+  events.forEach(e=>{(e.winners||[]).forEach(w=>{if(w.winner.toLowerCase()===n)mentions.push({...w,eventName:e.name});});});
+  return{mensdays,weekends,quizWins,mentions,total:mensdays+weekends};
+};
 const ICONS=["📍","🍺","🏎️","🎯","🧠","🍽️","🍝","🍹","🎳","🔐","🎤","🎲","🏆","🚗","🎉","🍻","🎸","🏄","⚽","🎾","🎨","🎭"];
 const TROPHY_ICONS=["🏆","🥇","🥈","🥉","🎯","🧠","🍺","😴","😅","📸","🎤","🏎️","🔐","🎳","🎲","👑","💀","🤡","🎖️","⚡","🦆","🐐"];
 const REACTIONS=["🍺","😂","❤️","🔥","👑"];
@@ -333,7 +360,7 @@ const PendingScreen = ({user,onLogout}) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // NAV
 // ─────────────────────────────────────────────────────────────────────────────
-const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,pendingCount,notifications,notifLastRead,onMarkNotifRead}) => {
+const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,pendingCount,notifications,notifLastRead,onMarkNotifRead}) => {
   const [menuOpen,setMenuOpen]=useState(false);
   const [notifOpen,setNotifOpen]=useState(false);
   const isMobile=useIsMobile();
@@ -369,11 +396,12 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,pe
         <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}}>
           {view!=="home"&&<button onClick={onBack} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Terug</button>}
           <div onClick={onHome} style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer"}}>
-            {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":eventName}
+            {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Leden":eventName}
           </div>
         </div>
         {!isMobile&&(
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+            <button onClick={onMembers} style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>👥 Leden</button>
             <button onClick={onHof} style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
             {can.manageUsers(currentUser)&&<button onClick={onAdmin} style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
             <div style={{position:"relative"}} onClick={e=>e.stopPropagation()}>
@@ -400,6 +428,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,pe
       </div>
       {isMobile&&menuOpen&&(
         <div onClick={e=>e.stopPropagation()} style={{background:"rgba(15,11,7,.98)",borderBottom:"1px solid var(--border)",padding:".8rem 1.2rem",display:"grid",gap:".5rem"}}>
+          <button onClick={()=>{onMembers();setMenuOpen(false);}} style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>👥 Leden</button>
           <button onClick={()=>{onHof();setMenuOpen(false);}} style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
           {can.manageUsers(currentUser)&&<button onClick={()=>{onAdmin();setMenuOpen(false);}} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:".7rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{pendingCount}</span>}</button>}
           <div onClick={()=>{onLogout();setMenuOpen(false);}} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"8px 14px",cursor:"pointer"}}>
@@ -634,6 +663,174 @@ const HallOfFame = ({events}) => {
 
       {events.length===0&&<Card style={{textAlign:"center",padding:"4rem",color:"var(--muted)"}}>No events yet — the Hall of Fame will fill up as you play!</Card>}
     </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MEMBERS
+// ─────────────────────────────────────────────────────────────────────────────
+const MemberCard=({user,events,onClick,isMe})=>{
+  const stats=computeMemberStats(user.username,events);
+  const hasPhoto=!!user.photo_url;
+  const animal=ANIMALS[(user.animal_avatar??user.avatar??0)%ANIMALS.length];
+  return(
+    <div onClick={onClick} style={{position:"relative",aspectRatio:"1/1",borderRadius:"var(--radius)",overflow:"hidden",cursor:"pointer",border:"1px solid var(--border)",background:hasPhoto?"var(--bg2)":animal.bg,transition:"transform .2s,border-color .2s",flexShrink:0}}
+      onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.borderColor="var(--border2)"}}
+      onMouseLeave={e=>{e.currentTarget.style.transform="";e.currentTarget.style.borderColor=""}}>
+      {hasPhoto
+        ?<img src={user.photo_url} alt={user.username} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+        :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"clamp(3rem,10vw,5rem)"}}>{animal.emoji}</div>
+      }
+      <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,.88) 60%)",padding:"2rem .75rem .75rem"}}>
+        <div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:"#fff",lineHeight:1.2,marginBottom:5}}>{user.display_name||user.username}</div>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+          <RoleBadge role={user.role}/>
+          {stats.total>0&&<span style={{fontSize:".67rem",color:"rgba(255,255,255,.7)"}}>🍺 {stats.total}×</span>}
+          {stats.quizWins>0&&<span style={{fontSize:".67rem",color:"rgba(255,255,255,.7)"}}>🧠 {stats.quizWins}×</span>}
+          {stats.mentions.length>0&&<span style={{fontSize:".67rem",color:"rgba(255,255,255,.7)"}}>🏆 {stats.mentions.length}</span>}
+        </div>
+      </div>
+      {isMe&&<div style={{position:"absolute",top:8,right:8,background:"var(--amber)",borderRadius:6,padding:"2px 8px",fontSize:".62rem",fontWeight:700,color:"#0f0b07",letterSpacing:".04em"}}>JIJ</div>}
+    </div>
+  );
+};
+
+const MembersPage=({users,events,onOpenMember,currentUser})=>{
+  const members=users.filter(u=>u.role!=="pending").sort((a,b)=>{
+    if(a.role==="admin"&&b.role!=="admin")return -1;
+    if(b.role==="admin"&&a.role!=="admin")return 1;
+    return new Date(a.joined_at)-new Date(b.joined_at);
+  });
+  return(
+    <div>
+      <H style={{marginBottom:"1.5rem"}}>👥 Leden</H>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:"1rem"}}>
+        {members.map(u=><MemberCard key={u.id} user={u} events={events} onClick={()=>onOpenMember(u.id)} isMe={u.id===currentUser.id}/>)}
+      </div>
+    </div>
+  );
+};
+
+const MemberProfile=({user,events,currentUser,onEdit})=>{
+  const stats=computeMemberStats(user.username,events);
+  const hasPhoto=!!user.photo_url;
+  const animal=ANIMALS[(user.animal_avatar??user.avatar??0)%ANIMALS.length];
+  const isMe=user.id===currentUser.id;
+  return(
+    <div style={{display:"grid",gap:"1.5rem"}}>
+      <Card style={{padding:0,overflow:"hidden"}}>
+        <div style={{height:240,position:"relative",background:hasPhoto?"var(--bg2)":animal.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          {hasPhoto
+            ?<img src={user.photo_url} alt={user.username} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+            :<div style={{fontSize:"7rem",lineHeight:1}}>{animal.emoji}</div>
+          }
+          <div style={{position:"absolute",inset:0,background:"linear-gradient(transparent 35%,rgba(0,0,0,.75))"}}/>
+          <div style={{position:"absolute",bottom:0,left:0,right:0,padding:"1.2rem 1.5rem"}}>
+            <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+              <div>
+                <H size="1.7rem" style={{marginBottom:3,color:"#fff"}}>{user.display_name||user.username}</H>
+                {user.display_name&&<div style={{color:"rgba(255,255,255,.55)",fontSize:".82rem"}}>@{user.username}</div>}
+              </div>
+              <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                <RoleBadge role={user.role}/>
+                {user.age&&<Tag color="var(--muted)">{user.age} jaar</Tag>}
+                {isMe&&<Btn onClick={onEdit} size="sm" variant="ghost">✎ Bewerken</Btn>}
+              </div>
+            </div>
+          </div>
+        </div>
+        {user.bio&&<div style={{padding:"1rem 1.5rem",color:"var(--muted)",fontSize:".88rem",fontStyle:"italic",borderTop:"1px solid var(--border)"}}>&ldquo;{user.bio}&rdquo;</div>}
+      </Card>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:"1rem"}}>
+        {[["🍺",stats.mensdays,"Mensdagen"],["🏕️",stats.weekends,"Weekenden"],["🧠",stats.quizWins,"Quiz gewonnen"],["🏆",stats.mentions.length,"Awards"]].map(([icon,val,label])=>(
+          <Card key={label} style={{textAlign:"center",padding:"1.2rem"}}>
+            <div style={{fontSize:"1.5rem",marginBottom:4}}>{icon}</div>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"2rem",color:"var(--amber)",lineHeight:1}}>{val}</div>
+            <div style={{fontSize:".73rem",color:"var(--muted)",marginTop:5}}>{label}</div>
+          </Card>
+        ))}
+      </div>
+
+      {stats.mentions.length>0&&(
+        <Card>
+          <H size="1rem" style={{marginBottom:"1rem"}}>🏆 Awards</H>
+          <div style={{display:"grid",gap:".75rem"}}>
+            {stats.mentions.map((m,i)=>(
+              <div key={i} style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+                <span style={{fontSize:"1.4rem"}}>{m.icon||"🏆"}</span>
+                <div>
+                  <div style={{fontWeight:600,fontSize:".9rem",color:"var(--cream)"}}>{m.category}</div>
+                  <div style={{fontSize:".78rem",color:"var(--muted)",marginTop:2}}>{m.eventName}{m.detail&&` · ${m.detail}`}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <div style={{fontSize:".75rem",color:"var(--muted2)",textAlign:"center"}}>
+        Lid sinds {user.joined_at?new Date(user.joined_at).toLocaleDateString("nl-NL",{day:"numeric",month:"long",year:"numeric"}):"onbekend"}
+      </div>
+    </div>
+  );
+};
+
+const EditProfileModal=({user,onSave,onClose})=>{
+  const [displayName,setDisplayName]=useState(user.display_name||"");
+  const [age,setAge]=useState(user.age||"");
+  const [bio,setBio]=useState(user.bio||"");
+  const [animalAvatar,setAnimalAvatar]=useState(user.animal_avatar??user.avatar??0);
+  const [photoUrl,setPhotoUrl]=useState(user.photo_url||"");
+  const [uploading,setUploading]=useState(false);
+  const [err,setErr]=useState("");
+  const fileRef=useRef();
+  const handleUpload=async e=>{
+    const file=e.target.files[0];if(!file)return;
+    setUploading(true);setErr("");
+    const path=`profiles/${user.id}/${Date.now()}`;
+    const{data,error}=await supabase.storage.from("profile-photos").upload(path,file,{upsert:true});
+    if(error){setErr("Upload mislukt: "+error.message);setUploading(false);return;}
+    const{data:{publicUrl}}=supabase.storage.from("profile-photos").getPublicUrl(data.path);
+    setPhotoUrl(publicUrl);setUploading(false);
+  };
+  const save=()=>onSave({display_name:displayName.trim()||null,age:age?parseInt(age):null,bio:bio.trim()||null,animal_avatar:animalAvatar,photo_url:photoUrl||null});
+  return(
+    <Modal onClose={onClose} maxWidth={460}>
+      <H>Profiel bewerken</H>
+      <div style={{display:"grid",gap:"1.1rem"}}>
+        <div style={{textAlign:"center"}}>
+          <div style={{width:100,height:100,borderRadius:"50%",margin:"0 auto .8rem",background:photoUrl?"var(--bg3)":ANIMALS[animalAvatar%10].bg,overflow:"hidden",border:"3px solid var(--border2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"3rem",cursor:"pointer"}} onClick={()=>fileRef.current.click()}>
+            {photoUrl?<img src={photoUrl} style={{width:"100%",height:"100%",objectFit:"cover"}} alt=""/>:ANIMALS[animalAvatar%10].emoji}
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleUpload}/>
+          <div style={{display:"flex",gap:8,justifyContent:"center"}}>
+            <Btn onClick={()=>fileRef.current.click()} variant="ghost" size="sm" disabled={uploading}>{uploading?"Uploaden…":"📷 Foto uploaden"}</Btn>
+            {photoUrl&&<Btn onClick={()=>setPhotoUrl("")} variant="ghost" size="sm" style={{color:"var(--red)"}}>Verwijderen</Btn>}
+          </div>
+          {err&&<div style={{color:"var(--red)",fontSize:".78rem",marginTop:6}}>{err}</div>}
+        </div>
+        {!photoUrl&&(
+          <div>
+            <Lbl>Kies je dier</Lbl>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8}}>
+              {ANIMALS.map((a,i)=>(
+                <div key={i} onClick={()=>setAnimalAvatar(i)} title={a.name} style={{aspectRatio:"1",borderRadius:10,background:a.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",border:animalAvatar===i?"2px solid var(--amber)":"2px solid transparent",fontSize:"1.8rem",transition:"border-color .15s"}}>
+                  {a.emoji}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div><Lbl>Weergavenaam</Lbl><Inp value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder={user.username}/></div>
+        <div><Lbl>Leeftijd</Lbl><Inp value={age} onChange={e=>setAge(e.target.value.replace(/\D/g,""))} placeholder="bijv. 28"/></div>
+        <div><Lbl>Bio / tagline</Lbl><Inp value={bio} onChange={e=>setBio(e.target.value)} placeholder="Korte beschrijving…" multiline rows={2}/></div>
+        <div style={{display:"flex",gap:8,marginTop:4}}>
+          <Btn onClick={save}>Opslaan</Btn>
+          <Btn onClick={onClose} variant="ghost">Annuleren</Btn>
+        </div>
+      </div>
+    </Modal>
   );
 };
 
@@ -1826,6 +2023,8 @@ export default function App(){
   const [showAdmin,setShowAdmin]=useState(false);
   const [newEvent,setNewEvent]=useState(false);
   const [loaded,setLoaded]=useState(false);
+  const [activeMemberId,setActiveMemberId]=useState(null);
+  const [editingProfile,setEditingProfile]=useState(false);
   const [notifications,setNotifications]=useState([]);
   const [notifLastRead,setNotifLastRead]=useState(()=>localStorage.getItem("notif-read")||"");
   const eventsRef=useRef([]);
@@ -1906,8 +2105,22 @@ export default function App(){
     goHome();
   };
   const openEvent=id=>{setActiveId(id);setPageView("event");};
-  const goHome=()=>{setPageView("home");setActiveId(null);};
+  const goHome=()=>{setPageView("home");setActiveId(null);setActiveMemberId(null);};
+  const goBack=()=>{
+    if(pageView==="member")setPageView("members");
+    else goHome();
+  };
+  const openMember=id=>{setActiveMemberId(id);setPageView("member");};
+  const saveProfile=async updates=>{
+    const{error}=await supabase.from("users").update(updates).eq("id",currentUser.id);
+    if(!error){
+      const updated={...currentUser,...updates};
+      setCurrentUser(updated);
+      setUsers(prev=>prev.map(u=>u.id===currentUser.id?updated:u));
+    }
+  };
   const activeEvent=events.find(e=>e.id===activeId);
+  const activeMember=users.find(u=>u.id===activeMemberId);
 
   if(!loaded)return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",color:"var(--muted)",fontFamily:"'DM Sans',sans-serif",background:"var(--bg)"}}><GS/>Loading…</div>;
   if(!currentUser){
@@ -1919,15 +2132,18 @@ export default function App(){
   return(
     <div style={{minHeight:"100vh",background:"var(--bg)"}}>
       <GS/>
-      <Nav view={pageView} eventName={activeEvent?.name} onBack={goHome} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onHof={()=>setPageView("hof")} onHome={goHome} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onMarkNotifRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}}/>
+      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onMarkNotifRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}}/>
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
         {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser}/>}
         {pageView==="hof"&&<HallOfFame events={events}/>}
+        {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
+        {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
         {pageView==="event"&&activeEvent&&<EventPage evt={activeEvent} onUpdate={updateEvent} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser}/>}
       </main>
       <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted2)",fontSize:".72rem",borderTop:"1px solid var(--border)",letterSpacing:".1em"}}>🍺 MensApp · Built for the lads</div>
       {showAdmin&&<AdminPanel users={users} onUpdateUsers={updateUsers} onDeleteUser={deleteUser} onClose={()=>setShowAdmin(false)}/>}
       {newEvent&&can.editEvent(currentUser)&&<NewEventModal onSave={async evt=>{await saveEvents([...events,evt]);setNewEvent(false);openEvent(evt.id)}} onClose={()=>setNewEvent(false)}/>}
+      {editingProfile&&<EditProfileModal user={currentUser} onSave={async u=>{await saveProfile(u);setEditingProfile(false);}} onClose={()=>setEditingProfile(false)}/>}
     </div>
   );
 }
