@@ -66,9 +66,11 @@ const Lbl = ({children}) => <div style={{fontSize:".75rem",color:"var(--muted)",
 const Tag = ({children,color="var(--amber)"}) => (
   <span style={{background:color+"22",color,border:`1px solid ${color}33`,borderRadius:6,padding:"3px 10px",fontSize:".73rem",fontWeight:600}}>{children}</span>
 );
-const Avatar = ({name,size=32,index=0,style={}}) => (
-  <div style={{width:size,height:size,borderRadius:"50%",flexShrink:0,background:`hsl(${(name.charCodeAt(0)*47+index*31)%360},50%,32%)`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:size*.36,color:"var(--cream)",border:"2px solid var(--bg2)",...style}}>{name[0].toUpperCase()}</div>
-);
+const Avatar = ({name,size=32,index=0,photoUrl="",style={}}) => {
+  if(photoUrl) return <div style={{width:size,height:size,borderRadius:"50%",flexShrink:0,overflow:"hidden",border:"2px solid var(--bg2)",...style}}><img src={photoUrl} alt={name} style={{width:"100%",height:"100%",objectFit:"cover"}}/></div>;
+  const animal=ANIMALS[index%ANIMALS.length];
+  return <div style={{width:size,height:size,borderRadius:"50%",flexShrink:0,background:animal.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.5,border:"2px solid var(--bg2)",...style}}>{animal.emoji}</div>;
+};
 const Modal = ({children,onClose,maxWidth=500}) => (
   <div className="ov" onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
     <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth,maxHeight:"92vh",overflowY:"auto"}}>
@@ -177,7 +179,7 @@ const HIGHLIGHT_EMOJIS=["✨","😂","😬","🎷","🍰","🚗","🎯","🏆","
 
 const SEED_EVENTS=[
   {
-    id:"evt-2023",name:"Mensday 2023",type:"day",date:"2023-09-09",startTime:"12:00",
+    id:"evt-2023",name:"Mensday 2023",type:"day",date:"2023-09-09",start_time:"12:00",end_time:"23:00",
     location:"Amsterdam",description:"The sixth edition. Legendary go-karting afternoon.",theme:"Racing Edition",archived:true,
     attendees:[{name:"Doom",status:"went"},{name:"Bram",status:"went"},{name:"Sander",status:"went"},{name:"Tim",status:"went"},{name:"Ruben",status:"absent"},{name:"Daan",status:"went"}],
     schedule:[
@@ -205,7 +207,7 @@ const SEED_EVENTS=[
     ],
   },
   {
-    id:"evt-2024",name:"Mensday 2024",type:"day",date:"2024-09-14",startTime:"13:00",
+    id:"evt-2024",name:"Mensday 2024",type:"day",date:"2024-09-14",start_time:"13:00",end_time:"23:30",
     location:"Rotterdam",description:"The seventh edition. Escape room & rooftop dinner.",theme:"",archived:true,
     attendees:[{name:"Doom",status:"went"},{name:"Bram",status:"went"},{name:"Sander",status:"absent"},{name:"Tim",status:"went"},{name:"Ruben",status:"went"},{name:"Daan",status:"went"}],
     schedule:[
@@ -225,7 +227,7 @@ const SEED_EVENTS=[
     ],
   },
   {
-    id:"evt-2025",name:"Mensday 2025",type:"day",date:"2025-09-13",startTime:"12:00",
+    id:"evt-2025",name:"Mensday 2025",type:"day",date:"2025-09-13",start_time:"12:00",end_time:"",
     location:"TBD",description:"The eighth edition. Planning in progress!",theme:"",archived:false,
     attendees:[{name:"Doom",status:"going"},{name:"Bram",status:"going"},{name:"Sander",status:"maybe"},{name:"Tim",status:"going"},{name:"Ruben",status:"not coming"},{name:"Daan",status:"going"}],
     schedule:[
@@ -396,7 +398,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
         <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}}>
           {view!=="home"&&<button onClick={onBack} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Terug</button>}
           <div onClick={onHome} style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer"}}>
-            {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Leden":eventName}
+            {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":eventName}
           </div>
         </div>
         {!isMobile&&(
@@ -408,11 +410,12 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
               <button onClick={()=>{const o=!notifOpen;setNotifOpen(o);setMenuOpen(false);if(o&&unread>0)onMarkNotifRead();}} style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🔔{unread>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}</button>
               {notifOpen&&<div onClick={e=>e.stopPropagation()} style={{position:"absolute",right:0,top:"calc(100% + 8px)",width:300,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:"var(--radius)",boxShadow:"0 8px 32px rgba(0,0,0,.5)",zIndex:300,maxHeight:360,overflowY:"auto"}}>{notifList}</div>}
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:7,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"5px 12px",cursor:"pointer"}} onClick={onLogout}>
-              <Avatar name={currentUser.username} size={22} index={currentUser.avatar||0}/>
+            <div style={{display:"flex",alignItems:"center",gap:7,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"5px 12px"}}>
+              <Avatar name={currentUser.username} size={22} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/>
               <span style={{fontSize:".8rem",color:"var(--cream)"}}>{currentUser.username}</span>
               <RoleBadge role={currentUser.role}/>
             </div>
+            <button onClick={onLogout} style={{background:"transparent",border:"1px solid rgba(224,85,85,.3)",borderRadius:8,color:"var(--red)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>Uitloggen</button>
           </div>
         )}
         {isMobile&&(
@@ -431,9 +434,9 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
           <button onClick={()=>{onMembers();setMenuOpen(false);}} style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>👥 Leden</button>
           <button onClick={()=>{onHof();setMenuOpen(false);}} style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
           {can.manageUsers(currentUser)&&<button onClick={()=>{onAdmin();setMenuOpen(false);}} style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:".7rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{pendingCount}</span>}</button>}
-          <div onClick={()=>{onLogout();setMenuOpen(false);}} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"8px 14px",cursor:"pointer"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8}}><Avatar name={currentUser.username} size={26} index={currentUser.avatar||0}/><span style={{fontSize:".88rem",color:"var(--cream)"}}>{currentUser.username}</span><RoleBadge role={currentUser.role}/></div>
-            <span style={{fontSize:".78rem",color:"var(--muted)"}}>Uitloggen</span>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"8px 14px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}><Avatar name={currentUser.username} size={26} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/><span style={{fontSize:".88rem",color:"var(--cream)"}}>{currentUser.username}</span><RoleBadge role={currentUser.role}/></div>
+            <button onClick={()=>{onLogout();setMenuOpen(false);}} style={{background:"transparent",border:"1px solid rgba(224,85,85,.3)",borderRadius:8,color:"var(--red)",padding:"6px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>Uitloggen</button>
           </div>
         </div>
       )}
@@ -470,7 +473,7 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
         {pending.length===0&&<div style={{color:"var(--muted)",fontSize:".88rem",textAlign:"center",padding:"2rem"}}>No pending requests 🎉</div>}
         {pending.map(u=>(
           <div key={u.id} style={{background:"var(--bg3)",borderRadius:"var(--radius-sm)",padding:"1rem 1.1rem",display:"flex",alignItems:"center",gap:"1rem",flexWrap:"wrap"}}>
-            <Avatar name={u.username} size={36} index={u.avatar||0}/>
+            <Avatar name={u.username} size={36} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>
             <div style={{flex:1}}><div style={{fontWeight:600,fontSize:".95rem"}}>{u.username}</div><div style={{color:"var(--muted)",fontSize:".75rem"}}>Requested {new Date(u.joined_at).toLocaleDateString("nl-NL")}</div></div>
             <div style={{display:"flex",gap:6}}>
               <Btn onClick={()=>approve(u.id,"member")} variant="success" size="sm">✓ Approve</Btn>
@@ -483,7 +486,7 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
       {tab==="users"&&<div style={{display:"grid",gap:".7rem"}}>
         {approved.map(u=>(
           <div key={u.id} style={{background:"var(--bg3)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",display:"flex",alignItems:"center",gap:"1rem",flexWrap:"wrap"}}>
-            <Avatar name={u.username} size={32} index={u.avatar||0}/>
+            <Avatar name={u.username} size={32} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>
             <div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:".92rem"}}>{u.username}</span><RoleBadge role={u.role}/></div><div style={{color:"var(--muted)",fontSize:".73rem",marginTop:2}}>Joined {new Date(u.joined_at).toLocaleDateString("nl-NL")}</div></div>
             <div style={{display:"flex",gap:6}}>
               {u.role==="member"&&<Btn onClick={()=>promote(u.id)} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"var(--border2)",fontSize:".73rem"}}>★ Admin</Btn>}
@@ -867,7 +870,7 @@ const Home = ({events,onOpen,onNew,currentUser}) => {
 
 const EventCard = ({evt,onOpen,compact=false,currentUser}) => {
   const going=evt.attendees.filter(a=>["went","going"].includes(a.status)).length;
-  const countdown=useCountdown(evt.date,evt.startTime);
+  const countdown=useCountdown(evt.date,evt.start_time);
   const myStatus=evt.attendees.find(a=>a.name.toLowerCase()===currentUser?.username.toLowerCase())?.status;
   const colorOf=s=>statusMap[s]?.color??"var(--muted)";
   return(
@@ -887,7 +890,7 @@ const EventCard = ({evt,onOpen,compact=false,currentUser}) => {
           <div style={{fontFamily:"var(--font-h)",fontSize:compact?"1.05rem":"1.25rem",color:"var(--amber2)",marginBottom:4}}>{evt.name}</div>
           <div style={{color:"var(--muted)",fontSize:".8rem"}}>
             📅 {new Date(evt.date).toLocaleDateString("nl-NL",{weekday:"short",day:"numeric",month:"long",year:"numeric"})}
-            {evt.startTime&&` · ⏰ ${evt.startTime}`}
+            {evt.start_time&&` · ⏰ ${evt.start_time}${evt.end_time?` – ${evt.end_time}`:""}`}
             {evt.location!=="TBD"&&` · 📍 ${evt.location}`}
           </div>
           {!compact&&evt.description&&<div style={{color:"var(--cream)",opacity:.65,fontSize:".84rem",marginTop:6}}>{evt.description}</div>}
@@ -923,10 +926,10 @@ const EventCard = ({evt,onOpen,compact=false,currentUser}) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const TABS=["Overview","Polls","Quiz","Photos","Winners & Highlights","FAQ"];
 
-const EventPage=({evt,onUpdate,onDelete,currentUser})=>{
+const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
   const [tab,setTab]=useState("Overview");
   const [editing,setEditing]=useState(false);
-  const countdown=useCountdown(evt.date,evt.startTime);
+  const countdown=useCountdown(evt.date,evt.start_time);
   const isPast=evt.archived;
   const isAdmin=can.editEvent(currentUser);
 
@@ -942,7 +945,7 @@ const EventPage=({evt,onUpdate,onDelete,currentUser})=>{
               {evt.theme&&<Tag color="var(--gold)">{evt.theme}</Tag>}
             </div>
             <H size="2rem" style={{marginBottom:".3rem"}}>{evt.name}</H>
-            <div style={{color:"var(--cream)",opacity:.7,fontSize:".9rem",marginBottom:3}}>📅 {new Date(evt.date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}{evt.startTime&&` · ⏰ ${evt.startTime}`}</div>
+            <div style={{color:"var(--cream)",opacity:.7,fontSize:".9rem",marginBottom:3}}>📅 {new Date(evt.date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}{evt.start_time&&` · ⏰ ${evt.start_time}${evt.end_time?` – ${evt.end_time}`:""}`}</div>
             <div style={{color:"var(--cream)",opacity:.7,fontSize:".9rem",marginBottom:10}}>📍 {evt.location}</div>
             {evt.description&&<div style={{color:"var(--muted)",fontSize:".85rem",maxWidth:440}}>{evt.description}</div>}
           </div>
@@ -991,7 +994,7 @@ const EventPage=({evt,onUpdate,onDelete,currentUser})=>{
         {tab==="FAQ"                  &&<FAQTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
       </div>
 
-      {editing&&<EditEventModal evt={evt} onSave={u=>{onUpdate(u);setEditing(false)}} onClose={()=>setEditing(false)}/>}
+      {editing&&<EditEventModal evt={evt} users={users} onSave={u=>{onUpdate(u);setEditing(false)}} onClose={()=>setEditing(false)}/>}
     </div>
   );
 };
@@ -1036,7 +1039,7 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser})=>{
         <Card style={{background:"linear-gradient(135deg,#1a1309,#241b0e)",borderColor:"var(--border2)"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"1rem"}}>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
-              <Avatar name={currentUser.username} size={40} index={0}/>
+              <Avatar name={currentUser.username} size={40} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/>
               <div>
                 <div style={{fontWeight:600,fontSize:"1rem"}}>{currentUser.username}</div>
                 <div style={{fontSize:".78rem",color:"var(--muted)",marginTop:2}}>
@@ -1967,16 +1970,74 @@ const EditScheduleModal=({evt,onSave,onClose})=>{
   ))}<Btn onClick={()=>setSched(s=>[...s,{...blankStop}])} variant="subtle" size="sm">+ Add Stop</Btn><div style={{display:"flex",gap:8}}><Btn onClick={()=>onSave(sched)}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div></div></Modal>);
 };
 
-const EditEventModal=({evt,onSave,onClose})=>{
-  const [d,setD]=useState({...evt});const [an,setAn]=useState("");
-  return(<Modal onClose={onClose} maxWidth={500}><H>Edit Event</H><div style={{display:"grid",gap:".9rem"}}>{[["name","Event Name"],["date","Datum (JJJJ-MM-DD)"],["startTime","Starttijd (HH:MM)"],["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}<div><Lbl>Type</Lbl><select value={d.type} onChange={e=>setD({...d,type:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div><div><Lbl>Description</Lbl><Inp value={d.description||""} onChange={e=>setD({...d,description:e.target.value})} placeholder="Short description…" multiline/></div><div><Lbl>Attendees</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>{d.attendees.map((a,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,background:"var(--bg3)",borderRadius:8,padding:"5px 10px",fontSize:".8rem"}}>{a.name}<span onClick={()=>setD({...d,attendees:d.attendees.filter((_,j)=>j!==i)})} style={{cursor:"pointer",color:"var(--muted)",marginLeft:2}}>✕</span></div>)}</div><div style={{display:"flex",gap:6}}><Inp value={an} onChange={e=>setAn(e.target.value)} placeholder="Add name…" onKeyDown={e=>{if(e.key==="Enter"&&an.trim()){setD({...d,attendees:[...d.attendees,{name:an.trim(),status:"going"}]});setAn("")}}}/><Btn onClick={()=>{if(!an.trim())return;setD({...d,attendees:[...d.attendees,{name:an.trim(),status:"going"}]});setAn("")}} variant="subtle" size="sm" style={{flexShrink:0}}>Add</Btn></div></div><div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave(d)}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div></div></Modal>);
+const AttendeeInput=({attendees,setAttendees,users=[]})=>{
+  const [an,setAn]=useState("");
+  const suggestions=an.length>0?users.filter(u=>u.role!=="pending"&&u.username.toLowerCase().includes(an.toLowerCase())&&!attendees.some(a=>a.name.toLowerCase()===u.username.toLowerCase())):[];
+  const add=name=>{if(!name.trim())return;setAttendees([...attendees,{name:name.trim(),status:"going"}]);setAn("");};
+  return(
+    <div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+        {attendees.map((a,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",gap:6,background:"var(--bg3)",borderRadius:8,padding:"5px 10px",fontSize:".8rem"}}>
+            {a.name}<span onClick={()=>setAttendees(attendees.filter((_,j)=>j!==i))} style={{cursor:"pointer",color:"var(--muted)",marginLeft:2}}>✕</span>
+          </div>
+        ))}
+      </div>
+      <div style={{position:"relative"}}>
+        <div style={{display:"flex",gap:6}}>
+          <Inp value={an} onChange={e=>setAn(e.target.value)} placeholder="Naam toevoegen…" onKeyDown={e=>{if(e.key==="Enter"&&an.trim())add(an);}}/>
+          <Btn onClick={()=>add(an)} variant="subtle" size="sm" style={{flexShrink:0}}>Add</Btn>
+        </div>
+        {suggestions.length>0&&(
+          <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,right:50,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:"var(--radius-sm)",zIndex:10,overflow:"hidden"}}>
+            {suggestions.map(u=>(
+              <div key={u.id} onMouseDown={e=>{e.preventDefault();add(u.username);}} style={{padding:"8px 12px",cursor:"pointer",fontSize:".85rem",display:"flex",alignItems:"center",gap:8}} onMouseEnter={e=>e.currentTarget.style.background="var(--bg3)"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                <Avatar name={u.username} size={22} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>
+                {u.username}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
-const NewEventModal=({onSave,onClose})=>{
+const EditEventModal=({evt,onSave,onClose,users=[]})=>{
+  const [d,setD]=useState({...evt});
+  return(
+    <Modal onClose={onClose} maxWidth={500}><H>Edit Event</H>
+    <div style={{display:"grid",gap:".9rem"}}>
+      {[["name","Event Name"],["date","Datum (JJJJ-MM-DD)"],["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><Lbl>Starttijd (HH:MM)</Lbl><Inp value={d.start_time||""} onChange={e=>setD({...d,start_time:e.target.value})} placeholder="12:00"/></div>
+        <div><Lbl>Eindtijd (HH:MM)</Lbl><Inp value={d.end_time||""} onChange={e=>setD({...d,end_time:e.target.value})} placeholder="23:00"/></div>
+      </div>
+      <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>setD({...d,type:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
+      <div><Lbl>Description</Lbl><Inp value={d.description||""} onChange={e=>setD({...d,description:e.target.value})} placeholder="Short description…" multiline/></div>
+      <div><Lbl>Attendees</Lbl><AttendeeInput attendees={d.attendees} setAttendees={v=>setD({...d,attendees:v})} users={users}/></div>
+      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave(d)}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
+    </div></Modal>
+  );
+};
+
+const NewEventModal=({onSave,onClose,users=[]})=>{
   const yr=new Date().getFullYear();
-  const [d,setD]=useState({name:`Mensday ${yr}`,type:"day",date:`${yr}-09-13`,startTime:"12:00",location:"TBD",description:"",theme:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false});
-  const [an,setAn]=useState("");
-  return(<Modal onClose={onClose} maxWidth={500}><H>New Event</H><div style={{display:"grid",gap:".85rem"}}>{[["name","Event Name"],["date","Datum (JJJJ-MM-DD)"],["startTime","Starttijd (HH:MM)"],["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}<div><Lbl>Type</Lbl><select value={d.type} onChange={e=>setD({...d,type:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div><div><Lbl>Description</Lbl><Inp value={d.description||""} onChange={e=>setD({...d,description:e.target.value})} placeholder="Short description…" multiline/></div><div><Lbl>Attendees</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>{d.attendees.map((a,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,background:"var(--bg3)",borderRadius:8,padding:"5px 10px",fontSize:".8rem"}}>{a.name}<span onClick={()=>setD({...d,attendees:d.attendees.filter((_,j)=>j!==i)})} style={{cursor:"pointer",color:"var(--muted)",marginLeft:2}}>✕</span></div>)}</div><div style={{display:"flex",gap:6}}><Inp value={an} onChange={e=>setAn(e.target.value)} placeholder="Add name…" onKeyDown={e=>{if(e.key==="Enter"&&an.trim()){setD({...d,attendees:[...d.attendees,{name:an.trim(),status:"going"}]});setAn("")}}}/><Btn onClick={()=>{if(!an.trim())return;setD({...d,attendees:[...d.attendees,{name:an.trim(),status:"going"}]});setAn("")}} variant="subtle" size="sm" style={{flexShrink:0}}>Add</Btn></div></div><div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave({...d,id:`evt-${Date.now()}`})}>Create</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div></div></Modal>);
+  const [d,setD]=useState({name:`Mensday ${yr}`,type:"day",date:`${yr}-09-13`,start_time:"12:00",end_time:"",location:"TBD",description:"",theme:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false});
+  return(
+    <Modal onClose={onClose} maxWidth={500}><H>New Event</H>
+    <div style={{display:"grid",gap:".85rem"}}>
+      {[["name","Event Name"],["date","Datum (JJJJ-MM-DD)"],["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><Lbl>Starttijd (HH:MM)</Lbl><Inp value={d.start_time||""} onChange={e=>setD({...d,start_time:e.target.value})} placeholder="12:00"/></div>
+        <div><Lbl>Eindtijd (HH:MM)</Lbl><Inp value={d.end_time||""} onChange={e=>setD({...d,end_time:e.target.value})} placeholder="23:00"/></div>
+      </div>
+      <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>setD({...d,type:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
+      <div><Lbl>Description</Lbl><Inp value={d.description||""} onChange={e=>setD({...d,description:e.target.value})} placeholder="Short description…" multiline/></div>
+      <div><Lbl>Attendees</Lbl><AttendeeInput attendees={d.attendees} setAttendees={v=>setD({...d,attendees:v})} users={users}/></div>
+      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave({...d,id:`evt-${Date.now()}`})}>Create</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
+    </div></Modal>
+  );
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2138,11 +2199,11 @@ export default function App(){
         {pageView==="hof"&&<HallOfFame events={events}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
-        {pageView==="event"&&activeEvent&&<EventPage evt={activeEvent} onUpdate={updateEvent} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser}/>}
+        {pageView==="event"&&activeEvent&&<EventPage evt={activeEvent} onUpdate={updateEvent} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users}/>}
       </main>
       <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted2)",fontSize:".72rem",borderTop:"1px solid var(--border)",letterSpacing:".1em"}}>🍺 MensApp · Built for the lads</div>
       {showAdmin&&<AdminPanel users={users} onUpdateUsers={updateUsers} onDeleteUser={deleteUser} onClose={()=>setShowAdmin(false)}/>}
-      {newEvent&&can.editEvent(currentUser)&&<NewEventModal onSave={async evt=>{await saveEvents([...events,evt]);setNewEvent(false);openEvent(evt.id)}} onClose={()=>setNewEvent(false)}/>}
+      {newEvent&&can.editEvent(currentUser)&&<NewEventModal users={users} onSave={async evt=>{await saveEvents([...events,evt]);setNewEvent(false);openEvent(evt.id)}} onClose={()=>setNewEvent(false)}/>}
       {editingProfile&&<EditProfileModal user={currentUser} onSave={async u=>{await saveProfile(u);setEditingProfile(false);}} onClose={()=>setEditingProfile(false)}/>}
     </div>
   );
