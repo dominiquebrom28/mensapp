@@ -6,32 +6,52 @@ import { supabase, hashPin } from "./supabase.js";
 // ─────────────────────────────────────────────────────────────────────────────
 const GS = () => (
   <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700;1,900&family=DM+Sans:wght@300;400;500;600;700&display=swap');
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
-      --bg:#0f0b07;--bg2:#1a1309;--bg3:#241b0e;--bg4:#2e2212;
+      --bg:#0c0901;--bg2:#150e04;--bg3:#1d1408;--bg4:#27190c;
       --amber:#e8943a;--amber2:#f5b866;--gold:#c9922a;
       --cream:#f0e6d3;--muted:#8a7460;--muted2:#6a5848;
-      --border:rgba(232,148,58,.15);--border2:rgba(232,148,58,.3);
-      --green:#4caf7d;--red:#e05555;--blue:#5b9bd5;--purple:#9b7fe8;
+      --border:rgba(232,148,58,.12);--border2:rgba(232,148,58,.35);
+      --green:#4caf7d;--red:#e05555;--blue:#5b9bd5;--purple:#9b7fe8;--orange:#ff6b35;
       --font-h:'Playfair Display',serif;--font-b:'DM Sans',sans-serif;
       --radius:14px;--radius-sm:9px;
+      --hero-glow:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(232,148,58,.18),transparent 70%);
     }
     body{background:var(--bg);color:var(--cream);font-family:var(--font-b);min-height:100vh}
-    ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:var(--bg2)}::-webkit-scrollbar-thumb{background:var(--gold);border-radius:3px}
+    ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:var(--bg2)}::-webkit-scrollbar-thumb{background:linear-gradient(var(--amber),var(--gold));border-radius:3px}
     input,select,textarea{font-family:var(--font-b)}
-    @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
     @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-    @keyframes pop{0%{transform:scale(.8);opacity:0}60%{transform:scale(1.1)}100%{transform:scale(1);opacity:1}}
+    @keyframes pop{0%{transform:scale(.8);opacity:0}60%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
     @keyframes countdown{from{stroke-dashoffset:0}to{stroke-dashoffset:251}}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
     @keyframes goldShimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
-    .fu{animation:fadeUp .4s ease both}
-    .fu1{animation:fadeUp .4s .07s ease both}
-    .fu2{animation:fadeUp .4s .14s ease both}
-    .fu3{animation:fadeUp .4s .21s ease both}
+    @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+    @keyframes glowPulse{0%,100%{box-shadow:0 0 20px rgba(232,148,58,.1),0 0 60px rgba(232,148,58,.05)}50%{box-shadow:0 0 40px rgba(232,148,58,.35),0 0 120px rgba(232,148,58,.15)}}
+    @keyframes shimmer{0%{background-position:-600px 0}100%{background-position:600px 0}}
+    @keyframes borderFire{0%,100%{border-color:rgba(232,148,58,.25)}50%{border-color:rgba(232,148,58,.85)}}
+    @keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+    @keyframes countUp{from{transform:scale(.7);opacity:0}to{transform:scale(1);opacity:1}}
+    @keyframes reveal{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0% 0 0)}}
+    .fu{animation:fadeUp .45s ease both}
+    .fu1{animation:fadeUp .45s .08s ease both}
+    .fu2{animation:fadeUp .45s .16s ease both}
+    .fu3{animation:fadeUp .45s .24s ease both}
+    .fu4{animation:fadeUp .45s .32s ease both}
     .ov{animation:fadeIn .2s ease both}
     .pop{animation:pop .35s ease both}
+    .float{animation:float 3.5s ease-in-out infinite}
+    .glow-pulse{animation:glowPulse 3s ease-in-out infinite}
+    .fire-border{animation:borderFire 2s ease-in-out infinite}
+    .skeleton{background:linear-gradient(90deg,var(--bg3) 25%,var(--bg4) 50%,var(--bg3) 75%);background-size:600px 100%;animation:shimmer 1.5s infinite;border-radius:8px}
+    .event-card-upcoming:hover{transform:translateY(-3px);box-shadow:0 12px 40px rgba(232,148,58,.15)!important}
+    .event-card-upcoming{transition:all .25s cubic-bezier(.4,0,.2,1)}
+    .schedule-card{transition:all .22s ease;animation:slideUp .32s ease both}
+    .schedule-card:hover{transform:translateX(5px);border-color:var(--border2)!important;background:var(--bg4)!important}
+    .rsvp-btn{transition:all .2s cubic-bezier(.4,0,.2,1)!important}
+    .rsvp-btn:hover{transform:translateY(-1px);filter:brightness(1.1)}
+    .rsvp-btn:active{transform:scale(.97)}
   `}</style>
 );
 
@@ -844,25 +864,73 @@ const EditProfileModal=({user,onSave,onClose})=>{
 const Home = ({events,onOpen,onNew,currentUser,users=[]}) => {
   const upcoming=events.filter(e=>!e.archived).sort((a,b)=>new Date(a.date)-new Date(b.date));
   const past=events.filter(e=>e.archived).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const nextEvt=upcoming[0];
+  const goingLads=nextEvt?nextEvt.attendees.filter(a=>a.status==="going"):[];
+  const totalEditions=events.length;
+  const hypers=["No excuses. No mercy. Just lads.","The brotherhood doesn't sleep.","Every year. No matter what.","Legends are made here.","It's that time again."];
+  const hype=hypers[(new Date().getMonth()+new Date().getDate())%hypers.length];
   return(
-    <div style={{display:"grid",gap:"2rem"}}>
-      <div className="fu" style={{textAlign:"center",padding:"2rem 0 1rem"}}>
-        <div style={{fontSize:"3.5rem",marginBottom:".5rem"}}>🍺</div>
-        <h1 style={{fontFamily:"var(--font-h)",fontSize:"3rem",color:"var(--amber2)",lineHeight:1.1}}>Mensday</h1>
-        <p style={{color:"var(--muted)",marginTop:".6rem",fontSize:".9rem",letterSpacing:".05em"}}>The annual gathering of lads</p>
+    <div style={{display:"grid",gap:"2.5rem"}}>
+
+      {/* ── HERO ── */}
+      <div className="fu" style={{textAlign:"center",padding:"3rem 0 .5rem",position:"relative"}}>
+        <div style={{position:"absolute",inset:0,background:"var(--hero-glow)",pointerEvents:"none"}}/>
+        <div className="float" style={{fontSize:"4.5rem",marginBottom:".5rem",display:"inline-block"}}>🍺</div>
+        <h1 style={{fontFamily:"var(--font-h)",fontStyle:"italic",fontSize:"clamp(3rem,10vw,6rem)",color:"var(--amber2)",lineHeight:.9,letterSpacing:"-.02em",marginBottom:".6rem"}}>MENSDAY</h1>
+        <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:12,marginBottom:"1.2rem"}}>
+          <div style={{height:1,flex:1,maxWidth:60,background:"linear-gradient(to right,transparent,var(--border2))"}}/>
+          <span style={{color:"var(--muted)",fontSize:".72rem",letterSpacing:".25em",textTransform:"uppercase"}}>{hype}</span>
+          <div style={{height:1,flex:1,maxWidth:60,background:"linear-gradient(to left,transparent,var(--border2))"}}/>
+        </div>
+        {totalEditions>0&&(
+          <div style={{display:"inline-flex",gap:"2rem",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:50,padding:".6rem 2rem",flexWrap:"wrap",justifyContent:"center"}}>
+            {[
+              [goingLads.length,"Lads In 🔥"],
+              [totalEditions,"Editions 🏆"],
+              [past.length,"Legendary 💀"],
+            ].map(([v,l])=>(
+              <div key={l} style={{textAlign:"center"}}>
+                <div style={{fontFamily:"var(--font-h)",fontSize:"1.6rem",color:"var(--amber)",lineHeight:1}}>{v}</div>
+                <div style={{fontSize:".62rem",color:"var(--muted)",letterSpacing:".12em",textTransform:"uppercase",marginTop:2}}>{l}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        {goingLads.length>0&&(
+          <div style={{marginTop:"1.2rem",display:"flex",justifyContent:"center",alignItems:"center",gap:8}}>
+            <div style={{display:"flex"}}>{goingLads.slice(0,7).map((a,i)=><div key={i} style={{marginLeft:i===0?0:-10,borderRadius:"50%",border:"2px solid var(--bg)"}}><Avatar name={a.name} size={30} {...getUA(a.name,users)}/></div>)}</div>
+            <span style={{fontSize:".8rem",color:"var(--muted)"}}>
+              {goingLads.slice(0,3).map(a=>a.name).join(", ")}{goingLads.length>3?` +${goingLads.length-3} more`:""} confirmed
+            </span>
+          </div>
+        )}
       </div>
+
+      {/* ── UPCOMING ── */}
       <div className="fu1">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}>
-          <H style={{marginBottom:0}}>Upcoming</H>
+          <H style={{marginBottom:0}}>🔥 Next Mission</H>
           {can.editEvent(currentUser)&&<Btn onClick={onNew} size="sm">+ New Event</Btn>}
         </div>
-        {upcoming.length===0&&<Card style={{textAlign:"center",padding:"2.5rem",color:"var(--muted)"}}>No upcoming events yet.</Card>}
+        {upcoming.length===0&&(
+          <Card style={{textAlign:"center",padding:"3.5rem 2rem",background:"linear-gradient(135deg,var(--bg2),var(--bg3))"}}>
+            <div style={{fontSize:"3rem",marginBottom:".8rem"}}>👀</div>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"1.3rem",color:"var(--amber2)",marginBottom:".5rem"}}>The next edition is being planned...</div>
+            <div style={{color:"var(--muted)",fontSize:".88rem"}}>Admin is cooking something up. Stay on standby, lad.</div>
+          </Card>
+        )}
         <div style={{display:"grid",gap:"1rem"}}>{upcoming.map(e=><EventCard key={e.id} evt={e} onOpen={onOpen} currentUser={currentUser} users={users}/>)}</div>
       </div>
+
+      {/* ── ARCHIVES ── */}
       {past.length>0&&(
         <div className="fu2">
-          <H>Past Events</H>
-          <div style={{display:"grid",gap:".8rem"}}>{past.map(e=><EventCard key={e.id} evt={e} onOpen={onOpen} compact currentUser={currentUser} users={users}/>)}</div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"1rem"}}>
+            <H style={{marginBottom:0}}>📚 The Archives</H>
+            <div style={{height:1,flex:1,background:"var(--border)"}}/>
+            <span style={{fontSize:".72rem",color:"var(--muted)",letterSpacing:".1em"}}>{past.length} editions</span>
+          </div>
+          <div style={{display:"grid",gap:".7rem"}}>{past.map(e=><EventCard key={e.id} evt={e} onOpen={onOpen} compact currentUser={currentUser} users={users}/>)}</div>
         </div>
       )}
     </div>
@@ -874,48 +942,108 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
   const countdown=useCountdown(evt.date,evt.start_time);
   const myStatus=evt.attendees.find(a=>a.name.toLowerCase()===currentUser?.username.toLowerCase())?.status;
   const colorOf=s=>statusMap[s]?.color??"var(--muted)";
-  return(
-    <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:compact?"1rem 1.2rem":"1.4rem",cursor:"pointer",transition:"all .2s",position:"relative",overflow:"hidden"}}
-      onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--border2)";e.currentTarget.style.transform="translateY(-2px)"}}
-      onMouseLeave={e=>{e.currentTarget.style.borderColor="";e.currentTarget.style.transform=""}}
+  const isUpcoming=!evt.archived&&!countdown.past;
+  const myStatusColor=myStatus?colorOf(myStatus):"var(--muted)";
+
+  if(compact) return(
+    <div className="event-card-upcoming" style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",cursor:"pointer",position:"relative",overflow:"hidden",display:"flex",alignItems:"center",gap:"1rem"}}
+      onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--border2)"}}
+      onMouseLeave={e=>{e.currentTarget.style.borderColor=""}}
       onClick={()=>onOpen(evt.id)}>
-      {!evt.archived&&<div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,var(--amber),var(--gold))"}}/>}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:"1rem"}}>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",gap:6,marginBottom:6,flexWrap:"wrap"}}>
-            <Tag color={evt.type==="weekend"?"var(--purple)":"var(--amber)"}>{evt.type==="weekend"?"Weekend":"Day"}</Tag>
-            {evt.archived&&<Tag color="var(--muted2)">Archive</Tag>}
-            {evt.theme&&<Tag color="var(--gold)">{evt.theme}</Tag>}
-            {!evt.archived&&myStatus&&<Tag color={colorOf(myStatus)}>{statusMap[myStatus]?.label}</Tag>}
-          </div>
-          <div style={{fontFamily:"var(--font-h)",fontSize:compact?"1.05rem":"1.25rem",color:"var(--amber2)",marginBottom:4}}>{evt.name}</div>
-          <div style={{color:"var(--muted)",fontSize:".8rem"}}>
-            📅 {new Date(evt.date).toLocaleDateString("nl-NL",{weekday:"short",day:"numeric",month:"long",year:"numeric"})}
-            {evt.start_time&&` · ⏰ ${evt.start_time}${evt.end_time?` – ${evt.end_time}`:""}`}
-            {evt.location!=="TBD"&&` · 📍 ${evt.location}`}
-          </div>
-          {!compact&&evt.description&&<div style={{color:"var(--cream)",opacity:.65,fontSize:".84rem",marginTop:6}}>{evt.description}</div>}
-        </div>
-        <div style={{textAlign:"right",flexShrink:0}}>
-          {!evt.archived&&!countdown.past&&(
-            <div style={{display:"flex",gap:5}}>
-              {[["d","d"],["h","h"],["m","m"]].map(([k,l])=>(
-                <div key={k} style={{textAlign:"center"}}>
-                  <div style={{fontFamily:"var(--font-h)",fontSize:"1.2rem",color:"var(--amber)",lineHeight:1}}>{String(countdown[k]??0).padStart(2,"0")}</div>
-                  <div style={{fontSize:".58rem",color:"var(--muted)",letterSpacing:".1em"}}>{l}</div>
-                </div>
-              ))}
-            </div>
-          )}
-          {evt.archived&&<div style={{fontFamily:"var(--font-h)",fontSize:"1.7rem",color:"var(--muted2)",opacity:.5}}>{new Date(evt.date).getFullYear()}</div>}
-          <div style={{fontSize:".73rem",color:"var(--muted)",marginTop:4}}>{going} {evt.archived?"attended":"going"}</div>
-          {(evt.winners?.length>0)&&<div style={{fontSize:".72rem",color:"var(--gold)",marginTop:2}}>🏆 {evt.winners.length} awards</div>}
+      <div style={{fontFamily:"var(--font-h)",fontSize:"1.5rem",color:"var(--muted2)",opacity:.4,minWidth:44,textAlign:"center"}}>{new Date(evt.date).getFullYear()}</div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:"var(--amber2)"}}>{evt.name}</div>
+        <div style={{color:"var(--muted)",fontSize:".73rem",marginTop:2}}>
+          {new Date(evt.date).toLocaleDateString("nl-NL",{day:"numeric",month:"long"})}
+          {evt.location&&evt.location!=="TBD"&&` · ${evt.location}`}
         </div>
       </div>
-      {!compact&&(
-        <div style={{display:"flex",alignItems:"center",marginTop:"1rem"}}>
-          <div style={{display:"flex"}}>{evt.attendees.slice(0,6).map((a,i)=><div key={i} style={{marginLeft:i===0?0:-8}}><Avatar name={a.name} size={26} {...getUA(a.name,users)}/></div>)}</div>
-          <div style={{marginLeft:10,fontSize:".76rem",color:"var(--muted)"}}>{evt.attendees.map(a=>a.name).join(", ")}</div>
+      <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+        {evt.winners?.length>0&&<span style={{fontSize:".72rem",color:"var(--gold)"}}>🏆 {evt.winners.length}</span>}
+        <span style={{fontSize:".73rem",color:"var(--muted)"}}>{going} attended</span>
+        <div style={{color:"var(--muted)",fontSize:".8rem",opacity:.4}}>›</div>
+      </div>
+    </div>
+  );
+
+  return(
+    <div className={`event-card-upcoming${isUpcoming?" glow-pulse":""}`}
+      style={{background:isUpcoming?"linear-gradient(135deg,#1a1008,#221608,#1a1008)":"var(--bg2)",border:`1px solid ${isUpcoming?"rgba(232,148,58,.3)":"var(--border)"}`,borderRadius:"var(--radius)",cursor:"pointer",position:"relative",overflow:"hidden"}}
+      onClick={()=>onOpen(evt.id)}>
+
+      {/* Top accent bar */}
+      {isUpcoming&&<div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,var(--orange),var(--amber),var(--gold),var(--amber))",backgroundSize:"200% 100%",animation:"goldShimmer 3s linear infinite"}}/>}
+
+      {/* Main content */}
+      <div style={{padding:"1.4rem",display:"flex",gap:"1.2rem",alignItems:"flex-start"}}>
+        <div style={{flex:1,minWidth:0}}>
+          {/* Tags */}
+          <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap",alignItems:"center"}}>
+            <Tag color={evt.type==="weekend"?"var(--purple)":"var(--amber)"}>{evt.type==="weekend"?"🏕️ Weekend":"📅 Day Event"}</Tag>
+            {evt.theme&&<Tag color="var(--gold)">✨ {evt.theme}</Tag>}
+            {myStatus&&(
+              <span style={{background:myStatusColor+"22",color:myStatusColor,border:`1px solid ${myStatusColor}44`,borderRadius:6,padding:"3px 10px",fontSize:".72rem",fontWeight:700}}>
+                {myStatus==="going"?"🔒 Locked In":myStatus==="maybe"?"🤔 Maybe":myStatus==="not coming"?"❌ Can't Make It":statusMap[myStatus]?.label}
+              </span>
+            )}
+          </div>
+
+          {/* Event name */}
+          <div style={{fontFamily:"var(--font-h)",fontSize:"1.5rem",color:"var(--amber2)",marginBottom:5,lineHeight:1.1}}>{evt.name}</div>
+
+          {/* Date / location */}
+          <div style={{color:"var(--muted)",fontSize:".82rem",marginBottom:8}}>
+            {new Date(evt.date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+            {evt.start_time&&<span style={{color:"var(--amber)",marginLeft:6}}>⏰ {evt.start_time}{evt.end_time&&`–${evt.end_time}`}</span>}
+            {evt.location&&evt.location!=="TBD"&&<span style={{marginLeft:6}}>· 📍 {evt.location}</span>}
+          </div>
+
+          {evt.description&&<div style={{color:"var(--cream)",opacity:.6,fontSize:".84rem",marginBottom:8,lineHeight:1.5}}>{evt.description}</div>}
+
+          {/* Lads going */}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4}}>
+            <div style={{display:"flex"}}>{evt.attendees.filter(a=>["went","going"].includes(a.status)).slice(0,6).map((a,i)=><div key={i} style={{marginLeft:i===0?0:-8,borderRadius:"50%",border:"2px solid var(--bg2)"}}><Avatar name={a.name} size={24} {...getUA(a.name,users)}/></div>)}</div>
+            {going>0&&<span style={{fontSize:".75rem",color:"var(--muted)"}}><strong style={{color:"var(--cream)"}}>{going}</strong> lad{going!==1?"s":""} {evt.archived?"attended":"in"}</span>}
+          </div>
+        </div>
+
+        {/* Right: countdown or year */}
+        <div style={{flexShrink:0,textAlign:"center"}}>
+          {isUpcoming?(
+            <div style={{background:"rgba(232,148,58,.08)",border:"1px solid rgba(232,148,58,.2)",borderRadius:12,padding:".8rem .9rem"}}>
+              <div style={{fontSize:".6rem",color:"var(--amber)",letterSpacing:".15em",textTransform:"uppercase",marginBottom:6}}>Happening in</div>
+              <div style={{display:"flex",gap:4,alignItems:"flex-end"}}>
+                {[["d","d"],["h","h"],["m","m"]].map(([k,l])=>(
+                  <div key={k} style={{textAlign:"center",minWidth:28}}>
+                    <div style={{fontFamily:"var(--font-h)",fontSize:"1.6rem",color:"var(--amber2)",lineHeight:1,fontWeight:900}}>{String(countdown[k]??0).padStart(2,"0")}</div>
+                    <div style={{fontSize:".55rem",color:"var(--muted)",letterSpacing:".1em"}}>{l}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ):(
+            <div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"2rem",color:"var(--muted2)",opacity:.35,lineHeight:1}}>{new Date(evt.date).getFullYear()}</div>
+              {evt.winners?.length>0&&<div style={{fontSize:".7rem",color:"var(--gold)",marginTop:4}}>🏆 {evt.winners.length} awards</div>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Activity sneak-peek strip */}
+      {evt.schedule&&evt.schedule.length>0&&(
+        <div style={{padding:"0 1.4rem 1.2rem",borderTop:"1px solid var(--border)"}}>
+          <div style={{fontSize:".63rem",color:"var(--muted)",letterSpacing:".15em",textTransform:"uppercase",marginBottom:8,marginTop:10}}>What's on the menu</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {evt.schedule.slice(0,6).map((s,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:5,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"5px 10px",fontSize:".76rem",color:"var(--cream)",opacity:.85}}>
+                <span style={{fontSize:"1rem"}}>{s.icon||"📍"}</span>
+                <span>{s.activity}</span>
+                {s.time&&<span style={{color:"var(--amber)",fontSize:".68rem",marginLeft:2}}>{s.time}</span>}
+              </div>
+            ))}
+            {evt.schedule.length>6&&<div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"5px 10px",fontSize:".76rem",color:"var(--muted)"}}>+{evt.schedule.length-6} more 👀</div>}
+          </div>
         </div>
       )}
     </div>
@@ -936,49 +1064,82 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
 
   return(
     <div style={{display:"grid",gap:"1.5rem"}}>
-      <Card className="fu" style={{background:"linear-gradient(135deg,#1f1609,#2e1e0a,#1a1309)",borderColor:"var(--border2)",position:"relative",overflow:"hidden"}}>
-        <div style={{position:"absolute",top:-60,right:-60,width:220,height:220,background:"radial-gradient(circle,rgba(232,148,58,.12),transparent 70%)",borderRadius:"50%",pointerEvents:"none"}}/>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:"1.5rem"}}>
-          <div style={{flex:1}}>
-            <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
-              <Tag color={evt.type==="weekend"?"var(--purple)":"var(--amber)"}>{evt.type==="weekend"?"Weekend":"Day"}</Tag>
-              {isPast&&<Tag color="var(--muted2)">Archived</Tag>}
-              {evt.theme&&<Tag color="var(--gold)">{evt.theme}</Tag>}
-            </div>
-            <H size="2rem" style={{marginBottom:".3rem"}}>{evt.name}</H>
-            <div style={{color:"var(--cream)",opacity:.7,fontSize:".9rem",marginBottom:3}}>📅 {new Date(evt.date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}{evt.start_time&&` · ⏰ ${evt.start_time}${evt.end_time?` – ${evt.end_time}`:""}`}</div>
-            <div style={{color:"var(--cream)",opacity:.7,fontSize:".9rem",marginBottom:10}}>📍 {evt.location}</div>
-            {evt.description&&<div style={{color:"var(--muted)",fontSize:".85rem",maxWidth:440}}>{evt.description}</div>}
+      {/* ── Epic event header ── */}
+      <div className="fu" style={{position:"relative",overflow:"hidden",borderRadius:"var(--radius)",border:"1px solid var(--border2)",background:"linear-gradient(135deg,#1a1008 0%,#2c1c00 45%,#1a1008 100%)"}}>
+        {/* Background glows */}
+        <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 70% 90% at 85% 40%,rgba(232,148,58,.13),transparent 65%)",pointerEvents:"none"}}/>
+        <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 50% 60% at 10% 70%,rgba(201,146,42,.07),transparent 60%)",pointerEvents:"none"}}/>
+        {/* Shimmer top bar */}
+        <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,var(--orange),var(--amber),var(--gold),var(--amber),var(--orange))",backgroundSize:"300% 100%",animation:"goldShimmer 3s linear infinite"}}/>
+
+        <div style={{padding:"2rem 1.8rem 1.5rem"}}>
+          {/* Tags */}
+          <div style={{display:"flex",gap:8,marginBottom:"1rem",flexWrap:"wrap",alignItems:"center"}}>
+            <Tag color={evt.type==="weekend"?"var(--purple)":"var(--amber)"}>{evt.type==="weekend"?"🏕️ Weekend":"📅 Day Event"}</Tag>
+            {isPast&&<Tag color="var(--muted2)">📦 Archived</Tag>}
+            {evt.theme&&<Tag color="var(--gold)">✨ {evt.theme}</Tag>}
+            {!isPast&&!countdown.past&&<span style={{background:"rgba(255,107,53,.15)",color:"var(--orange)",border:"1px solid rgba(255,107,53,.4)",borderRadius:6,padding:"3px 10px",fontSize:".72rem",fontWeight:700,letterSpacing:".06em",animation:"borderFire 2s ease-in-out infinite"}}>🔥 INCOMING</span>}
           </div>
-          {!isPast&&!countdown.past&&(
-            <div>
-              <div style={{fontSize:".62rem",color:"var(--muted)",letterSpacing:".12em",textTransform:"uppercase",textAlign:"center",marginBottom:10}}>Countdown</div>
-              <div style={{display:"flex",gap:".5rem",alignItems:"flex-end"}}>
-                {[["d","days"],["h","hrs"],["m","min"],["s","sec"]].map(([k,l],i)=>(
-                  <div key={k} style={{display:"flex",alignItems:"flex-end",gap:".5rem"}}>
-                    <CU v={countdown[k]} l={l}/>
-                    {i<3&&<div style={{color:"var(--gold)",fontSize:"1.5rem",fontWeight:100,marginBottom:8}}>:</div>}
-                  </div>
-                ))}
+
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:"1.5rem"}}>
+            <div style={{flex:1,minWidth:0}}>
+              {/* Big italic event name */}
+              <div style={{fontFamily:"var(--font-h)",fontStyle:"italic",fontSize:"clamp(1.8rem,5vw,2.8rem)",color:"var(--amber2)",lineHeight:1.05,marginBottom:".7rem",fontWeight:900,letterSpacing:"-.01em"}}>{evt.name}</div>
+
+              {/* Date + time row */}
+              <div style={{display:"flex",flexWrap:"wrap",gap:".5rem",marginBottom:".4rem",alignItems:"center"}}>
+                <span style={{color:"var(--cream)",opacity:.75,fontSize:".88rem"}}>📅 {new Date(evt.date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</span>
+                {evt.start_time&&<span style={{color:"var(--amber)",fontSize:".88rem",fontWeight:700}}>⏰ {evt.start_time}{evt.end_time&&` – ${evt.end_time}`}</span>}
               </div>
+              {evt.location&&evt.location!=="TBD"&&<div style={{color:"var(--cream)",opacity:.65,fontSize:".86rem",marginBottom:".5rem"}}>📍 {evt.location}</div>}
+              {evt.description&&<div style={{color:"var(--muted)",fontSize:".84rem",maxWidth:500,lineHeight:1.6,marginTop:".5rem"}}>{evt.description}</div>}
+
+              {/* Attending lads */}
+              {evt.attendees.filter(a=>["went","going"].includes(a.status)).length>0&&(
+                <div style={{display:"flex",alignItems:"center",gap:10,marginTop:"1.1rem"}}>
+                  <div style={{display:"flex"}}>{evt.attendees.filter(a=>["went","going"].includes(a.status)).slice(0,8).map((a,i)=><div key={i} style={{marginLeft:i===0?0:-10,borderRadius:"50%",border:"2px solid #1a1008"}}><Avatar name={a.name} size={28} {...getUA(a.name,users)}/></div>)}</div>
+                  <span style={{fontSize:".82rem",color:"var(--muted)"}}>
+                    <strong style={{color:"var(--amber2)"}}>{evt.attendees.filter(a=>["went","going"].includes(a.status)).length}</strong> lad{evt.attendees.filter(a=>["went","going"].includes(a.status)).length!==1?"s":""} {isPast?"attended":"confirmed"}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Right: countdown */}
+            {!isPast&&!countdown.past&&(
+              <div style={{flexShrink:0}}>
+                <div style={{fontSize:".6rem",color:"var(--orange)",letterSpacing:".18em",textTransform:"uppercase",textAlign:"center",marginBottom:12,fontWeight:700}}>⚡ T-MINUS</div>
+                <div style={{display:"flex",gap:".4rem",alignItems:"flex-end"}}>
+                  {[["d","days"],["h","hrs"],["m","min"],["s","sec"]].map(([k,l],i)=>(
+                    <div key={k} style={{display:"flex",alignItems:"flex-end",gap:".4rem"}}>
+                      <CU v={countdown[k]} l={l}/>
+                      {i<3&&<div style={{color:"var(--gold)",fontSize:"1.4rem",fontWeight:100,marginBottom:8}}>:</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer bar */}
+        <div style={{borderTop:"1px solid var(--border)",padding:".8rem 1.8rem",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,background:"rgba(0,0,0,.25)"}}>
+          {isAdmin?(
+            <div style={{display:"flex",gap:".5rem",flexWrap:"wrap"}}>
+              <Btn onClick={()=>setEditing(true)} variant="ghost" size="sm">✎ Edit</Btn>
+              {!isPast&&<Btn onClick={()=>onUpdate({...evt,archived:true})} variant="ghost" size="sm" style={{color:"var(--muted)"}}>Archive</Btn>}
+              {isPast&&<Btn onClick={()=>onUpdate({...evt,archived:false})} variant="ghost" size="sm">Reopen</Btn>}
+              <Btn onClick={onDelete} variant="danger" size="sm">Delete</Btn>
+            </div>
+          ):(
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <Avatar name={currentUser.username} size={22} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/>
+              <span style={{fontSize:".74rem",color:"var(--muted)"}}>Viewing as <strong style={{color:"var(--cream)"}}>{currentUser.username}</strong></span>
             </div>
           )}
+          {evt.schedule&&evt.schedule.length>0&&<span style={{fontSize:".71rem",color:"var(--muted)",letterSpacing:".05em"}}>{evt.schedule.length} activities on the menu 👀</span>}
         </div>
-        {isAdmin&&(
-          <div style={{display:"flex",gap:".6rem",marginTop:"1.2rem",flexWrap:"wrap"}}>
-            <Btn onClick={()=>setEditing(true)} variant="ghost" size="sm">✎ Edit</Btn>
-            {!isPast&&<Btn onClick={()=>onUpdate({...evt,archived:true})} variant="ghost" size="sm" style={{color:"var(--muted)"}}>Archive</Btn>}
-            {isPast&&<Btn onClick={()=>onUpdate({...evt,archived:false})} variant="ghost" size="sm">Reopen</Btn>}
-            <Btn onClick={onDelete} variant="danger" size="sm">Delete</Btn>
-          </div>
-        )}
-        {!isAdmin&&(
-          <div style={{marginTop:"1rem",display:"flex",alignItems:"center",gap:6}}>
-            <div style={{width:6,height:6,borderRadius:"50%",background:"var(--green)"}}/>
-            <span style={{fontSize:".75rem",color:"var(--muted)"}}>Logged in as <strong style={{color:"var(--cream)"}}>{currentUser.username}</strong></span>
-          </div>
-        )}
-      </Card>
+      </div>
 
       <div className="fu1" style={{display:"flex",gap:".2rem",borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
         {TABS.map(t=>(
@@ -1035,62 +1196,109 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[]})=>{
   return(
     <div style={{display:"grid",gap:"1.4rem"}}>
 
-      {/* Member self-RSVP card */}
+      {/* ── RSVP card ── */}
       {!isPast&&can.updateRsvp(currentUser)&&(
-        <Card style={{background:"linear-gradient(135deg,#1a1309,#241b0e)",borderColor:"var(--border2)"}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"1rem"}}>
-            <div style={{display:"flex",alignItems:"center",gap:12}}>
-              <Avatar name={currentUser.username} size={40} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/>
-              <div>
-                <div style={{fontWeight:600,fontSize:"1rem"}}>{currentUser.username}</div>
-                <div style={{fontSize:".78rem",color:"var(--muted)",marginTop:2}}>
-                  {myEntry?"Your current status:":"You're not on the list yet — RSVP below"}
-                  {myEntry&&<strong style={{color:colorOf(myEntry.status),marginLeft:6}}>{statusMap[myEntry.status]?.label}</strong>}
-                </div>
+        <Card style={{background:"linear-gradient(135deg,#1e1508,#291a08)",borderColor:"var(--border2)",position:"relative",overflow:"hidden"}}>
+          <div style={{position:"absolute",top:-40,right:-40,width:140,height:140,background:"radial-gradient(circle,rgba(232,148,58,.1),transparent 70%)",borderRadius:"50%",pointerEvents:"none"}}/>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1rem"}}>
+            <Avatar name={currentUser.username} size={38} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/>
+            <div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"1.05rem",color:"var(--amber2)",fontWeight:700}}>{currentUser.username}</div>
+              <div style={{fontSize:".75rem",color:"var(--muted)",marginTop:1}}>
+                {myEntry?<>Current status: <strong style={{color:colorOf(myEntry.status)}}>{statusMap[myEntry.status]?.label}</strong></>:"Not on the list yet — lock in your spot"}
               </div>
             </div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {statusOpts.map(s=>(
-                <button key={s} onClick={()=>selfRsvp(s)} style={{
-                  background:myEntry?.status===s?colorOf(s)+"33":"var(--bg3)",
-                  border:`2px solid ${myEntry?.status===s?colorOf(s):colorOf(s)+"44"}`,
-                  color:colorOf(s),borderRadius:"var(--radius-sm)",padding:"8px 16px",cursor:"pointer",
-                  fontFamily:"var(--font-b)",fontWeight:600,fontSize:".85rem",transition:"all .18s",
+          </div>
+          <div style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--cream)",opacity:.85,marginBottom:".8rem",fontStyle:"italic"}}>Are you coming? Make it official.</div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            {[{s:"going",emoji:"🔥",label:"I'm In"},{s:"maybe",emoji:"🤔",label:"Maybe"},{s:"not coming",emoji:"❌",label:"Can't Make It"}].map(({s,emoji,label})=>{
+              const sel=myEntry?.status===s;
+              const c=colorOf(s);
+              return(
+                <button key={s} className="rsvp-btn" onClick={()=>selfRsvp(s)} style={{
+                  background:sel?`${c}22`:"transparent",
+                  border:`2px solid ${sel?c:`${c}40`}`,
+                  color:sel?c:"var(--muted)",
+                  borderRadius:"var(--radius-sm)",padding:"10px 20px",cursor:"pointer",
+                  fontFamily:"var(--font-b)",fontWeight:700,fontSize:".88rem",
+                  display:"flex",alignItems:"center",gap:7,
+                  boxShadow:sel?`0 0 18px ${c}30`:"none",
                 }}>
-                  {statusMap[s]?.label}
+                  <span style={{fontSize:"1.15rem"}}>{emoji}</span>
+                  {label}
+                  {sel&&<span style={{fontSize:".62rem",letterSpacing:".08em",opacity:.75,marginLeft:2}}>✓</span>}
                 </button>
-              ))}
-            </div>
+              );
+            })}
           </div>
         </Card>
       )}
 
-      {/* Schedule */}
-      <Card>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.2rem"}}>
-          <H style={{marginBottom:0}}>Schedule</H>
+      {/* ── Schedule — Sneak Peek ── */}
+      <Card style={{background:"linear-gradient(135deg,var(--bg2),#1c1408)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"1.2rem"}}>
+          <div>
+            <H style={{marginBottom:3}}>{isPast?"📋 What Went Down":"👀 What's on the Menu"}</H>
+            {!isPast&&evt.schedule.length>0&&<div style={{fontSize:".75rem",color:"var(--muted)"}}>The agenda is locked. Here's a taste of what's coming.</div>}
+          </div>
           {isAdmin&&<Btn onClick={()=>setEditSched(true)} variant="ghost" size="sm">✎ Edit</Btn>}
         </div>
-        {evt.schedule.length===0&&<div style={{color:"var(--muted)",fontSize:".85rem"}}>No schedule yet.</div>}
-        {evt.schedule.map((s,i)=>(
-          <div key={i} style={{display:"flex",position:"relative"}}>
-            {i<evt.schedule.length-1&&<div style={{position:"absolute",left:70,top:36,bottom:0,width:2,background:"linear-gradient(to bottom,rgba(232,148,58,.4),rgba(232,148,58,.08))",zIndex:0}}/>}
-            <div style={{minWidth:58,textAlign:"right",paddingTop:10,paddingRight:12,color:"var(--amber)",fontWeight:600,fontSize:".8rem",flexShrink:0}}>{s.time}</div>
-            <div style={{position:"relative",zIndex:1,flexShrink:0,marginRight:14,paddingTop:8}}>
-              <div style={{width:26,height:26,borderRadius:"50%",background:"var(--bg3)",border:"2px solid var(--amber)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px"}}>{s.icon||"📍"}</div>
-            </div>
-            <div style={{flex:1,paddingBottom:i<evt.schedule.length-1?"1.4rem":0,paddingTop:8}}>
-              <div style={{fontWeight:600,fontSize:".93rem",color:"var(--cream)",marginBottom:3}}>{s.activity}</div>
-              {s.location&&(
-                <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:s.note?3:0}}>
-                  <span style={{fontSize:".76rem",color:"var(--muted)"}}>📍</span>
-                  {s.locationUrl?<a href={s.locationUrl} target="_blank" rel="noreferrer" style={{fontSize:".78rem",color:"var(--amber)",textDecoration:"none",borderBottom:"1px solid rgba(232,148,58,.3)"}}>{s.location} ↗</a>:<span style={{fontSize:".78rem",color:"var(--muted)"}}>{s.location}</span>}
-                </div>
-              )}
-              {s.note&&<div style={{fontSize:".76rem",color:"var(--muted2)",fontStyle:"italic",marginTop:3,background:"var(--bg3)",borderRadius:6,padding:"3px 8px",display:"inline-block"}}>💬 {s.note}</div>}
-            </div>
+
+        {evt.schedule.length===0&&(
+          <div style={{textAlign:"center",padding:"2.5rem 1rem",color:"var(--muted)"}}>
+            <div style={{fontSize:"2.5rem",marginBottom:".6rem"}}>🔒</div>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--amber2)",marginBottom:".3rem"}}>Schedule under wraps</div>
+            <div style={{fontSize:".8rem"}}>The lads don't need to know yet.</div>
+            {isAdmin&&<div style={{marginTop:".6rem",fontSize:".75rem",color:"var(--amber)"}}>Add activities with Edit ↑</div>}
           </div>
-        ))}
+        )}
+
+        <div style={{display:"grid",gap:".55rem"}}>
+          {evt.schedule.map((s,i)=>(
+            <div key={i} className="schedule-card" style={{
+              display:"flex",alignItems:"center",gap:"1rem",
+              background:isPast?"var(--bg3)":"linear-gradient(90deg,rgba(29,20,8,.9),rgba(21,14,4,.7))",
+              border:`1px solid ${isPast?"var(--border)":"rgba(232,148,58,.18)"}`,
+              borderRadius:"var(--radius-sm)",padding:".8rem 1rem",
+              position:"relative",overflow:"hidden",
+              animationDelay:`${i*.07}s`,
+            }}>
+              {/* Left accent */}
+              <div style={{position:"absolute",left:0,top:0,bottom:0,width:3,background:isPast?"linear-gradient(to bottom,var(--muted2),var(--muted))":"linear-gradient(to bottom,var(--amber),var(--gold))",opacity:isPast?.4:.7}}/>
+
+              {/* Icon bubble */}
+              <div style={{
+                width:42,height:42,borderRadius:11,flexShrink:0,
+                background:isPast?"var(--bg4)":"rgba(232,148,58,.1)",
+                border:`1px solid ${isPast?"var(--border)":"rgba(232,148,58,.28)"}`,
+                display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.25rem",
+              }}>{s.icon||"📍"}</div>
+
+              {/* Time */}
+              {s.time&&<div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:isPast?"var(--muted)":"var(--amber)",fontWeight:700,flexShrink:0,minWidth:40,textAlign:"center"}}>{s.time}</div>}
+
+              {/* Content */}
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:600,fontSize:".92rem",color:isPast?"var(--cream)":"var(--amber2)",marginBottom:2}}>{s.activity}</div>
+                {s.location&&(
+                  <div style={{display:"flex",alignItems:"center",gap:4}}>
+                    {s.locationUrl
+                      ?<a href={s.locationUrl} target="_blank" rel="noreferrer" style={{fontSize:".74rem",color:"var(--amber)",textDecoration:"none",opacity:.8}}>📍 {s.location} ↗</a>
+                      :<span style={{fontSize:".74rem",color:"var(--muted)"}}>📍 {s.location}</span>
+                    }
+                  </div>
+                )}
+                {s.note&&<div style={{fontSize:".72rem",color:"var(--muted)",fontStyle:"italic",marginTop:2}}>💬 {s.note}</div>}
+              </div>
+
+              {/* Right badge */}
+              {isPast
+                ?<div style={{flexShrink:0,fontSize:".62rem",color:"var(--green)",letterSpacing:".1em",textTransform:"uppercase",opacity:.7,fontWeight:700}}>✓ Done</div>
+                :<div style={{flexShrink:0,fontSize:".62rem",color:"var(--amber)",letterSpacing:".1em",textTransform:"uppercase",opacity:.65,fontWeight:700}}>Revealed</div>
+              }
+            </div>
+          ))}
+        </div>
         {editSched&&<EditScheduleModal evt={evt} onSave={sched=>{onUpdate({...evt,schedule:sched});setEditSched(false)}} onClose={()=>setEditSched(false)}/>}
       </Card>
 
