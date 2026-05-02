@@ -423,35 +423,20 @@ const PendingScreen = ({user,onLogout}) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // NAV
 // ─────────────────────────────────────────────────────────────────────────────
-const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onMarkNotifRead}) => {
+const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onUpdates}) => {
   const [menuOpen,setMenuOpen]=useState(false);
-  const [notifOpen,setNotifOpen]=useState(false);
   const isMobile=useIsMobile();
   const unread=notifications.filter(n=>n.timestamp>notifLastRead).length;
-  const typeIcon={rsvp:"📅",faq:"❓",answer:"💬",photo:"📷"};
-  const timeAgo=ts=>{const d=Date.now()-new Date(ts);if(d<60000)return"zojuist";if(d<3600000)return`${Math.floor(d/60000)} min geleden`;if(d<86400000)return`${Math.floor(d/3600000)} uur geleden`;return`${Math.floor(d/86400000)} d geleden`;};
   useEffect(()=>{
-    if(!notifOpen&&!menuOpen)return;
-    const close=()=>{setNotifOpen(false);setMenuOpen(false);};
+    if(!menuOpen)return;
+    const close=()=>setMenuOpen(false);
     document.addEventListener("click",close);
     return()=>document.removeEventListener("click",close);
-  },[notifOpen,menuOpen]);
-  const notifList=(
-    <div>
-      <div style={{padding:"10px 14px",borderBottom:"1px solid var(--border)",fontSize:".75rem",color:"var(--muted)",fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>Activiteit</div>
-      {notifications.length===0
-        ?<div style={{padding:"2rem",textAlign:"center",color:"var(--muted)",fontSize:".83rem"}}>Nog geen activiteit</div>
-        :notifications.map(n=>(
-          <div key={n.id} className="notif-item" style={{padding:"10px 14px",borderBottom:"1px solid var(--border)",display:"flex",gap:10,alignItems:"flex-start"}}>
-            <span style={{fontSize:"1rem",flexShrink:0}}>{typeIcon[n.type]||"•"}</span>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:".83rem",color:"var(--cream)",wordBreak:"break-word"}}>{n.message}</div>
-              <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{n.event} · {timeAgo(n.timestamp)}</div>
-            </div>
-          </div>
-        ))
-      }
-    </div>
+  },[menuOpen]);
+  const bellBtn=(mobile=false)=>(
+    <button onClick={onUpdates} className="nav-btn" style={{position:"relative",background:view==="updates"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:mobile?"6px 10px":"5px 12px",cursor:"pointer",fontSize:mobile?"1rem":".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>
+      📬{unread>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}
+    </button>
   );
   return(
     <nav style={{position:"fixed",top:0,left:0,right:0,zIndex:200,background:"rgba(15,11,7,.94)",backdropFilter:"blur(14px)",borderBottom:"1px solid var(--border)"}}>
@@ -459,7 +444,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
         <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}}>
           {view!=="home"&&<button onClick={onBack} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Terug</button>}
           <div onClick={onHome} onMouseEnter={e=>e.currentTarget.style.opacity=".72"} onMouseLeave={e=>e.currentTarget.style.opacity=""} style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer",transition:"opacity .15s"}}>
-            {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":eventName}
+            {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":eventName}
           </div>
         </div>
         {!isMobile&&(
@@ -468,10 +453,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
             <button onClick={onHof} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
             {can.announce(currentUser)&&<button onClick={onAnnounce} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>📢 Announce</button>}
             {can.manageUsers(currentUser)&&<button onClick={onAdmin} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
-            <div style={{position:"relative"}} onClick={e=>e.stopPropagation()}>
-              <button onClick={()=>{const o=!notifOpen;setNotifOpen(o);setMenuOpen(false);if(o&&unread>0)onMarkNotifRead();}} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🔔{unread>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}</button>
-              {notifOpen&&<div onClick={e=>e.stopPropagation()} style={{position:"absolute",right:0,top:"calc(100% + 8px)",width:300,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:"var(--radius)",boxShadow:"0 8px 32px rgba(0,0,0,.5)",zIndex:300,maxHeight:360,overflowY:"auto"}}>{notifList}</div>}
-            </div>
+            {bellBtn()}
             <div style={{display:"flex",alignItems:"center",gap:7,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"5px 12px"}}>
               <Avatar name={currentUser.username} size={22} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/>
               <span style={{fontSize:".8rem",color:"var(--cream)"}}>{currentUser.username}</span>
@@ -482,10 +464,8 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
         )}
         {isMobile&&(
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-            <div style={{position:"relative"}} onClick={e=>e.stopPropagation()}>
-              <button onClick={()=>{const o=!notifOpen;setNotifOpen(o);setMenuOpen(false);if(o&&unread>0)onMarkNotifRead();}} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"6px 10px",cursor:"pointer",fontSize:"1rem"}}>🔔{unread>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}</button>
-            </div>
-            <button onClick={e=>{e.stopPropagation();setMenuOpen(o=>!o);setNotifOpen(false);}} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"6px 11px",cursor:"pointer",fontSize:"1.1rem",lineHeight:1}}>
+            {bellBtn(true)}
+            <button onClick={e=>{e.stopPropagation();setMenuOpen(o=>!o);}} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"6px 11px",cursor:"pointer",fontSize:"1.1rem",lineHeight:1}}>
               {menuOpen?"✕":"☰"}{!menuOpen&&pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}
             </button>
           </div>
@@ -502,9 +482,6 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
             <button onClick={()=>{onLogout();setMenuOpen(false);}} className="nav-logout" style={{background:"transparent",border:"1px solid rgba(224,85,85,.3)",borderRadius:8,color:"var(--red)",padding:"6px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s ease"}}>Uitloggen</button>
           </div>
         </div>
-      )}
-      {isMobile&&notifOpen&&(
-        <div onClick={e=>e.stopPropagation()} style={{background:"rgba(15,11,7,.98)",borderBottom:"1px solid var(--border)",maxHeight:300,overflowY:"auto"}}>{notifList}</div>
       )}
     </nav>
   );
@@ -2587,30 +2564,126 @@ const NewEventModal=({onSave,onClose,users=[]})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 const diffEvents=(prev,next)=>{
   const acts=[];
+  const now=new Date().toISOString();
   next.forEach(evt=>{
     const old=prev.find(e=>e.id===evt.id);
     if(!old)return;
+    const eid=evt.id,en=evt.name;
+    // FAQs
     (evt.faqs||[]).forEach(faq=>{
       if(!(old.faqs||[]).find(f=>f.id===faq.id))
-        acts.push({id:faq.id,type:"faq",message:`${faq.askedBy} stelde een vraag`,event:evt.name,timestamp:faq.askedAt});
+        acts.push({id:faq.id,type:"faq",message:`${faq.askedBy} stelde een vraag`,event:en,eventId:eid,timestamp:faq.askedAt});
     });
     (evt.faqs||[]).forEach(faq=>{
-      const oldFaq=(old.faqs||[]).find(f=>f.id===faq.id);
-      if(oldFaq&&!oldFaq.answer&&faq.answer)
-        acts.push({id:`ans-${faq.id}`,type:"answer",message:`${faq.answeredBy} beantwoordde een vraag`,event:evt.name,timestamp:faq.answeredAt});
+      const of=(old.faqs||[]).find(f=>f.id===faq.id);
+      if(of&&!of.answer&&faq.answer)
+        acts.push({id:`ans-${faq.id}`,type:"answer",message:`Vraag beantwoord door ${faq.answeredBy}`,event:en,eventId:eid,timestamp:faq.answeredAt});
     });
+    // RSVP
     (evt.attendees||[]).forEach(att=>{
-      const oldAtt=(old.attendees||[]).find(a=>a.name===att.name);
-      if(oldAtt&&oldAtt.status!==att.status)
-        acts.push({id:`rsvp-${att.name}-${evt.id}-${att.status}`,type:"rsvp",message:`${att.name}: ${statusMap[att.status]?.label||att.status}`,event:evt.name,timestamp:new Date().toISOString()});
+      const oa=(old.attendees||[]).find(a=>a.name===att.name);
+      if(oa&&oa.status!==att.status)
+        acts.push({id:`rsvp-${att.name}-${eid}-${att.status}`,type:"rsvp",message:`${att.name}: ${statusMap[att.status]?.label||att.status}`,event:en,eventId:eid,timestamp:now});
     });
+    // Photos
     const oldPhotoIds=new Set((old.photos||[]).map(p=>p.id));
     (evt.photos||[]).forEach(photo=>{
       if(!oldPhotoIds.has(photo.id))
-        acts.push({id:photo.id,type:"photo",message:`${photo.uploader} uploadde een foto`,event:evt.name,timestamp:photo.uploadedAt});
+        acts.push({id:photo.id,type:"photo",message:`${photo.uploader} uploadde een foto`,event:en,eventId:eid,timestamp:photo.uploadedAt});
     });
+    // Polls — new poll
+    (evt.polls||[]).forEach(poll=>{
+      if(!(old.polls||[]).find(p=>p.id===poll.id))
+        acts.push({id:`poll-new-${poll.id}`,type:"poll",message:`Nieuwe poll: "${poll.title}"`,event:en,eventId:eid,timestamp:now});
+    });
+    // Polls — poll closed
+    (evt.polls||[]).forEach(poll=>{
+      const op=(old.polls||[]).find(p=>p.id===poll.id);
+      if(op&&!op.closed&&poll.closed)
+        acts.push({id:`poll-close-${poll.id}`,type:"poll",message:`Poll resultaten: "${poll.title}"`,event:en,eventId:eid,timestamp:now});
+    });
+    // Schedule — new stops added
+    const oldLen=(old.schedule||[]).length,newLen=(evt.schedule||[]).length;
+    if(newLen>oldLen)
+      acts.push({id:`sched-${eid}-${newLen}`,type:"schedule",message:`${newLen-oldLen} activiteit${newLen-oldLen>1?"en":""} toegevoegd aan het programma`,event:en,eventId:eid,timestamp:now});
+    // Location changed
+    if(old.location&&evt.location&&old.location!==evt.location)
+      acts.push({id:`loc-${eid}-${evt.location}`,type:"schedule",message:`Locatie gewijzigd: ${evt.location}`,event:en,eventId:eid,timestamp:now});
+    // Start time changed
+    if(old.start_time&&evt.start_time&&old.start_time!==evt.start_time)
+      acts.push({id:`time-${eid}-${evt.start_time}`,type:"schedule",message:`Starttijd gewijzigd: ${evt.start_time}`,event:en,eventId:eid,timestamp:now});
+    // Quizzes
+    (evt.quizzes||[]).forEach(quiz=>{
+      if(!(old.quizzes||[]).find(q=>q.id===quiz.id))
+        acts.push({id:`quiz-new-${quiz.id}`,type:"quiz",message:`Nieuwe quiz beschikbaar: "${quiz.title}"`,event:en,eventId:eid,timestamp:now});
+    });
+    // Winners announced
+    const ow=(old.winners||[]).length,nw=(evt.winners||[]).length;
+    if(nw>ow)
+      acts.push({id:`win-${eid}-${nw}`,type:"winners",message:`Winnaars bekendgemaakt!`,event:en,eventId:eid,timestamp:now});
   });
   return acts;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UPDATES PAGE
+// ─────────────────────────────────────────────────────────────────────────────
+const UpdatesPage=({notifications,notifLastRead,onMarkAllRead,onOpenEvent})=>{
+  const typeIcon={rsvp:"📅",faq:"❓",answer:"💬",photo:"📷",poll:"📊",schedule:"🗓",quiz:"🧠",winners:"🏆"};
+  const typeLabel={rsvp:"RSVP",faq:"Nieuwe vraag",answer:"Vraag beantwoord",photo:"Foto",poll:"Poll",schedule:"Programma",quiz:"Quiz",winners:"Winnaars"};
+  const typeColor={rsvp:"var(--amber)",faq:"#7c6cfc",answer:"#56b4a0",photo:"#e08050",poll:"var(--amber2)",schedule:"var(--gold)",quiz:"#c46eff",winners:"var(--gold)"};
+  const timeAgo=ts=>{const d=Date.now()-new Date(ts);if(d<60000)return"zojuist";if(d<3600000)return`${Math.floor(d/60000)}m geleden`;if(d<86400000)return`${Math.floor(d/3600000)}u geleden`;return`${Math.floor(d/86400000)}d geleden`;};
+  const unread=notifications.filter(n=>n.timestamp>notifLastRead);
+  const read=notifications.filter(n=>n.timestamp<=notifLastRead);
+  const Item=({n,isNew})=>(
+    <div onClick={()=>n.eventId&&onOpenEvent(n.eventId)}
+      onMouseEnter={e=>{e.currentTarget.style.background="var(--bg3)";e.currentTarget.style.borderColor="var(--border2)";}}
+      onMouseLeave={e=>{e.currentTarget.style.background=isNew?"rgba(232,148,58,.04)":"var(--bg2)";e.currentTarget.style.borderColor="var(--border)";}}
+      style={{display:"flex",gap:"1rem",alignItems:"flex-start",padding:".9rem 1.1rem",borderRadius:"var(--radius-sm)",border:`1px solid ${isNew?"rgba(232,148,58,.2)":"var(--border)"}`,background:isNew?"rgba(232,148,58,.04)":"var(--bg2)",cursor:n.eventId?"pointer":"default",transition:"background .15s,border-color .15s",marginBottom:".5rem"}}>
+      <div style={{flexShrink:0,width:36,height:36,borderRadius:"50%",background:`${typeColor[n.type]||"var(--muted)"}22`,border:`1px solid ${typeColor[n.type]||"var(--muted)"}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1rem",marginTop:1}}>
+        {typeIcon[n.type]||"•"}
+      </div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3,flexWrap:"wrap"}}>
+          <span style={{fontSize:".68rem",fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:typeColor[n.type]||"var(--muted)"}}>{typeLabel[n.type]||n.type}</span>
+          {isNew&&<span style={{width:6,height:6,borderRadius:"50%",background:"var(--amber)",display:"inline-block",flexShrink:0}}/>}
+        </div>
+        <div style={{fontSize:".88rem",color:"var(--cream)",lineHeight:1.4}}>{n.message}</div>
+        <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:3}}>{n.event} · {timeAgo(n.timestamp)}</div>
+      </div>
+      {n.eventId&&<div style={{color:"var(--muted)",fontSize:".8rem",alignSelf:"center",flexShrink:0,opacity:.5}}>›</div>}
+    </div>
+  );
+  return(
+    <div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.5rem",flexWrap:"wrap",gap:8}}>
+        <div>
+          <H style={{marginBottom:2}}>📬 Updates</H>
+          <div style={{fontSize:".78rem",color:"var(--muted)"}}>{unread.length>0?`${unread.length} nieuw`:"Alles bijgewerkt"}</div>
+        </div>
+        {unread.length>0&&<Btn onClick={onMarkAllRead} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"rgba(232,148,58,.3)"}}>✓ Alles gelezen</Btn>}
+      </div>
+      {notifications.length===0&&(
+        <div style={{textAlign:"center",padding:"4rem 1rem",color:"var(--muted)"}}>
+          <div style={{fontSize:"2.5rem",marginBottom:"1rem"}}>📭</div>
+          <div style={{fontSize:".9rem"}}>Nog geen updates</div>
+          <div style={{fontSize:".78rem",marginTop:6,opacity:.6}}>Nieuwe polls, schema-wijzigingen, vragen — alles verschijnt hier</div>
+        </div>
+      )}
+      {unread.length>0&&(
+        <div style={{marginBottom:"1.5rem"}}>
+          <div style={{fontSize:".68rem",fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:"var(--amber)",marginBottom:".65rem"}}>Nieuw · {unread.length}</div>
+          {unread.map(n=><Item key={n.id} n={n} isNew={true}/>)}
+        </div>
+      )}
+      {read.length>0&&(
+        <div>
+          {unread.length>0&&<div style={{fontSize:".68rem",fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:"var(--muted)",marginBottom:".65rem",marginTop:"1.2rem"}}>Eerder</div>}
+          {read.map(n=><Item key={n.id} n={n} isNew={false}/>)}
+        </div>
+      )}
+    </div>
+  );
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2630,6 +2703,10 @@ export default function App(){
   const [editingProfile,setEditingProfile]=useState(false);
   const [notifications,setNotifications]=useState([]);
   const [notifLastRead,setNotifLastRead]=useState(()=>localStorage.getItem("notif-read")||"");
+  useEffect(()=>{
+    if(!currentUser)return;
+    try{const s=JSON.parse(localStorage.getItem(`md-notifs-${currentUser.id}`)||"[]");setNotifications(s);}catch{}
+  },[currentUser?.id]);
   const [announcements,setAnnouncements]=useState(()=>{try{return JSON.parse(localStorage.getItem("md-announcements")||"[]");}catch{return[];}});
   const [showAnnounce,setShowAnnounce]=useState(false);
   const [editingAnn,setEditingAnn]=useState(null);
@@ -2675,7 +2752,17 @@ export default function App(){
       supabase.from("events").select("*").order("date").then(({data})=>{
         if(data){
           const newActs=diffEvents(eventsRef.current,data);
-          if(newActs.length)setNotifications(prev=>[...newActs,...prev].slice(0,50));
+          if(newActs.length){
+            setNotifications(prev=>{
+              const ids=new Set(prev.map(n=>n.id));
+              const fresh=newActs.filter(n=>!ids.has(n.id));
+              if(!fresh.length)return prev;
+              const next=[...fresh,...prev].slice(0,100);
+              const cu=currentUserRef.current;
+              if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));
+              return next;
+            });
+          }
           setEvents(data);
         }
       });
@@ -2783,7 +2870,7 @@ export default function App(){
   return(
     <div style={{minHeight:"100vh",background:"var(--bg)"}}>
       <GS/>
-      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onMarkNotifRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}}/>
+      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onUpdates={()=>setPageView("updates")}/>
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
         <AnnouncementBanner announcements={announcements} currentUser={currentUser} onArchive={archiveAnnouncement} onHardDelete={hardDeleteAnnouncement} onReactivate={reactivateAnnouncement} onEdit={ann=>{setEditingAnn(ann);setShowAnnounce(true);}} onNew={()=>{setEditingAnn(null);setShowAnnounce(true);}}/>
         {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users}/>}
@@ -2791,6 +2878,7 @@ export default function App(){
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
         {pageView==="event"&&activeEvent&&<EventPage evt={activeEvent} onUpdate={updateEvent} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users}/>}
+        {pageView==="updates"&&<UpdatesPage notifications={notifications} notifLastRead={notifLastRead} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={id=>{openEvent(id);}}/>}
       </main>
       <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted2)",fontSize:".72rem",borderTop:"1px solid var(--border)",letterSpacing:".1em"}}>🍺 MensApp · Built for the lads</div>
       {showAdmin&&<AdminPanel users={users} onUpdateUsers={updateUsers} onDeleteUser={deleteUser} onClose={()=>setShowAdmin(false)}/>}
