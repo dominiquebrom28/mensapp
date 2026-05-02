@@ -899,7 +899,7 @@ const Home = ({events,onOpen,onNew,currentUser,users=[]}) => {
   const nextEvt=upcoming[0];
   const goingLads=nextEvt?nextEvt.attendees.filter(a=>a.status==="going"):[];
   const totalEditions=events.length;
-  const kretjes=events.filter(e=>e.archived).reduce((s,e)=>s+(e.attendees?.filter(a=>a.status==="went").length||0),0);
+  const kretjes=events.reduce((s,e)=>s+(e.kretjes||0),0);
   const hypers=["No excuses. No mercy. Just lads.","The brotherhood doesn't sleep.","Every year. No matter what.","Legends are made here.","It's that time again."];
   const hype=hypers[(new Date().getMonth()+new Date().getDate())%hypers.length];
   return(
@@ -1088,7 +1088,7 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // EVENT PAGE
 // ─────────────────────────────────────────────────────────────────────────────
-const TABS=["Overview","Polls","Quiz","Photos","Winners & Highlights","FAQ"];
+const TABS=["Overview","Polls","Quiz","Photos","Winners & Highlights","FAQ","Kretjes 🍺"];
 
 const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
   const [tab,setTab]=useState("Overview");
@@ -1194,6 +1194,7 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
         {tab==="Photos"               &&<PhotosTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast}/>}
         {tab==="FAQ"                  &&<FAQTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
+        {tab==="Kretjes 🍺"           &&<KretjesTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
       </div>
 
       {editing&&<EditEventModal evt={evt} users={users} onSave={u=>{onUpdate(u);setEditing(false)}} onClose={()=>setEditing(false)}/>}
@@ -2202,6 +2203,52 @@ const FAQTab=({evt,onUpdate,currentUser})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // ANNOUNCEMENTS
 // ─────────────────────────────────────────────────────────────────────────────
+const KretjesTab=({evt,onUpdate,currentUser})=>{
+  const count=evt.kretjes||0;
+  const canEdit=ACTIVE_ROLES.includes(currentUser?.role);
+  const change=delta=>{
+    if(!canEdit)return;
+    const next=Math.max(0,count+delta);
+    onUpdate({...evt,kretjes:next});
+  };
+  const btnStyle=(disabled)=>({
+    width:64,height:64,borderRadius:"50%",border:"2px solid rgba(232,148,58,.4)",
+    background:disabled?"var(--bg3)":"rgba(232,148,58,.1)",
+    color:disabled?"var(--muted)":"var(--amber2)",cursor:disabled?"default":"pointer",
+    fontSize:"2rem",fontWeight:300,lineHeight:1,
+    display:"flex",alignItems:"center",justifyContent:"center",
+    transition:"all .15s",fontFamily:"var(--font-b)",flexShrink:0,
+  });
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"3rem 1rem",gap:"2rem"}}>
+      <div style={{textAlign:"center"}}>
+        <div style={{fontSize:"3rem",marginBottom:".4rem"}}>🍺</div>
+        <div style={{fontFamily:"var(--font-h)",fontSize:".75rem",color:"var(--muted)",letterSpacing:".18em",textTransform:"uppercase"}}>Kretjes deze editie</div>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:"2rem"}}>
+        <button
+          style={btnStyle(!canEdit||count===0)}
+          disabled={!canEdit||count===0}
+          onMouseEnter={e=>{if(canEdit&&count>0){e.currentTarget.style.background="rgba(232,148,58,.2)";e.currentTarget.style.borderColor="var(--amber)";}}}
+          onMouseLeave={e=>{e.currentTarget.style.background="rgba(232,148,58,.1)";e.currentTarget.style.borderColor="rgba(232,148,58,.4)";}}
+          onClick={()=>change(-1)}>−</button>
+        <div style={{textAlign:"center",minWidth:120}}>
+          <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(4rem,12vw,7rem)",color:"var(--amber2)",lineHeight:1,fontWeight:900,letterSpacing:"-.02em"}}>{count}</div>
+        </div>
+        <button
+          style={btnStyle(!canEdit)}
+          disabled={!canEdit}
+          onMouseEnter={e=>{if(canEdit){e.currentTarget.style.background="rgba(232,148,58,.2)";e.currentTarget.style.borderColor="var(--amber)";}}}
+          onMouseLeave={e=>{e.currentTarget.style.background="rgba(232,148,58,.1)";e.currentTarget.style.borderColor="rgba(232,148,58,.4)";}}
+          onClick={()=>change(1)}>+</button>
+      </div>
+      <div style={{fontSize:".78rem",color:"var(--muted)",textAlign:"center",maxWidth:260,lineHeight:1.6}}>
+        {canEdit?"Tap + of − om het aantal bij te werken. Telt mee in de totaaltelling op de homepage.":"Alleen actieve lads kunnen het aantal aanpassen."}
+      </div>
+    </div>
+  );
+};
+
 const renderMd=text=>{
   if(!text)return"";
   const inline=s=>s
@@ -2544,7 +2591,7 @@ const EditEventModal=({evt,onSave,onClose,users=[]})=>{
 
 const NewEventModal=({onSave,onClose,users=[]})=>{
   const yr=new Date().getFullYear();
-  const [d,setD]=useState({name:`Mensday ${yr}`,type:"day",date:`${yr}-09-13`,start_time:"12:00",end_time:"",location:"TBD",description:"",theme:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false});
+  const [d,setD]=useState({name:`Mensday ${yr}`,type:"day",date:`${yr}-09-13`,start_time:"12:00",end_time:"",location:"TBD",description:"",theme:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false,kretjes:0});
   return(
     <Modal onClose={onClose} maxWidth={500}><H>New Event</H>
     <div style={{display:"grid",gap:".85rem"}}>
