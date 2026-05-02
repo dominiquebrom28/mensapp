@@ -1083,7 +1083,7 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
           )}
           </div>
         </div>
-        {evt.description&&<div style={{color:"var(--cream)",opacity:.6,fontSize:".84rem",lineHeight:1.5,marginTop:".75rem",borderTop:"1px solid rgba(232,148,58,.08)",paddingTop:".7rem"}}>{evt.description}</div>}
+        {evt.description&&<div style={{color:"var(--cream)",opacity:.6,fontSize:".84rem",lineHeight:1.5,marginTop:".75rem",borderTop:"1px solid rgba(232,148,58,.08)",paddingTop:".7rem"}} dangerouslySetInnerHTML={{__html:renderMd(evt.description)}}/>}
       </div>
 
       {/* Activity sneak-peek strip */}
@@ -1176,7 +1176,7 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
               </div>
             )}
           </div>
-          {evt.description&&<div style={{color:"var(--muted)",fontSize:".86rem",lineHeight:1.7,marginTop:"1rem",borderTop:"1px solid rgba(232,148,58,.1)",paddingTop:".9rem"}}>{evt.description}</div>}
+          {evt.description&&<div style={{color:"var(--muted)",fontSize:".86rem",lineHeight:1.7,marginTop:"1rem",borderTop:"1px solid rgba(232,148,58,.1)",paddingTop:".9rem"}} dangerouslySetInnerHTML={{__html:renderMd(evt.description)}}/>}
         </div>
 
         {/* Footer bar */}
@@ -2225,16 +2225,29 @@ const FAQTab=({evt,onUpdate,currentUser})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 const renderMd=text=>{
   if(!text)return"";
-  return text
-    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  const inline=s=>s
     .replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>")
     .replace(/\*(.+?)\*/g,"<em>$1</em>")
     .replace(/~~(.+?)~~/g,"<del>$1</del>")
-    .replace(/`(.+?)`/g,"<code style='background:rgba(255,255,255,.1);padding:1px 6px;border-radius:4px;font-family:monospace;font-size:.9em'>$1</code>")
-    .replace(/\n/g,"<br/>");
+    .replace(/`(.+?)`/g,"<code style='background:rgba(255,255,255,.1);padding:1px 6px;border-radius:4px;font-family:monospace;font-size:.9em'>$1</code>");
+  const safe=text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const lines=safe.split("\n");
+  let html="",listItems=[],lastWasList=false;
+  for(let i=0;i<lines.length;i++){
+    const m=lines[i].match(/^[-*]\s+(.*)/);
+    if(m){listItems.push(`<li>${inline(m[1])}</li>`);}
+    else{
+      if(listItems.length){html+=`<ul style='margin:.25em 0 .35em 1.3em;padding:0'>${listItems.join("")}</ul>`;listItems=[];lastWasList=true;}
+      else lastWasList=false;
+      if(html&&!lastWasList)html+="<br/>";
+      html+=inline(lines[i]);lastWasList=false;
+    }
+  }
+  if(listItems.length)html+=`<ul style='margin:.25em 0 .35em 1.3em;padding:0'>${listItems.join("")}</ul>`;
+  return html;
 };
 
-const RichTextInput=({value,onChange,placeholder})=>{
+const RichTextInput=({value,onChange,placeholder,rows=4})=>{
   const ta=useRef();
   const wrap=(a,b)=>{
     const el=ta.current;if(!el)return;
@@ -2243,19 +2256,28 @@ const RichTextInput=({value,onChange,placeholder})=>{
     onChange(value.slice(0,s)+a+sel+b+value.slice(e));
     setTimeout(()=>{el.selectionStart=s+a.length;el.selectionEnd=s+a.length+sel.length;el.focus();},0);
   };
+  const insertList=()=>{
+    const el=ta.current;if(!el)return;
+    const pos=el.selectionStart,before=value.slice(0,pos);
+    const atLineStart=pos===0||before.endsWith("\n");
+    const prefix=atLineStart?"- ":"\n- ";
+    const next=before+prefix+value.slice(pos);
+    onChange(next);
+    setTimeout(()=>{el.selectionStart=el.selectionEnd=pos+prefix.length;el.focus();},0);
+  };
+  const btnStyle={background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,color:"var(--cream)",padding:"4px 10px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",transition:"all .15s"};
+  const hover={onMouseEnter:e=>{e.currentTarget.style.background="var(--bg4)";e.currentTarget.style.borderColor="var(--border2)";},onMouseLeave:e=>{e.currentTarget.style.background="var(--bg3)";e.currentTarget.style.borderColor="var(--border)";}};
   const tools=[["B","**","**",{fontWeight:700}],["I","*","*",{fontStyle:"italic"}],["S̶","~~","~~",{textDecoration:"line-through"}],["</>","`","`",{fontFamily:"monospace",fontSize:".82rem"}]];
   return(
     <div>
-      <div style={{display:"flex",gap:5,marginBottom:6}}>
+      <div style={{display:"flex",gap:5,marginBottom:6,flexWrap:"wrap"}}>
         {tools.map(([icon,a,b,s])=>(
-          <button key={icon} type="button" onClick={()=>wrap(a,b)}
-            onMouseEnter={e=>{e.currentTarget.style.background="var(--bg4)";e.currentTarget.style.borderColor="var(--border2)";}}
-            onMouseLeave={e=>{e.currentTarget.style.background="var(--bg3)";e.currentTarget.style.borderColor="var(--border)";}}
-            style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,color:"var(--cream)",padding:"4px 10px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",transition:"all .15s",...s}}>{icon}</button>
+          <button key={icon} type="button" onClick={()=>wrap(a,b)} {...hover} style={{...btnStyle,...s}}>{icon}</button>
         ))}
-        <span style={{fontSize:".7rem",color:"var(--muted)",alignSelf:"center",marginLeft:4}}>Selecteer tekst en klik een stijl</span>
+        <button type="button" onClick={insertList} {...hover} style={btnStyle}>• Lijst</button>
+        <span style={{fontSize:".7rem",color:"var(--muted)",alignSelf:"center",marginLeft:4}}>Selecteer + stijl</span>
       </div>
-      <textarea ref={ta} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={4}
+      <textarea ref={ta} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={rows}
         style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%",outline:"none",resize:"vertical",fontFamily:"var(--font-b)",lineHeight:1.6}}/>
     </div>
   );
@@ -2294,15 +2316,19 @@ const AnnouncementModal=({onSave,onClose,existing=null,currentUser})=>{
   );
 };
 
-const AnnouncementBanner=({announcements,currentUser,onDelete,onEdit,onNew})=>{
+const AnnouncementBanner=({announcements,currentUser,onArchive,onHardDelete,onReactivate,onEdit,onNew})=>{
   const canAnnounce=can.announce(currentUser);
   const [dismissed,setDismissed]=useState(()=>{try{return JSON.parse(localStorage.getItem("ann-dismissed")||"[]");}catch{return[];}});
+  const [showArchive,setShowArchive]=useState(false);
   const dismiss=id=>{const n=[...dismissed,id];setDismissed(n);localStorage.setItem("ann-dismissed",JSON.stringify(n));};
-  const visible=announcements.filter(a=>!dismissed.includes(a.id));
+  const active=announcements.filter(a=>a.active!==false);
+  const archived=announcements.filter(a=>a.active===false);
+  const visible=active.filter(a=>!dismissed.includes(a.id));
   if(visible.length===0&&!canAnnounce)return null;
   return(
     <div style={{marginBottom:"1.4rem"}}>
-      {canAnnounce&&<div style={{display:"flex",justifyContent:"flex-end",marginBottom:visible.length>0?".6rem":"0"}}>
+      {canAnnounce&&<div style={{display:"flex",justifyContent:"flex-end",gap:6,marginBottom:visible.length>0?".6rem":"0"}}>
+        {archived.length>0&&<Btn onClick={()=>setShowArchive(v=>!v)} variant="ghost" size="sm" style={{color:"var(--muted)",borderColor:"var(--border)",fontSize:".78rem"}}>📁 Archief ({archived.length})</Btn>}
         <Btn onClick={onNew} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"var(--border2)",fontSize:".78rem"}}>📢 Aankondiging</Btn>
       </div>}
       {visible.map(ann=>(
@@ -2312,7 +2338,6 @@ const AnnouncementBanner=({announcements,currentUser,onDelete,onEdit,onNew})=>{
           border:"1px solid rgba(232,148,58,.45)",borderLeft:"4px solid var(--amber)",
           borderRadius:"var(--radius)",padding:"1.1rem 1.4rem",
         }}>
-          {/* Glow layers */}
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 55% 90% at 5% 50%,rgba(232,148,58,.1),transparent 55%)",pointerEvents:"none"}}/>
           <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,var(--amber),var(--gold),var(--amber2),transparent 70%)",opacity:.65,pointerEvents:"none"}}/>
           <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}>
@@ -2328,12 +2353,27 @@ const AnnouncementBanner=({announcements,currentUser,onDelete,onEdit,onNew})=>{
             </div>
             <div style={{display:"flex",gap:5,flexShrink:0}}>
               {canAnnounce&&<Btn onClick={()=>onEdit(ann)} variant="ghost" size="sm" style={{padding:"5px 9px",fontSize:".72rem"}}>✎</Btn>}
-              {canAnnounce&&<Btn onClick={()=>onDelete(ann.id)} variant="danger" size="sm" style={{padding:"5px 9px",fontSize:".72rem"}}>✕</Btn>}
+              {canAnnounce&&<Btn onClick={()=>onArchive(ann.id)} variant="danger" size="sm" style={{padding:"5px 9px",fontSize:".72rem"}}>↓</Btn>}
               {!canAnnounce&&<button onClick={()=>dismiss(ann.id)} onMouseEnter={e=>{e.currentTarget.style.color="var(--cream)";}} onMouseLeave={e=>{e.currentTarget.style.color="var(--muted)";}} style={{background:"transparent",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:"1rem",padding:"2px 6px",lineHeight:1,transition:"color .15s"}}>✕</button>}
             </div>
           </div>
         </div>
       ))}
+      {canAnnounce&&showArchive&&archived.length>0&&(
+        <div style={{border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",overflow:"hidden",marginTop:".4rem"}}>
+          <div style={{padding:".6rem 1rem",background:"var(--bg2)",fontSize:".72rem",color:"var(--muted)",letterSpacing:".1em",textTransform:"uppercase"}}>Gearchiveerde aankondigingen</div>
+          {archived.map(ann=>(
+            <div key={ann.id} style={{display:"flex",alignItems:"center",gap:10,padding:".65rem 1rem",borderTop:"1px solid var(--border)",background:"var(--bg)"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:".84rem",color:"var(--cream)",opacity:.7,fontWeight:600}}>{ann.title}</div>
+                <div style={{fontSize:".68rem",color:"var(--muted)",marginTop:2}}>{ann.createdBy} · {new Date(ann.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short",year:"numeric"})}</div>
+              </div>
+              <Btn onClick={()=>onReactivate(ann.id)} variant="ghost" size="sm" style={{fontSize:".72rem",color:"var(--amber)",borderColor:"rgba(232,148,58,.3)"}}>↑ Activeren</Btn>
+              <Btn onClick={()=>onHardDelete(ann.id)} variant="danger" size="sm" style={{fontSize:".72rem",padding:"4px 8px"}}>✕</Btn>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -2516,7 +2556,7 @@ const EditEventModal=({evt,onSave,onClose,users=[]})=>{
         <div><Lbl>Eindtijd (HH:MM)</Lbl><Inp value={d.end_time||""} onChange={e=>setD({...d,end_time:e.target.value})} placeholder="23:00"/></div>
       </div>
       <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>setD({...d,type:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
-      <div><Lbl>Description</Lbl><Inp value={d.description||""} onChange={e=>setD({...d,description:e.target.value})} placeholder="Short description…" multiline/></div>
+      <div><Lbl>Description</Lbl><RichTextInput value={d.description||""} onChange={v=>setD({...d,description:v})} placeholder="Beschrijving… **bold**, *italic*, - lijstje" rows={3}/></div>
       <div><Lbl>Attendees</Lbl><AttendeeInput attendees={d.attendees} setAttendees={v=>setD({...d,attendees:v})} users={users}/></div>
       <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave(d)}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
     </div></Modal>
@@ -2535,7 +2575,7 @@ const NewEventModal=({onSave,onClose,users=[]})=>{
         <div><Lbl>Eindtijd (HH:MM)</Lbl><Inp value={d.end_time||""} onChange={e=>setD({...d,end_time:e.target.value})} placeholder="23:00"/></div>
       </div>
       <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>setD({...d,type:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
-      <div><Lbl>Description</Lbl><Inp value={d.description||""} onChange={e=>setD({...d,description:e.target.value})} placeholder="Short description…" multiline/></div>
+      <div><Lbl>Description</Lbl><RichTextInput value={d.description||""} onChange={v=>setD({...d,description:v})} placeholder="Beschrijving… **bold**, *italic*, - lijstje" rows={3}/></div>
       <div><Lbl>Attendees</Lbl><AttendeeInput attendees={d.attendees} setAttendees={v=>setD({...d,attendees:v})} users={users}/></div>
       <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave({...d,id:`evt-${Date.now()}`})}>Create</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
     </div></Modal>
@@ -2682,15 +2722,32 @@ export default function App(){
     goHome();
   };
   const saveAnnouncement=async ann=>{
+    const full={...ann,active:ann.active!==false?true:ann.active};
     setAnnouncements(prev=>{
-      const next=prev.findIndex(a=>a.id===ann.id)>=0?prev.map(a=>a.id===ann.id?ann:a):[ann,...prev];
+      const next=prev.findIndex(a=>a.id===full.id)>=0?prev.map(a=>a.id===full.id?full:a):[full,...prev];
       localStorage.setItem("md-announcements",JSON.stringify(next));
       return next;
     });
-    await supabase.from("announcements").upsert([ann]);
+    await supabase.from("announcements").upsert([full]);
     setShowAnnounce(false);setEditingAnn(null);
   };
-  const deleteAnnouncement=async id=>{
+  const archiveAnnouncement=async id=>{
+    setAnnouncements(prev=>{
+      const next=prev.map(a=>a.id===id?{...a,active:false}:a);
+      localStorage.setItem("md-announcements",JSON.stringify(next));
+      return next;
+    });
+    await supabase.from("announcements").update({active:false}).eq("id",id);
+  };
+  const reactivateAnnouncement=async id=>{
+    setAnnouncements(prev=>{
+      const next=prev.map(a=>a.id===id?{...a,active:true}:a);
+      localStorage.setItem("md-announcements",JSON.stringify(next));
+      return next;
+    });
+    await supabase.from("announcements").update({active:true}).eq("id",id);
+  };
+  const hardDeleteAnnouncement=async id=>{
     setAnnouncements(prev=>{
       const next=prev.filter(a=>a.id!==id);
       localStorage.setItem("md-announcements",JSON.stringify(next));
@@ -2728,7 +2785,7 @@ export default function App(){
       <GS/>
       <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onMarkNotifRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}}/>
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
-        <AnnouncementBanner announcements={announcements} currentUser={currentUser} onDelete={deleteAnnouncement} onEdit={ann=>{setEditingAnn(ann);setShowAnnounce(true);}} onNew={()=>{setEditingAnn(null);setShowAnnounce(true);}}/>
+        <AnnouncementBanner announcements={announcements} currentUser={currentUser} onArchive={archiveAnnouncement} onHardDelete={hardDeleteAnnouncement} onReactivate={reactivateAnnouncement} onEdit={ann=>{setEditingAnn(ann);setShowAnnounce(true);}} onNew={()=>{setEditingAnn(null);setShowAnnounce(true);}}/>
         {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users}/>}
         {pageView==="hof"&&<HallOfFame events={events} users={users}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
