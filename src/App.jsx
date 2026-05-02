@@ -2721,7 +2721,8 @@ export default function App(){
       supabase.from("users").select("*"),
       supabase.from("announcements").select("*").order("created_at",{ascending:false}),
     ]).then(async([{data:evts},{data:usrs},{data:anns}])=>{
-      if(anns){setAnnouncements(anns);localStorage.setItem("md-announcements",JSON.stringify(anns));}
+      const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});
+      if(anns&&anns.length){const mapped=anns.map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}
       // Seed DB on first run if empty
       let allEvents=evts?.length?evts:SEED_EVENTS;
       let allUsers=usrs?.length?usrs:[];
@@ -2741,7 +2742,7 @@ export default function App(){
     });
 
     const poll=setInterval(()=>{
-      supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data){setAnnouncements(data);localStorage.setItem("md-announcements",JSON.stringify(data));}});
+      supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data&&data.length){const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});const mapped=data.map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}});
       supabase.from("users").select("*").then(({data})=>{
         if(data){
           setUsers(data);
@@ -2809,13 +2810,15 @@ export default function App(){
     goHome();
   };
   const saveAnnouncement=async ann=>{
-    const full={...ann,active:ann.active!==false?true:ann.active};
+    const full={...ann,active:ann.active!==false};
     setAnnouncements(prev=>{
       const next=prev.findIndex(a=>a.id===full.id)>=0?prev.map(a=>a.id===full.id?full:a):[full,...prev];
       localStorage.setItem("md-announcements",JSON.stringify(next));
       return next;
     });
-    await supabase.from("announcements").upsert([full]);
+    // Use snake_case for Supabase; omit 'active' so old schemas without the column still work
+    const dbRow={id:full.id,title:full.title,body:full.body||"",created_by:full.createdBy,created_at:full.createdAt};
+    await supabase.from("announcements").upsert([dbRow]);
     setShowAnnounce(false);setEditingAnn(null);
   };
   const archiveAnnouncement=async id=>{
@@ -2824,7 +2827,8 @@ export default function App(){
       localStorage.setItem("md-announcements",JSON.stringify(next));
       return next;
     });
-    await supabase.from("announcements").update({active:false}).eq("id",id);
+    // best-effort; only works if 'active' column exists
+    supabase.from("announcements").update({active:false}).eq("id",id);
   };
   const reactivateAnnouncement=async id=>{
     setAnnouncements(prev=>{
