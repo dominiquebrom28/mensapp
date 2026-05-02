@@ -1030,40 +1030,39 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
       {isUpcoming&&<div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,var(--orange),var(--amber),var(--gold),var(--amber))",backgroundSize:"200% 100%",animation:"goldShimmer 3s linear infinite"}}/>}
 
       {/* Main content */}
-      <div style={{padding:"1.4rem",display:"flex",gap:"1.2rem",alignItems:"flex-start"}}>
-        <div style={{flex:1,minWidth:0}}>
-          {/* Tags */}
-          <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap",alignItems:"center"}}>
-            <Tag color={evt.type==="weekend"?"var(--purple)":"var(--amber)"}>{evt.type==="weekend"?"🏕️ Weekend":"📅 Day Event"}</Tag>
-            {evt.theme&&<Tag color="var(--gold)">✨ {evt.theme}</Tag>}
-            {myStatus&&(
-              <span style={{background:myStatusColor+"22",color:myStatusColor,border:`1px solid ${myStatusColor}44`,borderRadius:6,padding:"3px 10px",fontSize:".72rem",fontWeight:700}}>
-                {myStatus==="going"?"🔒 Locked In":myStatus==="maybe"?"🤔 Maybe":myStatus==="not coming"?"❌ Can't Make It":statusMap[myStatus]?.label}
-              </span>
-            )}
+      <div style={{padding:"1.4rem"}}>
+        <div style={{display:"flex",gap:"1.2rem",alignItems:"flex-start"}}>
+          <div style={{flex:1,minWidth:0}}>
+            {/* Tags */}
+            <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap",alignItems:"center"}}>
+              <Tag color={evt.type==="weekend"?"var(--purple)":"var(--amber)"}>{evt.type==="weekend"?"🏕️ Weekend":"📅 Day Event"}</Tag>
+              {evt.theme&&<Tag color="var(--gold)">✨ {evt.theme}</Tag>}
+              {myStatus&&(
+                <span style={{background:myStatusColor+"22",color:myStatusColor,border:`1px solid ${myStatusColor}44`,borderRadius:6,padding:"3px 10px",fontSize:".72rem",fontWeight:700}}>
+                  {myStatus==="going"?"🔒 Locked In":myStatus==="maybe"?"🤔 Maybe":myStatus==="not coming"?"❌ Can't Make It":statusMap[myStatus]?.label}
+                </span>
+              )}
+            </div>
+
+            {/* Event name */}
+            <div style={{fontFamily:"var(--font-h)",fontSize:"1.5rem",color:"var(--amber2)",marginBottom:5,lineHeight:1.1}}>{evt.name}</div>
+
+            {/* Date / location */}
+            <div style={{color:"var(--muted)",fontSize:".82rem",marginBottom:4}}>
+              {new Date(evt.date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+              {evt.start_time&&<span style={{color:"var(--amber)",marginLeft:6}}>⏰ {evt.start_time}{evt.end_time&&`–${evt.end_time}`}</span>}
+              {evt.location&&evt.location!=="TBD"&&<span style={{marginLeft:6}}>· 📍 {evt.location}</span>}
+            </div>
+
+            {/* Lads going */}
+            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6}}>
+              <div style={{display:"flex"}}>{evt.attendees.filter(a=>["went","going"].includes(a.status)).slice(0,6).map((a,i)=><div key={i} style={{marginLeft:i===0?0:-8,borderRadius:"50%",border:"2px solid var(--bg2)"}}><Avatar name={a.name} size={24} {...getUA(a.name,users)}/></div>)}</div>
+              {going>0&&<span style={{fontSize:".75rem",color:"var(--muted)"}}><strong style={{color:"var(--cream)"}}>{going}</strong> lad{going!==1?"s":""} {evt.archived?"attended":"in"}</span>}
+            </div>
           </div>
 
-          {/* Event name */}
-          <div style={{fontFamily:"var(--font-h)",fontSize:"1.5rem",color:"var(--amber2)",marginBottom:5,lineHeight:1.1}}>{evt.name}</div>
-
-          {/* Date / location */}
-          <div style={{color:"var(--muted)",fontSize:".82rem",marginBottom:8}}>
-            {new Date(evt.date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
-            {evt.start_time&&<span style={{color:"var(--amber)",marginLeft:6}}>⏰ {evt.start_time}{evt.end_time&&`–${evt.end_time}`}</span>}
-            {evt.location&&evt.location!=="TBD"&&<span style={{marginLeft:6}}>· 📍 {evt.location}</span>}
-          </div>
-
-          {evt.description&&<div style={{color:"var(--cream)",opacity:.6,fontSize:".84rem",marginBottom:8,lineHeight:1.5}}>{evt.description}</div>}
-
-          {/* Lads going */}
-          <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4}}>
-            <div style={{display:"flex"}}>{evt.attendees.filter(a=>["went","going"].includes(a.status)).slice(0,6).map((a,i)=><div key={i} style={{marginLeft:i===0?0:-8,borderRadius:"50%",border:"2px solid var(--bg2)"}}><Avatar name={a.name} size={24} {...getUA(a.name,users)}/></div>)}</div>
-            {going>0&&<span style={{fontSize:".75rem",color:"var(--muted)"}}><strong style={{color:"var(--cream)"}}>{going}</strong> lad{going!==1?"s":""} {evt.archived?"attended":"in"}</span>}
-          </div>
-        </div>
-
-        {/* Right: countdown or year */}
-        <div style={{flexShrink:0,textAlign:"center"}}>
+          {/* Right: countdown or year */}
+          <div style={{flexShrink:0,textAlign:"center"}}>
           {isUpcoming?(
             <div style={{background:"rgba(232,148,58,.08)",border:"1px solid rgba(232,148,58,.2)",borderRadius:12,padding:".8rem .9rem"}}>
               <div style={{fontSize:".6rem",color:"var(--amber)",letterSpacing:".15em",textTransform:"uppercase",marginBottom:6}}>Happening in</div>
@@ -1082,7 +1081,9 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
               {evt.winners?.length>0&&<div style={{fontSize:".7rem",color:"var(--gold)",marginTop:4}}>🏆 {evt.winners.length} awards</div>}
             </div>
           )}
+          </div>
         </div>
+        {evt.description&&<div style={{color:"var(--cream)",opacity:.6,fontSize:".84rem",lineHeight:1.5,marginTop:".75rem",borderTop:"1px solid rgba(232,148,58,.08)",paddingTop:".7rem"}}>{evt.description}</div>}
       </div>
 
       {/* Activity sneak-peek strip */}
