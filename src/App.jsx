@@ -899,6 +899,7 @@ const Home = ({events,onOpen,onNew,currentUser,users=[]}) => {
   const nextEvt=upcoming[0];
   const goingLads=nextEvt?nextEvt.attendees.filter(a=>a.status==="going"):[];
   const totalEditions=events.length;
+  const kretjes=events.filter(e=>e.archived).reduce((s,e)=>s+(e.attendees?.filter(a=>a.status==="went").length||0),0);
   const hypers=["No excuses. No mercy. Just lads.","The brotherhood doesn't sleep.","Every year. No matter what.","Legends are made here.","It's that time again."];
   const hype=hypers[(new Date().getMonth()+new Date().getDate())%hypers.length];
   return(
@@ -920,6 +921,7 @@ const Home = ({events,onOpen,onNew,currentUser,users=[]}) => {
               [goingLads.length,"Lads In 🔥"],
               [totalEditions,"Editions 🏆"],
               [past.length,"Legendary 💀"],
+              [kretjes,"Kretjes 🍺"],
             ].map(([v,l])=>(
               <div key={l} style={{textAlign:"center"}}>
                 <div style={{fontFamily:"var(--font-h)",fontSize:"1.6rem",color:"var(--amber)",lineHeight:1}}>{v}</div>
