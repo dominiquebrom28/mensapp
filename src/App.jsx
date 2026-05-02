@@ -31,6 +31,8 @@ const GS = () => (
     @keyframes glowPulse{0%,100%{box-shadow:0 0 20px rgba(232,148,58,.1),0 0 60px rgba(232,148,58,.05)}50%{box-shadow:0 0 40px rgba(232,148,58,.35),0 0 120px rgba(232,148,58,.15)}}
     @keyframes shimmer{0%{background-position:-600px 0}100%{background-position:600px 0}}
     @keyframes borderFire{0%,100%{border-color:rgba(232,148,58,.25)}50%{border-color:rgba(232,148,58,.85)}}
+    @keyframes annPulse{0%,100%{box-shadow:0 0 0 0 rgba(232,148,58,.0),0 4px 24px rgba(0,0,0,.4)}50%{box-shadow:0 0 0 4px rgba(232,148,58,.12),0 4px 32px rgba(0,0,0,.5)}}
+    .ann-banner{animation:annPulse 3.5s ease-in-out infinite}
     @keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
     @keyframes countUp{from{transform:scale(.7);opacity:0}to{transform:scale(1);opacity:1}}
     @keyframes reveal{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0% 0 0)}}
@@ -118,15 +120,25 @@ const Avatar = ({name,size=32,index=0,photoUrl="",style={}}) => {
   return <div style={{width:size,height:size,borderRadius:"50%",flexShrink:0,background:animal.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.5,border:"2px solid var(--bg2)",...style}}>{animal.emoji}</div>;
 };
 const getUA=(name,users=[])=>{const u=users.find(x=>x.username?.toLowerCase()===name?.toLowerCase());return{index:u?.animal_avatar??u?.avatar??0,photoUrl:u?.photo_url||""};};
-const Modal = ({children,onClose,maxWidth=500}) => (
-  <div className="ov" onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
+const Modal = ({children,onClose,maxWidth=500}) => {
+  const ready=useRef(false);
+  useEffect(()=>{const t=setTimeout(()=>{ready.current=true;},350);return()=>clearTimeout(t);},[]);
+  return (
+  <div className="ov" onClick={()=>{if(ready.current)onClose();}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
     <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth,maxHeight:"92vh",overflowY:"auto"}}>
       <Card style={{padding:"1.8rem"}}>{children}</Card>
     </div>
   </div>
-);
+  );
+};
 const RoleBadge = ({role}) => {
-  const m={admin:{color:"var(--amber)",label:"Admin"},member:{color:"var(--green)",label:"Member"},pending:{color:"var(--muted)",label:"Pending"}};
+  const m={
+    admin:{color:"var(--amber)",label:"Admin"},
+    organisation:{color:"var(--purple)",label:"Organisation"},
+    lad:{color:"var(--green)",label:"Lad"},
+    member:{color:"var(--green)",label:"Lad"},
+    pending:{color:"var(--muted)",label:"Pending"},
+  };
   const r=m[role]||m.pending;
   return <Tag color={r.color}>{r.label}</Tag>;
 };
@@ -141,6 +153,7 @@ const Divider = ({label}) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // PERMISSIONS
 // ─────────────────────────────────────────────────────────────────────────────
+const ACTIVE_ROLES=["admin","organisation","lad","member"];
 const can = {
   editEvent:    u=>u?.role==="admin",
   manageUsers:  u=>u?.role==="admin",
@@ -151,10 +164,11 @@ const can = {
   deletePoll:   u=>u?.role==="admin",
   deletePhoto:  u=>u?.role==="admin",
   hostQuiz:     u=>u?.role==="admin",
-  vote:         u=>["admin","member"].includes(u?.role),
-  uploadPhoto:  u=>["admin","member"].includes(u?.role),
-  reactPhoto:   u=>["admin","member"].includes(u?.role),
-  updateRsvp:   u=>["admin","member"].includes(u?.role),
+  announce:     u=>["admin","organisation"].includes(u?.role),
+  vote:         u=>ACTIVE_ROLES.includes(u?.role),
+  uploadPhoto:  u=>ACTIVE_ROLES.includes(u?.role),
+  reactPhoto:   u=>ACTIVE_ROLES.includes(u?.role),
+  updateRsvp:   u=>ACTIVE_ROLES.includes(u?.role),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -409,7 +423,7 @@ const PendingScreen = ({user,onLogout}) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // NAV
 // ─────────────────────────────────────────────────────────────────────────────
-const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,pendingCount,notifications,notifLastRead,onMarkNotifRead}) => {
+const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onMarkNotifRead}) => {
   const [menuOpen,setMenuOpen]=useState(false);
   const [notifOpen,setNotifOpen]=useState(false);
   const isMobile=useIsMobile();
@@ -452,6 +466,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
             <button onClick={onMembers} className="nav-btn" style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>👥 Lads</button>
             <button onClick={onHof} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
+            {can.announce(currentUser)&&<button onClick={onAnnounce} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>📢 Announce</button>}
             {can.manageUsers(currentUser)&&<button onClick={onAdmin} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
             <div style={{position:"relative"}} onClick={e=>e.stopPropagation()}>
               <button onClick={()=>{const o=!notifOpen;setNotifOpen(o);setMenuOpen(false);if(o&&unread>0)onMarkNotifRead();}} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🔔{unread>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}</button>
@@ -480,6 +495,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
         <div onClick={e=>e.stopPropagation()} style={{background:"rgba(15,11,7,.98)",borderBottom:"1px solid var(--border)",padding:".8rem 1.2rem",display:"grid",gap:".5rem"}}>
           <button onClick={()=>{onMembers();setMenuOpen(false);}} className="nav-btn" style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>👥 Lads</button>
           <button onClick={()=>{onHof();setMenuOpen(false);}} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
+          {can.announce(currentUser)&&<button onClick={()=>{onAnnounce();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>📢 Announce</button>}
           {can.manageUsers(currentUser)&&<button onClick={()=>{onAdmin();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:".7rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{pendingCount}</span>}</button>}
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"8px 14px"}}>
             <div style={{display:"flex",alignItems:"center",gap:8}}><Avatar name={currentUser.username} size={26} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/><span style={{fontSize:".88rem",color:"var(--cream)"}}>{currentUser.username}</span><RoleBadge role={currentUser.role}/></div>
@@ -501,11 +517,17 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
   const [tab,setTab]=useState("pending");
   const pending=users.filter(u=>u.role==="pending");
   const approved=users.filter(u=>u.role!=="pending");
-  const approve=(id,role="member")=>onUpdateUsers(users.map(u=>u.id===id?{...u,role}:u));
-  const reject=(id)=>onDeleteUser(id);
-  const promote=(id)=>onUpdateUsers(users.map(u=>u.id===id?{...u,role:"admin"}:u));
-  const demote=(id)=>onUpdateUsers(users.map(u=>u.id===id?{...u,role:"member"}:u));
-  const remove=(id)=>{if(window.confirm("Remove this user?"))onDeleteUser(id);};
+  const setRole=(id,role)=>onUpdateUsers(users.map(u=>u.id===id?{...u,role}:u));
+  const reject=id=>onDeleteUser(id);
+  const remove=id=>{if(window.confirm("Remove this user?"))onDeleteUser(id);};
+  const tabBtn=(t,label)=>(
+    <button key={t} onClick={()=>setTab(t)}
+      onMouseEnter={e=>{if(tab!==t){const el=e.currentTarget;el._sc=el.style.color;el._sb=el.style.background;el.style.color="var(--amber)";el.style.background="rgba(232,148,58,.06)";}}}
+      onMouseLeave={e=>{const el=e.currentTarget;el.style.color=el._sc??"";el.style.background=el._sb??"";}}
+      style={{background:"none",border:"none",borderBottom:tab===t?"2px solid var(--amber)":"2px solid transparent",color:tab===t?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"7px 16px",fontFamily:"var(--font-b)",fontWeight:tab===t?600:400,fontSize:".85rem",marginBottom:-1,transition:"color .15s,background .15s",borderRadius:"6px 6px 0 0"}}>
+      {label}{t==="pending"&&pending.length>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:10,padding:"1px 6px",fontSize:".68rem",marginLeft:6}}>{pending.length}</span>}
+    </button>
+  );
   return(
     <Modal onClose={onClose} maxWidth={600}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.2rem"}}>
@@ -514,10 +536,7 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
       </div>
       {pending.length>0&&<div style={{background:"rgba(232,148,58,.1)",border:"1px solid var(--border2)",borderRadius:"var(--radius-sm)",padding:"10px 14px",marginBottom:"1.2rem",display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:"1.2rem"}}>⏳</span><span style={{color:"var(--amber2)",fontSize:".88rem",fontWeight:600}}>{pending.length} pending approval{pending.length>1?"s":""}</span></div>}
       <div style={{display:"flex",gap:".3rem",borderBottom:"1px solid var(--border)",marginBottom:"1.2rem"}}>
-        {["pending","users"].map(t=><button key={t} onClick={()=>setTab(t)}
-          onMouseEnter={e=>{if(tab!==t){const el=e.currentTarget;el._sc=el.style.color;el._sb=el.style.background;el.style.color="var(--amber)";el.style.background="rgba(232,148,58,.06)";}}}
-          onMouseLeave={e=>{const el=e.currentTarget;el.style.color=el._sc??"";el.style.background=el._sb??"";}}
-          style={{background:"none",border:"none",borderBottom:tab===t?"2px solid var(--amber)":"2px solid transparent",color:tab===t?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"7px 16px",fontFamily:"var(--font-b)",fontWeight:tab===t?600:400,fontSize:".85rem",marginBottom:-1,transition:"color .15s,background .15s",borderRadius:"6px 6px 0 0"}}>{t==="pending"?"Pending":"All Users"}{t==="pending"&&pending.length>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:10,padding:"1px 6px",fontSize:".68rem",marginLeft:6}}>{pending.length}</span>}</button>)}
+        {tabBtn("pending","Pending")}{tabBtn("users","All Users")}
       </div>
       {tab==="pending"&&<div style={{display:"grid",gap:".8rem"}}>
         {pending.length===0&&<div style={{color:"var(--muted)",fontSize:".88rem",textAlign:"center",padding:"2rem"}}>No pending requests 🎉</div>}
@@ -525,9 +544,10 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
           <div key={u.id} style={{background:"var(--bg3)",borderRadius:"var(--radius-sm)",padding:"1rem 1.1rem",display:"flex",alignItems:"center",gap:"1rem",flexWrap:"wrap"}}>
             <Avatar name={u.username} size={36} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>
             <div style={{flex:1}}><div style={{fontWeight:600,fontSize:".95rem"}}>{u.username}</div><div style={{color:"var(--muted)",fontSize:".75rem"}}>Requested {new Date(u.joined_at).toLocaleDateString("nl-NL")}</div></div>
-            <div style={{display:"flex",gap:6}}>
-              <Btn onClick={()=>approve(u.id,"member")} variant="success" size="sm">✓ Approve</Btn>
-              <Btn onClick={()=>approve(u.id,"admin")} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"var(--border2)"}}>★ Admin</Btn>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              <Btn onClick={()=>setRole(u.id,"lad")} variant="success" size="sm">✓ Lad</Btn>
+              <Btn onClick={()=>setRole(u.id,"organisation")} variant="ghost" size="sm" style={{color:"var(--purple)",borderColor:"rgba(155,127,232,.4)",fontSize:".73rem"}}>★ Org</Btn>
+              <Btn onClick={()=>setRole(u.id,"admin")} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"var(--border2)",fontSize:".73rem"}}>★ Admin</Btn>
               <Btn onClick={()=>reject(u.id)} variant="danger" size="sm">✕</Btn>
             </div>
           </div>
@@ -537,10 +557,16 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
         {approved.map(u=>(
           <div key={u.id} style={{background:"var(--bg3)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",display:"flex",alignItems:"center",gap:"1rem",flexWrap:"wrap"}}>
             <Avatar name={u.username} size={32} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>
-            <div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:".92rem"}}>{u.username}</span><RoleBadge role={u.role}/></div><div style={{color:"var(--muted)",fontSize:".73rem",marginTop:2}}>Joined {new Date(u.joined_at).toLocaleDateString("nl-NL")}</div></div>
-            <div style={{display:"flex",gap:6}}>
-              {u.role==="member"&&<Btn onClick={()=>promote(u.id)} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"var(--border2)",fontSize:".73rem"}}>★ Admin</Btn>}
-              {u.role==="admin"&&<Btn onClick={()=>demote(u.id)} variant="ghost" size="sm" style={{fontSize:".73rem"}}>↓ Member</Btn>}
+            <div style={{flex:1}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:".92rem"}}>{u.username}</span><RoleBadge role={u.role}/></div>
+              <div style={{color:"var(--muted)",fontSize:".73rem",marginTop:2}}>Joined {new Date(u.joined_at).toLocaleDateString("nl-NL")}</div>
+            </div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {(u.role==="lad"||u.role==="member")&&<Btn onClick={()=>setRole(u.id,"organisation")} variant="ghost" size="sm" style={{color:"var(--purple)",borderColor:"rgba(155,127,232,.4)",fontSize:".73rem"}}>→ Org</Btn>}
+              {(u.role==="lad"||u.role==="member")&&<Btn onClick={()=>setRole(u.id,"admin")} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"var(--border2)",fontSize:".73rem"}}>→ Admin</Btn>}
+              {u.role==="organisation"&&<Btn onClick={()=>setRole(u.id,"admin")} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"var(--border2)",fontSize:".73rem"}}>→ Admin</Btn>}
+              {u.role==="organisation"&&<Btn onClick={()=>setRole(u.id,"lad")} variant="ghost" size="sm" style={{fontSize:".73rem"}}>↓ Lad</Btn>}
+              {u.role==="admin"&&<Btn onClick={()=>setRole(u.id,"organisation")} variant="ghost" size="sm" style={{color:"var(--purple)",borderColor:"rgba(155,127,232,.4)",fontSize:".73rem"}}>↓ Org</Btn>}
               <Btn onClick={()=>remove(u.id)} variant="danger" size="sm" style={{fontSize:".73rem"}}>✕</Btn>
             </div>
           </div>
@@ -1087,6 +1113,7 @@ const TABS=["Overview","Polls","Quiz","Photos","Winners & Highlights","FAQ"];
 const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
   const [tab,setTab]=useState("Overview");
   const [editing,setEditing]=useState(false);
+  const [presenting,setPresenting]=useState(false);
   const countdown=useCountdown(evt.date,evt.start_time);
   const isPast=evt.archived;
   const isAdmin=can.editEvent(currentUser);
@@ -1155,6 +1182,7 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
         <div style={{borderTop:"1px solid var(--border)",padding:".8rem 1.8rem",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,background:"rgba(0,0,0,.25)"}}>
           {isAdmin?(
             <div style={{display:"flex",gap:".5rem",flexWrap:"wrap"}}>
+              {evt.schedule.length>0&&<Btn onClick={()=>setPresenting(true)} variant="gold" size="sm">▶ Present</Btn>}
               <Btn onClick={()=>setEditing(true)} variant="ghost" size="sm">✎ Edit</Btn>
               {!isPast&&<Btn onClick={()=>onUpdate({...evt,archived:true})} variant="ghost" size="sm" style={{color:"var(--muted)"}}>Archive</Btn>}
               {isPast&&<Btn onClick={()=>onUpdate({...evt,archived:false})} variant="ghost" size="sm">Reopen</Btn>}
@@ -1189,6 +1217,7 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
       </div>
 
       {editing&&<EditEventModal evt={evt} users={users} onSave={u=>{onUpdate(u);setEditing(false)}} onClose={()=>setEditing(false)}/>}
+      {presenting&&<PresentationMode evt={evt} onClose={()=>setPresenting(false)}/>}
     </div>
   );
 };
@@ -2192,9 +2221,237 @@ const FAQTab=({evt,onUpdate,currentUser})=>{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ANNOUNCEMENTS
+// ─────────────────────────────────────────────────────────────────────────────
+const renderMd=text=>{
+  if(!text)return"";
+  return text
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g,"<em>$1</em>")
+    .replace(/~~(.+?)~~/g,"<del>$1</del>")
+    .replace(/`(.+?)`/g,"<code style='background:rgba(255,255,255,.1);padding:1px 6px;border-radius:4px;font-family:monospace;font-size:.9em'>$1</code>")
+    .replace(/\n/g,"<br/>");
+};
+
+const RichTextInput=({value,onChange,placeholder})=>{
+  const ta=useRef();
+  const wrap=(a,b)=>{
+    const el=ta.current;if(!el)return;
+    const s=el.selectionStart,e=el.selectionEnd;
+    const sel=value.slice(s,e)||"tekst";
+    onChange(value.slice(0,s)+a+sel+b+value.slice(e));
+    setTimeout(()=>{el.selectionStart=s+a.length;el.selectionEnd=s+a.length+sel.length;el.focus();},0);
+  };
+  const tools=[["B","**","**",{fontWeight:700}],["I","*","*",{fontStyle:"italic"}],["S̶","~~","~~",{textDecoration:"line-through"}],["</>","`","`",{fontFamily:"monospace",fontSize:".82rem"}]];
+  return(
+    <div>
+      <div style={{display:"flex",gap:5,marginBottom:6}}>
+        {tools.map(([icon,a,b,s])=>(
+          <button key={icon} type="button" onClick={()=>wrap(a,b)}
+            onMouseEnter={e=>{e.currentTarget.style.background="var(--bg4)";e.currentTarget.style.borderColor="var(--border2)";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="var(--bg3)";e.currentTarget.style.borderColor="var(--border)";}}
+            style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,color:"var(--cream)",padding:"4px 10px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",transition:"all .15s",...s}}>{icon}</button>
+        ))}
+        <span style={{fontSize:".7rem",color:"var(--muted)",alignSelf:"center",marginLeft:4}}>Selecteer tekst en klik een stijl</span>
+      </div>
+      <textarea ref={ta} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} rows={4}
+        style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%",outline:"none",resize:"vertical",fontFamily:"var(--font-b)",lineHeight:1.6}}/>
+    </div>
+  );
+};
+
+const AnnouncementModal=({onSave,onClose,existing=null,currentUser})=>{
+  const [title,setTitle]=useState(existing?.title||"");
+  const [body,setBody]=useState(existing?.body||"");
+  const save=()=>{
+    if(!title.trim())return;
+    onSave({
+      id:existing?.id||`ann-${Date.now()}`,
+      title:title.trim(),body,
+      createdBy:currentUser.username,
+      createdAt:existing?.createdAt||new Date().toISOString(),
+    });
+  };
+  return(
+    <Modal onClose={onClose} maxWidth={560}>
+      <H>📢 {existing?"Edit":"New"} Announcement</H>
+      <div style={{display:"grid",gap:".9rem"}}>
+        <div><Lbl>Title</Lbl><Inp value={title} onChange={e=>setTitle(e.target.value)} placeholder="What's the news?" autoFocus/></div>
+        <div>
+          <Lbl>Message</Lbl>
+          <RichTextInput value={body} onChange={setBody} placeholder={"Schrijf je bericht… Gebruik **bold**, *italic*, ~~doorhalen~~, `code`"}/>
+        </div>
+        {body&&(
+          <div>
+            <Lbl>Preview</Lbl>
+            <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"12px 14px",fontSize:".88rem",color:"var(--cream)",lineHeight:1.65}} dangerouslySetInnerHTML={{__html:renderMd(body)}}/>
+          </div>
+        )}
+        <div style={{display:"flex",gap:8}}><Btn onClick={save} disabled={!title.trim()}>📢 Publiceren</Btn><Btn onClick={onClose} variant="ghost">Annuleren</Btn></div>
+      </div>
+    </Modal>
+  );
+};
+
+const AnnouncementBanner=({announcements,currentUser,onDelete,onEdit,onNew})=>{
+  const canAnnounce=can.announce(currentUser);
+  const [dismissed,setDismissed]=useState(()=>{try{return JSON.parse(localStorage.getItem("ann-dismissed")||"[]");}catch{return[];}});
+  const dismiss=id=>{const n=[...dismissed,id];setDismissed(n);localStorage.setItem("ann-dismissed",JSON.stringify(n));};
+  const visible=announcements.filter(a=>!dismissed.includes(a.id));
+  if(visible.length===0&&!canAnnounce)return null;
+  return(
+    <div style={{marginBottom:"1.4rem"}}>
+      {canAnnounce&&<div style={{display:"flex",justifyContent:"flex-end",marginBottom:visible.length>0?".6rem":"0"}}>
+        <Btn onClick={onNew} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"var(--border2)",fontSize:".78rem"}}>📢 Aankondiging</Btn>
+      </div>}
+      {visible.map(ann=>(
+        <div key={ann.id} className="ann-banner" style={{
+          position:"relative",overflow:"hidden",marginBottom:".75rem",
+          background:"linear-gradient(135deg,#1c1100 0%,#2e1900 50%,#1c1100 100%)",
+          border:"1px solid rgba(232,148,58,.45)",borderLeft:"4px solid var(--amber)",
+          borderRadius:"var(--radius)",padding:"1.1rem 1.4rem",
+        }}>
+          {/* Glow layers */}
+          <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 55% 90% at 5% 50%,rgba(232,148,58,.1),transparent 55%)",pointerEvents:"none"}}/>
+          <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,var(--amber),var(--gold),var(--amber2),transparent 70%)",opacity:.65,pointerEvents:"none"}}/>
+          <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:".45rem",flexWrap:"wrap"}}>
+                <span style={{fontSize:"1.05rem",filter:"drop-shadow(0 0 6px rgba(232,148,58,.6))"}}>📢</span>
+                <span style={{fontFamily:"var(--font-h)",fontSize:"1.05rem",color:"var(--amber2)",fontWeight:700,lineHeight:1.2}}>{ann.title}</span>
+              </div>
+              {ann.body&&<div style={{fontSize:".88rem",color:"var(--cream)",lineHeight:1.68,opacity:.92}} dangerouslySetInnerHTML={{__html:renderMd(ann.body)}}/>}
+              <div style={{fontSize:".68rem",color:"var(--muted)",marginTop:".55rem",letterSpacing:".04em"}}>
+                {ann.createdBy} · {new Date(ann.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short",year:"numeric"})}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:5,flexShrink:0}}>
+              {canAnnounce&&<Btn onClick={()=>onEdit(ann)} variant="ghost" size="sm" style={{padding:"5px 9px",fontSize:".72rem"}}>✎</Btn>}
+              {canAnnounce&&<Btn onClick={()=>onDelete(ann.id)} variant="danger" size="sm" style={{padding:"5px 9px",fontSize:".72rem"}}>✕</Btn>}
+              {!canAnnounce&&<button onClick={()=>dismiss(ann.id)} onMouseEnter={e=>{e.currentTarget.style.color="var(--cream)";}} onMouseLeave={e=>{e.currentTarget.style.color="var(--muted)";}} style={{background:"transparent",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:"1rem",padding:"2px 6px",lineHeight:1,transition:"color .15s"}}>✕</button>}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRESENTATION MODE
+// ─────────────────────────────────────────────────────────────────────────────
+const PresentationMode=({evt,onClose})=>{
+  const stops=evt.schedule||[];
+  const total=stops.length+1;
+  const [idx,setIdx]=useState(0);
+  const [fading,setFading]=useState(false);
+  const idxRef=useRef(0);
+  useEffect(()=>{idxRef.current=idx;},[idx]);
+
+  const goTo=useCallback(n=>{
+    if(n<0||n>=total)return;
+    setFading(true);
+    setTimeout(()=>{setIdx(n);setFading(false);},230);
+  },[total]);
+
+  useEffect(()=>{
+    const h=e=>{
+      if(e.key==="ArrowRight"||e.key==="ArrowDown")goTo(idxRef.current+1);
+      else if(e.key==="ArrowLeft"||e.key==="ArrowUp")goTo(idxRef.current-1);
+      else if(e.key==="Escape")onClose();
+    };
+    window.addEventListener("keydown",h);
+    return()=>window.removeEventListener("keydown",h);
+  },[goTo,onClose]);
+
+  useEffect(()=>{
+    const el=document.documentElement;
+    if(el.requestFullscreen)el.requestFullscreen().catch(()=>{});
+    return()=>{if(document.exitFullscreen&&document.fullscreenElement)document.exitFullscreen().catch(()=>{});};
+  },[]);
+
+  const isIntro=idx===0;
+  const stop=isIntro?null:stops[idx-1];
+  const media=stop?.image||"";
+  const isVideo=media&&/\.(mp4|webm|mov|ogg)(\?|$)/i.test(media);
+
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:1000,background:"#090700",overflow:"hidden",fontFamily:"var(--font-b)"}}>
+      {/* Gold shimmer top bar */}
+      <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,var(--orange),var(--amber),var(--gold),var(--amber),var(--orange))",backgroundSize:"300% 100%",animation:"goldShimmer 3s linear infinite",zIndex:20}}/>
+      {/* Background media */}
+      {media&&(
+        <div style={{position:"absolute",inset:0}}>
+          {isVideo
+            ?<video src={media} autoPlay muted loop playsInline style={{width:"100%",height:"100%",objectFit:"cover",opacity:.6}}/>
+            :<img src={media} alt="" style={{width:"100%",height:"100%",objectFit:"cover",opacity:.62}}/>
+          }
+          <div style={{position:"absolute",inset:0,background:"linear-gradient(to top,rgba(6,4,0,.93) 0%,rgba(6,4,0,.52) 45%,rgba(6,4,0,.28) 100%)"}}/>
+        </div>
+      )}
+      {!media&&!isIntro&&<div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 70% 60% at 25% 60%,rgba(201,146,42,.11),transparent 65%)"}}/>}
+      {isIntro&&<div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 80% 70% at 50% 45%,rgba(232,148,58,.16),transparent 65%)"}}/>}
+      {/* Top bar */}
+      <div style={{position:"absolute",top:0,left:0,right:0,padding:"1.4rem 2rem",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:15}}>
+        <div style={{fontSize:".72rem",color:"rgba(255,255,255,.35)",letterSpacing:".14em",textTransform:"uppercase",fontWeight:600}}>{evt.name}</div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{fontSize:".72rem",color:"rgba(255,255,255,.32)",padding:"4px 11px",border:"1px solid rgba(255,255,255,.12)",borderRadius:20,backdropFilter:"blur(6px)"}}>{idx+1} / {total}</div>
+          <button onClick={onClose} onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,.18)";}} onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,.09)";}} style={{background:"rgba(255,255,255,.09)",border:"1px solid rgba(255,255,255,.18)",borderRadius:8,color:"rgba(255,255,255,.8)",padding:"7px 15px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,backdropFilter:"blur(8px)",transition:"background .15s"}}>✕ Exit</button>
+        </div>
+      </div>
+      {/* Main content */}
+      <div style={{position:"absolute",inset:0,display:"flex",alignItems:isIntro?"center":"flex-end",justifyContent:"center",padding:isIntro?"2rem":"3rem 5rem 5.5rem",opacity:fading?0:1,transition:"opacity .2s ease",zIndex:10}}>
+        {isIntro?(
+          <div style={{textAlign:"center",maxWidth:780}}>
+            {(evt.type||evt.theme)&&<div style={{fontSize:".82rem",color:"var(--amber)",letterSpacing:".22em",textTransform:"uppercase",fontWeight:700,marginBottom:"1.4rem",opacity:.9}}>
+              {evt.type==="weekend"?"🏕️ Weekend":"📅 Mensday"}{evt.theme&&` · ${evt.theme}`}
+            </div>}
+            <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(2.8rem,8vw,6rem)",color:"#fff",lineHeight:1.05,marginBottom:"1.4rem",textShadow:"0 0 60px rgba(232,148,58,.22)"}}>{evt.name}</div>
+            {evt.date&&<div style={{fontSize:"1.05rem",color:"rgba(255,255,255,.48)",marginBottom:"1.1rem",letterSpacing:".02em"}}>{new Date(evt.date+"T12:00:00").toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>}
+            {evt.location&&<div style={{fontSize:"1rem",color:"var(--amber2)",opacity:.8,marginBottom:"2.8rem"}}>📍 {evt.location}</div>}
+            {stops.length>0&&<div style={{display:"flex",alignItems:"center",gap:"1rem",justifyContent:"center",color:"rgba(255,255,255,.26)",fontSize:".78rem",letterSpacing:".09em"}}>
+              <div style={{height:1,width:36,background:"rgba(255,255,255,.14)"}}/>
+              {stops.length} stops on the menu
+              <div style={{height:1,width:36,background:"rgba(255,255,255,.14)"}}/>
+            </div>}
+          </div>
+        ):(
+          <div style={{width:"100%",maxWidth:900}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"1.1rem",flexWrap:"wrap"}}>
+              <span style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.4)",borderRadius:20,padding:"4px 14px",fontSize:".7rem",color:"var(--amber)",fontWeight:700,letterSpacing:".12em",textTransform:"uppercase"}}>Stop {idx} / {stops.length}</span>
+              {stop.time&&<span style={{fontSize:".95rem",color:"rgba(255,255,255,.42)",fontWeight:600,letterSpacing:".04em"}}>{stop.time}</span>}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:"1.3rem",marginBottom:"1rem",flexWrap:"wrap"}}>
+              {stop.icon&&<span style={{fontSize:"clamp(2rem,5vw,3.5rem)",lineHeight:1,filter:"drop-shadow(0 4px 24px rgba(232,148,58,.35))"}}>{stop.icon}</span>}
+              <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.9rem,5.5vw,4rem)",color:"#fff",lineHeight:1.08,textShadow:"0 2px 30px rgba(0,0,0,.55)"}}>{stop.activity}</div>
+            </div>
+            {stop.location&&<div style={{fontSize:"1rem",color:"rgba(255,255,255,.48)",marginBottom:".5rem",display:"flex",alignItems:"center",gap:7}}>
+              <span>📍</span>
+              {stop.locationUrl?<a href={stop.locationUrl} target="_blank" rel="noreferrer" style={{color:"var(--amber2)",textDecoration:"none"}}>{stop.location}</a>:<span>{stop.location}</span>}
+            </div>}
+            {stop.note&&<div style={{fontSize:".95rem",color:"rgba(255,255,255,.38)",fontStyle:"italic",lineHeight:1.6,maxWidth:640,marginTop:4}}>{stop.note}</div>}
+          </div>
+        )}
+      </div>
+      {/* Prev button */}
+      {idx>0&&<button onClick={()=>goTo(idx-1)} onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,.15)";}} onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,.07)";}} style={{position:"absolute",left:"1.5rem",top:"50%",transform:"translateY(-50%)",background:"rgba(255,255,255,.07)",border:"1px solid rgba(255,255,255,.14)",borderRadius:12,color:"#fff",width:52,height:52,cursor:"pointer",fontSize:"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",zIndex:15,transition:"background .15s",backdropFilter:"blur(8px)"}}>←</button>}
+      {/* Next button */}
+      {idx<total-1&&<button onClick={()=>goTo(idx+1)} onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,.15)";}} onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,.07)";}} style={{position:"absolute",right:"1.5rem",top:"50%",transform:"translateY(-50%)",background:"rgba(255,255,255,.07)",border:"1px solid rgba(255,255,255,.14)",borderRadius:12,color:"#fff",width:52,height:52,cursor:"pointer",fontSize:"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",zIndex:15,transition:"background .15s",backdropFilter:"blur(8px)"}}>→</button>}
+      {/* Dot navigation */}
+      <div style={{position:"absolute",bottom:"1.2rem",left:0,right:0,display:"flex",justifyContent:"center",gap:7,zIndex:15}}>
+        {Array.from({length:total}).map((_,i)=>(
+          <button key={i} onClick={()=>goTo(i)} style={{width:i===idx?22:7,height:7,borderRadius:4,background:i===idx?"var(--amber)":"rgba(255,255,255,.2)",border:"none",cursor:"pointer",padding:0,transition:"all .25s cubic-bezier(.4,0,.2,1)"}}/>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // EDIT MODALS
 // ─────────────────────────────────────────────────────────────────────────────
-const blankStop={time:"",activity:"",location:"",locationUrl:"",icon:"📍",note:""};
+const blankStop={time:"",activity:"",location:"",locationUrl:"",icon:"📍",note:"",image:""};
 const EditScheduleModal=({evt,onSave,onClose})=>{
   const [sched,setSched]=useState(evt.schedule.map(s=>({...blankStop,...s})));
   const [iconPicker,setIconPicker]=useState(null);
@@ -2210,6 +2467,7 @@ const EditScheduleModal=({evt,onSave,onClose})=>{
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:7}}><div><Lbl>Location</Lbl><Inp value={s.location} onChange={e=>upd(i,"location",e.target.value)} placeholder="Café de Kroeg"/></div><div><Lbl>Maps URL</Lbl><Inp value={s.locationUrl} onChange={e=>upd(i,"locationUrl",e.target.value)} placeholder="https://maps.google.com/…"/></div></div>
       <Lbl>Note</Lbl><Inp value={s.note} onChange={e=>upd(i,"note",e.target.value)} placeholder="e.g. reservation under Joris"/>
+      <div style={{marginTop:7}}><Lbl>Slide Image / Video URL</Lbl><Inp value={s.image||""} onChange={e=>upd(i,"image",e.target.value)} placeholder="https://… (background in presentation mode)"/></div>
     </div>
   ))}<Btn onClick={()=>setSched(s=>[...s,{...blankStop}])} variant="subtle" size="sm">+ Add Stop</Btn><div style={{display:"flex",gap:8}}><Btn onClick={()=>onSave(sched)}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div></div></Modal>);
 };
@@ -2332,14 +2590,21 @@ export default function App(){
   const [editingProfile,setEditingProfile]=useState(false);
   const [notifications,setNotifications]=useState([]);
   const [notifLastRead,setNotifLastRead]=useState(()=>localStorage.getItem("notif-read")||"");
+  const [announcements,setAnnouncements]=useState([]);
+  const [showAnnounce,setShowAnnounce]=useState(false);
+  const [editingAnn,setEditingAnn]=useState(null);
   const eventsRef=useRef([]);
   useEffect(()=>{eventsRef.current=events;},[events]);
+  const currentUserRef=useRef(null);
+  useEffect(()=>{currentUserRef.current=currentUser;},[currentUser]);
 
   useEffect(()=>{
     Promise.all([
       supabase.from("events").select("*").order("date"),
       supabase.from("users").select("*"),
-    ]).then(async([{data:evts},{data:usrs}])=>{
+      supabase.from("announcements").select("*").order("created_at",{ascending:false}),
+    ]).then(async([{data:evts},{data:usrs},{data:anns}])=>{
+      if(anns)setAnnouncements(anns);
       // Seed DB on first run if empty
       let allEvents=evts?.length?evts:SEED_EVENTS;
       let allUsers=usrs?.length?usrs:[];
@@ -2359,7 +2624,14 @@ export default function App(){
     });
 
     const poll=setInterval(()=>{
-      supabase.from("users").select("*").then(({data})=>{if(data)setUsers(data);});
+      supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data)setAnnouncements(data);});
+      supabase.from("users").select("*").then(({data})=>{
+        if(data){
+          setUsers(data);
+          const cu=currentUserRef.current;
+          if(cu){const fresh=data.find(u=>u.id===cu.id);if(fresh&&fresh.role!==cu.role)setCurrentUser(fresh);}
+        }
+      });
       supabase.from("events").select("*").order("date").then(({data})=>{
         if(data){
           const newActs=diffEvents(eventsRef.current,data);
@@ -2409,6 +2681,15 @@ export default function App(){
     await supabase.from("events").delete().eq("id",id);
     goHome();
   };
+  const saveAnnouncement=async ann=>{
+    setAnnouncements(prev=>{const idx=prev.findIndex(a=>a.id===ann.id);return idx>=0?prev.map(a=>a.id===ann.id?ann:a):[ann,...prev];});
+    await supabase.from("announcements").upsert([ann]);
+    setShowAnnounce(false);setEditingAnn(null);
+  };
+  const deleteAnnouncement=async id=>{
+    setAnnouncements(prev=>prev.filter(a=>a.id!==id));
+    await supabase.from("announcements").delete().eq("id",id);
+  };
   const openEvent=id=>{setActiveId(id);setPageView("event");};
   const goHome=()=>{setPageView("home");setActiveId(null);setActiveMemberId(null);};
   const goBack=()=>{
@@ -2437,8 +2718,9 @@ export default function App(){
   return(
     <div style={{minHeight:"100vh",background:"var(--bg)"}}>
       <GS/>
-      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onMarkNotifRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}}/>
+      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onMarkNotifRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}}/>
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
+        <AnnouncementBanner announcements={announcements} currentUser={currentUser} onDelete={deleteAnnouncement} onEdit={ann=>{setEditingAnn(ann);setShowAnnounce(true);}} onNew={()=>{setEditingAnn(null);setShowAnnounce(true);}}/>
         {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users}/>}
         {pageView==="hof"&&<HallOfFame events={events} users={users}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
@@ -2447,6 +2729,7 @@ export default function App(){
       </main>
       <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted2)",fontSize:".72rem",borderTop:"1px solid var(--border)",letterSpacing:".1em"}}>🍺 MensApp · Built for the lads</div>
       {showAdmin&&<AdminPanel users={users} onUpdateUsers={updateUsers} onDeleteUser={deleteUser} onClose={()=>setShowAdmin(false)}/>}
+      {showAnnounce&&can.announce(currentUser)&&<AnnouncementModal onSave={saveAnnouncement} onClose={()=>{setShowAnnounce(false);setEditingAnn(null);}} existing={editingAnn} currentUser={currentUser}/>}
       {newEvent&&can.editEvent(currentUser)&&<NewEventModal users={users} onSave={async evt=>{await saveEvents([...events,evt]);setNewEvent(false);openEvent(evt.id)}} onClose={()=>setNewEvent(false)}/>}
       {editingProfile&&<EditProfileModal user={currentUser} onSave={async u=>{await saveProfile(u);setEditingProfile(false);}} onClose={()=>setEditingProfile(false)}/>}
     </div>
