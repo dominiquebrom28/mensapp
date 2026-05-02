@@ -1148,7 +1148,6 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
                 {evt.start_time&&<span style={{color:"var(--amber)",fontSize:".88rem",fontWeight:700}}>⏰ {evt.start_time}{evt.end_time&&` – ${evt.end_time}`}</span>}
               </div>
               {evt.location&&evt.location!=="TBD"&&<div style={{color:"var(--cream)",opacity:.65,fontSize:".86rem",marginBottom:".5rem"}}>📍 {evt.location}</div>}
-              {evt.description&&<div style={{color:"var(--muted)",fontSize:".84rem",maxWidth:500,lineHeight:1.6,marginTop:".5rem"}}>{evt.description}</div>}
 
               {/* Attending lads */}
               {evt.attendees.filter(a=>["went","going"].includes(a.status)).length>0&&(
@@ -1176,6 +1175,7 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
               </div>
             )}
           </div>
+          {evt.description&&<div style={{color:"var(--muted)",fontSize:".86rem",lineHeight:1.7,marginTop:"1rem",borderTop:"1px solid rgba(232,148,58,.1)",paddingTop:".9rem"}}>{evt.description}</div>}
         </div>
 
         {/* Footer bar */}
@@ -1317,7 +1317,6 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[]})=>{
         <div style={{display:"grid",gap:".55rem"}}>
           {evt.schedule.map((s,i)=>(
             <div key={i} className="schedule-card" style={{
-              display:"flex",alignItems:"center",gap:"1rem",
               background:isPast?"var(--bg3)":"linear-gradient(90deg,rgba(29,20,8,.9),rgba(21,14,4,.7))",
               border:`1px solid ${isPast?"var(--border)":"rgba(232,148,58,.18)"}`,
               borderRadius:"var(--radius-sm)",padding:".8rem 1rem",
@@ -1327,36 +1326,36 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[]})=>{
               {/* Left accent */}
               <div style={{position:"absolute",left:0,top:0,bottom:0,width:3,background:isPast?"linear-gradient(to bottom,var(--muted2),var(--muted))":"linear-gradient(to bottom,var(--amber),var(--gold))",opacity:isPast?.4:.7}}/>
 
-              {/* Icon bubble */}
-              <div style={{
-                width:42,height:42,borderRadius:11,flexShrink:0,
-                background:isPast?"var(--bg4)":"rgba(232,148,58,.1)",
-                border:`1px solid ${isPast?"var(--border)":"rgba(232,148,58,.28)"}`,
-                display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.25rem",
-              }}>{s.icon||"📍"}</div>
-
-              {/* Time */}
-              {s.time&&<div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:isPast?"var(--muted)":"var(--amber)",fontWeight:700,flexShrink:0,minWidth:40,textAlign:"center"}}>{s.time}</div>}
-
-              {/* Content */}
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontWeight:600,fontSize:".92rem",color:isPast?"var(--cream)":"var(--amber2)",marginBottom:2}}>{s.activity}</div>
-                {s.location&&(
-                  <div style={{display:"flex",alignItems:"center",gap:4}}>
-                    {s.locationUrl
-                      ?<a href={s.locationUrl} target="_blank" rel="noreferrer" style={{fontSize:".74rem",color:"var(--amber)",textDecoration:"none",opacity:.8}}>📍 {s.location} ↗</a>
-                      :<span style={{fontSize:".74rem",color:"var(--muted)"}}>📍 {s.location}</span>
-                    }
-                  </div>
-                )}
-                {s.note&&<div style={{fontSize:".72rem",color:"var(--muted)",fontStyle:"italic",marginTop:2}}>💬 {s.note}</div>}
+              {/* Top row: icon + time + activity + badge */}
+              <div style={{display:"flex",alignItems:"center",gap:"1rem"}}>
+                <div style={{
+                  width:42,height:42,borderRadius:11,flexShrink:0,
+                  background:isPast?"var(--bg4)":"rgba(232,148,58,.1)",
+                  border:`1px solid ${isPast?"var(--border)":"rgba(232,148,58,.28)"}`,
+                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.25rem",
+                }}>{s.icon||"📍"}</div>
+                {s.time&&<div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:isPast?"var(--muted)":"var(--amber)",fontWeight:700,flexShrink:0,minWidth:38,textAlign:"center"}}>{s.time}</div>}
+                <div style={{flex:1,minWidth:0,fontWeight:600,fontSize:".92rem",color:isPast?"var(--cream)":"var(--amber2)"}}>{s.activity}</div>
+                {isPast
+                  ?<div style={{flexShrink:0,fontSize:".62rem",color:"var(--green)",letterSpacing:".1em",textTransform:"uppercase",opacity:.7,fontWeight:700}}>✓ Done</div>
+                  :<div style={{flexShrink:0,fontSize:".62rem",color:"var(--amber)",letterSpacing:".1em",textTransform:"uppercase",opacity:.65,fontWeight:700}}>Revealed</div>
+                }
               </div>
 
-              {/* Right badge */}
-              {isPast
-                ?<div style={{flexShrink:0,fontSize:".62rem",color:"var(--green)",letterSpacing:".1em",textTransform:"uppercase",opacity:.7,fontWeight:700}}>✓ Done</div>
-                :<div style={{flexShrink:0,fontSize:".62rem",color:"var(--amber)",letterSpacing:".1em",textTransform:"uppercase",opacity:.65,fontWeight:700}}>Revealed</div>
-              }
+              {/* Details row — full width, shown below on all screens */}
+              {(s.location||s.note)&&(
+                <div style={{marginTop:".4rem",paddingLeft:"calc(42px + 1rem)"}}>
+                  {s.location&&(
+                    <div style={{marginBottom:s.note?2:0}}>
+                      {s.locationUrl
+                        ?<a href={s.locationUrl} target="_blank" rel="noreferrer" style={{fontSize:".74rem",color:"var(--amber)",textDecoration:"none",opacity:.8}}>📍 {s.location} ↗</a>
+                        :<span style={{fontSize:".74rem",color:"var(--muted)"}}>📍 {s.location}</span>
+                      }
+                    </div>
+                  )}
+                  {s.note&&<div style={{fontSize:".72rem",color:"var(--muted)",fontStyle:"italic"}}>💬 {s.note}</div>}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -2590,7 +2589,7 @@ export default function App(){
   const [editingProfile,setEditingProfile]=useState(false);
   const [notifications,setNotifications]=useState([]);
   const [notifLastRead,setNotifLastRead]=useState(()=>localStorage.getItem("notif-read")||"");
-  const [announcements,setAnnouncements]=useState([]);
+  const [announcements,setAnnouncements]=useState(()=>{try{return JSON.parse(localStorage.getItem("md-announcements")||"[]");}catch{return[];}});
   const [showAnnounce,setShowAnnounce]=useState(false);
   const [editingAnn,setEditingAnn]=useState(null);
   const eventsRef=useRef([]);
@@ -2604,7 +2603,7 @@ export default function App(){
       supabase.from("users").select("*"),
       supabase.from("announcements").select("*").order("created_at",{ascending:false}),
     ]).then(async([{data:evts},{data:usrs},{data:anns}])=>{
-      if(anns)setAnnouncements(anns);
+      if(anns){setAnnouncements(anns);localStorage.setItem("md-announcements",JSON.stringify(anns));}
       // Seed DB on first run if empty
       let allEvents=evts?.length?evts:SEED_EVENTS;
       let allUsers=usrs?.length?usrs:[];
@@ -2624,7 +2623,7 @@ export default function App(){
     });
 
     const poll=setInterval(()=>{
-      supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data)setAnnouncements(data);});
+      supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data){setAnnouncements(data);localStorage.setItem("md-announcements",JSON.stringify(data));}});
       supabase.from("users").select("*").then(({data})=>{
         if(data){
           setUsers(data);
@@ -2682,12 +2681,20 @@ export default function App(){
     goHome();
   };
   const saveAnnouncement=async ann=>{
-    setAnnouncements(prev=>{const idx=prev.findIndex(a=>a.id===ann.id);return idx>=0?prev.map(a=>a.id===ann.id?ann:a):[ann,...prev];});
+    setAnnouncements(prev=>{
+      const next=prev.findIndex(a=>a.id===ann.id)>=0?prev.map(a=>a.id===ann.id?ann:a):[ann,...prev];
+      localStorage.setItem("md-announcements",JSON.stringify(next));
+      return next;
+    });
     await supabase.from("announcements").upsert([ann]);
     setShowAnnounce(false);setEditingAnn(null);
   };
   const deleteAnnouncement=async id=>{
-    setAnnouncements(prev=>prev.filter(a=>a.id!==id));
+    setAnnouncements(prev=>{
+      const next=prev.filter(a=>a.id!==id);
+      localStorage.setItem("md-announcements",JSON.stringify(next));
+      return next;
+    });
     await supabase.from("announcements").delete().eq("id",id);
   };
   const openEvent=id=>{setActiveId(id);setPageView("event");};
