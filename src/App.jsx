@@ -36,6 +36,14 @@ const GS = () => (
     @keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
     @keyframes countUp{from{transform:scale(.7);opacity:0}to{transform:scale(1);opacity:1}}
     @keyframes reveal{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0% 0 0)}}
+    @keyframes scoreReveal{0%{transform:translateX(-20px);opacity:0}100%{transform:translateX(0);opacity:1}}
+    @keyframes timerPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+    @keyframes musicWave{0%,100%{transform:scaleY(1)}50%{transform:scaleY(1.6)}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes teamReveal{0%{opacity:0;transform:scale(.85) translateY(10px)}100%{opacity:1;transform:scale(1) translateY(0)}}
+    @keyframes timerFinish{0%,100%{background:rgba(224,85,85,.07)}50%{background:rgba(224,85,85,.18)}}
+    .qp-score-row{animation:scoreReveal .4s ease both}
+    .qp-timer-warn{animation:timerPulse .6s ease-in-out infinite}
     .fu{animation:fadeUp .45s ease both}
     .fu1{animation:fadeUp .45s .08s ease both}
     .fu2{animation:fadeUp .45s .16s ease both}
@@ -120,6 +128,7 @@ const Avatar = ({name,size=32,index=0,photoUrl="",style={}}) => {
   return <div style={{width:size,height:size,borderRadius:"50%",flexShrink:0,background:animal.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.5,border:"2px solid var(--bg2)",...style}}>{animal.emoji}</div>;
 };
 const getUA=(name,users=[])=>{const u=users.find(x=>x.username?.toLowerCase()===name?.toLowerCase());return{index:u?.animal_avatar??u?.avatar??0,photoUrl:u?.photo_url||""};};
+const getDisplayName=(name,users=[])=>{const u=users.find(x=>x.username?.toLowerCase()===name?.toLowerCase());return u?.display_name||name;};
 const Modal = ({children,onClose,maxWidth=500}) => {
   const ready=useRef(false);
   useEffect(()=>{const t=setTimeout(()=>{ready.current=true;},350);return()=>clearTimeout(t);},[]);
@@ -158,12 +167,12 @@ const can = {
   editEvent:    u=>u?.role==="admin",
   manageUsers:  u=>u?.role==="admin",
   addWinner:    u=>u?.role==="admin",
-  editSchedule: u=>u?.role==="admin",
-  createPoll:   u=>u?.role==="admin",
-  closePoll:    u=>u?.role==="admin",
-  deletePoll:   u=>u?.role==="admin",
+  editSchedule: u=>["admin","organisation"].includes(u?.role),
+  createPoll:   u=>["admin","organisation"].includes(u?.role),
+  closePoll:    u=>["admin","organisation"].includes(u?.role),
+  deletePoll:   u=>["admin","organisation"].includes(u?.role),
   deletePhoto:  u=>u?.role==="admin",
-  hostQuiz:     u=>u?.role==="admin",
+  hostQuiz:     u=>["admin","organisation"].includes(u?.role),
   announce:     u=>["admin","organisation"].includes(u?.role),
   vote:         u=>ACTIVE_ROLES.includes(u?.role),
   uploadPhoto:  u=>ACTIVE_ROLES.includes(u?.role),
@@ -423,7 +432,7 @@ const PendingScreen = ({user,onLogout}) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // NAV
 // ─────────────────────────────────────────────────────────────────────────────
-const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onUpdates}) => {
+const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onUpdates,onProfile,onTeams,onTimer}) => {
   const [menuOpen,setMenuOpen]=useState(false);
   const isMobile=useIsMobile();
   const unread=notifications.filter(n=>n.timestamp>notifLastRead).length;
@@ -444,19 +453,21 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
         <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}}>
           {view!=="home"&&<button onClick={onBack} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Terug</button>}
           <div onClick={onHome} onMouseEnter={e=>e.currentTarget.style.opacity=".72"} onMouseLeave={e=>e.currentTarget.style.opacity=""} style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer",transition:"opacity .15s"}}>
-            {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":eventName}
+            {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":view==="teams"?"🎲 Team Creator":view==="timer"?"⏱ Timer":eventName}
           </div>
         </div>
         {!isMobile&&(
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
             <button onClick={onMembers} className="nav-btn" style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>👥 Lads</button>
             <button onClick={onHof} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
+            <button onClick={onTeams} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🎲 Teams</button>
+            <button onClick={onTimer} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⏱ Timer</button>
             {can.announce(currentUser)&&<button onClick={onAnnounce} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>📢 Announce</button>}
             {can.manageUsers(currentUser)&&<button onClick={onAdmin} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
             {bellBtn()}
-            <div style={{display:"flex",alignItems:"center",gap:7,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"5px 12px"}}>
+            <div onClick={onProfile} onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--amber)";e.currentTarget.style.background="rgba(232,148,58,.08)";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--bg3)";}} style={{display:"flex",alignItems:"center",gap:7,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"5px 12px",cursor:"pointer",transition:"border-color .15s,background .15s"}}>
               <Avatar name={currentUser.username} size={22} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/>
-              <span style={{fontSize:".8rem",color:"var(--cream)"}}>{currentUser.username}</span>
+              <span style={{fontSize:".8rem",color:"var(--cream)"}}>{currentUser.display_name||currentUser.username}</span>
               <RoleBadge role={currentUser.role}/>
             </div>
             <button onClick={onLogout} className="nav-logout" style={{background:"transparent",border:"1px solid rgba(224,85,85,.3)",borderRadius:8,color:"var(--red)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s ease"}}>Uitloggen</button>
@@ -475,11 +486,13 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
         <div onClick={e=>e.stopPropagation()} style={{background:"rgba(15,11,7,.98)",borderBottom:"1px solid var(--border)",padding:".8rem 1.2rem",display:"grid",gap:".5rem"}}>
           <button onClick={()=>{onMembers();setMenuOpen(false);}} className="nav-btn" style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>👥 Lads</button>
           <button onClick={()=>{onHof();setMenuOpen(false);}} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
+          <button onClick={()=>{onTeams();setMenuOpen(false);}} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🎲 Team Creator</button>
+          <button onClick={()=>{onTimer();setMenuOpen(false);}} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>⏱ Timer</button>
           {can.announce(currentUser)&&<button onClick={()=>{onAnnounce();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>📢 Announce</button>}
           {can.manageUsers(currentUser)&&<button onClick={()=>{onAdmin();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:".7rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{pendingCount}</span>}</button>}
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"8px 14px"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8}}><Avatar name={currentUser.username} size={26} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/><span style={{fontSize:".88rem",color:"var(--cream)"}}>{currentUser.username}</span><RoleBadge role={currentUser.role}/></div>
-            <button onClick={()=>{onLogout();setMenuOpen(false);}} className="nav-logout" style={{background:"transparent",border:"1px solid rgba(224,85,85,.3)",borderRadius:8,color:"var(--red)",padding:"6px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s ease"}}>Uitloggen</button>
+            <div onClick={()=>{onProfile();setMenuOpen(false);}} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",flex:1,minWidth:0}}><Avatar name={currentUser.username} size={26} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/><span style={{fontSize:".88rem",color:"var(--cream)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{currentUser.display_name||currentUser.username}</span><RoleBadge role={currentUser.role}/></div>
+            <button onClick={()=>{onLogout();setMenuOpen(false);}} className="nav-logout" style={{background:"transparent",border:"1px solid rgba(224,85,85,.3)",borderRadius:8,color:"var(--red)",padding:"6px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s ease",flexShrink:0,marginLeft:8}}>Uitloggen</button>
           </div>
         </div>
       )}
@@ -612,7 +625,7 @@ const HallOfFame = ({events,users=[]}) => {
               <div key={p.name} style={{display:"flex",alignItems:"center",gap:8}}>
                 <Avatar name={p.name} size={38} {...getUA(p.name,users)}/>
                 <div>
-                  <div style={{fontWeight:600,fontSize:".95rem"}}>{p.name}</div>
+                  <div style={{fontWeight:600,fontSize:".95rem"}}>{getDisplayName(p.name,users)}</div>
                   <div style={{fontSize:".72rem",color:"var(--amber)"}}>All {totalEvents} events</div>
                 </div>
               </div>
@@ -632,7 +645,7 @@ const HallOfFame = ({events,users=[]}) => {
               return(
                 <div key={p.name} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
                   <Avatar name={p.name} size={40} {...getUA(p.name,users)}/>
-                  <div style={{fontWeight:600,fontSize:".9rem"}}>{p.name}</div>
+                  <div style={{fontWeight:600,fontSize:".9rem"}}>{getDisplayName(p.name,users)}</div>
                   <div style={{fontSize:"1.2rem"}}>{podiumEmojis[realIdx]}</div>
                   <div style={{width:80,height:h,background:podiumColors[realIdx]+"33",border:`2px solid ${podiumColors[realIdx]}`,borderRadius:"8px 8px 0 0",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column"}}>
                     <div style={{fontFamily:"var(--font-h)",fontSize:"1.4rem",color:podiumColors[realIdx],fontWeight:900}}>{p.attended}</div>
@@ -649,7 +662,7 @@ const HallOfFame = ({events,users=[]}) => {
               <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:i<3?podiumColors[i]:"var(--muted2)",minWidth:28,textAlign:"center"}}>{i+1}</div>
               <Avatar name={a.name} size={32} {...getUA(a.name,users)}/>
               <div style={{flex:1}}>
-                <div style={{fontWeight:600,fontSize:".9rem"}}>{a.name}</div>
+                <div style={{fontWeight:600,fontSize:".9rem"}}>{getDisplayName(a.name,users)}</div>
                 <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>
                   {a.attended} attended · {a.missed} missed
                   {a.attended===totalEvents&&totalEvents>0&&<span style={{color:"var(--amber)",marginLeft:6}}>🐐 Perfect</span>}
@@ -681,7 +694,7 @@ const HallOfFame = ({events,users=[]}) => {
                 <div style={{display:"flex",alignItems:"center",gap:"1rem",padding:".9rem 1.1rem",cursor:"pointer"}} onClick={e=>{const d=e.currentTarget.nextSibling;d.style.display=d.style.display==="none"?"block":"none";}}>
                   <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:i<3?podiumColors[i]:"var(--muted2)",minWidth:28,textAlign:"center"}}>{i+1}</div>
                   <Avatar name={w.name} size={32} {...getUA(w.name,users)}/>
-                  <div style={{flex:1}}><div style={{fontWeight:600,fontSize:".9rem"}}>{w.name}</div><div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{w.count} award{w.count!==1?"s":""}</div></div>
+                  <div style={{flex:1}}><div style={{fontWeight:600,fontSize:".9rem"}}>{getDisplayName(w.name,users)}</div><div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{w.count} award{w.count!==1?"s":""}</div></div>
                   <div style={{background:"var(--gold)22",border:"1px solid var(--gold)44",borderRadius:8,padding:"4px 12px",fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--gold)"}}>{w.count}</div>
                 </div>
                 <div style={{display:"none",padding:"0 1.1rem 1rem",borderTop:"1px solid var(--border)"}}>
@@ -709,7 +722,7 @@ const HallOfFame = ({events,users=[]}) => {
               <div key={p.name} style={{display:"flex",alignItems:"center",gap:"1rem",background:"var(--bg2)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",border:"1px solid var(--border)"}}>
                 <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:i<3?podiumColors[i]:"var(--muted2)",minWidth:28,textAlign:"center"}}>{i+1}</div>
                 <Avatar name={p.name} size={32} {...getUA(p.name,users)}/>
-                <div style={{flex:1}}><div style={{fontWeight:600,fontSize:".9rem"}}>{p.name}</div><div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{p.quizzes} quiz{p.quizzes!==1?"zes":""} played</div></div>
+                <div style={{flex:1}}><div style={{fontWeight:600,fontSize:".9rem"}}>{getDisplayName(p.name,users)}</div><div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{p.quizzes} quiz{p.quizzes!==1?"zes":""} played</div></div>
                 <div style={{background:"rgba(91,155,213,.15)",border:"1px solid rgba(91,155,213,.3)",borderRadius:8,padding:"4px 12px",fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--blue)"}}>{p.total}</div>
               </div>
             ))}
@@ -893,7 +906,7 @@ const EditProfileModal=({user,onSave,onClose})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────────────────────────────────────
-const Home = ({events,onOpen,onNew,currentUser,users=[]}) => {
+const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer}) => {
   const upcoming=events.filter(e=>!e.archived).sort((a,b)=>new Date(a.date)-new Date(b.date));
   const past=events.filter(e=>e.archived).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const nextEvt=upcoming[0];
@@ -956,9 +969,33 @@ const Home = ({events,onOpen,onNew,currentUser,users=[]}) => {
         <div style={{display:"grid",gap:"1rem"}}>{upcoming.map(e=><EventCard key={e.id} evt={e} onOpen={onOpen} currentUser={currentUser} users={users}/>)}</div>
       </div>
 
+      {/* ── TOOLS ── */}
+      <div className="fu2">
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"1rem"}}>
+          <H style={{marginBottom:0}}>🛠 Tools</H>
+          <div style={{height:1,flex:1,background:"var(--border)"}}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:"1rem"}}>
+          {[
+            {icon:"🎲",title:"Team Creator",desc:"Schud willekeurige teams voor je activiteiten",onClick:onTeams,color:"var(--amber)"},
+            {icon:"⏱",title:"Timer",desc:"Afteltimer voor spelletjes en activiteiten",onClick:onTimer,color:"var(--blue)"},
+          ].map(({icon,title,desc,onClick,color})=>(
+            <div key={title} onClick={onClick}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=color;e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow=`0 8px 28px ${color}22`;}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="";}}
+              style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"1.5rem 1.4rem",cursor:"pointer",transition:"all .2s cubic-bezier(.4,0,.2,1)",display:"flex",flexDirection:"column",gap:".65rem"}}>
+              <div style={{fontSize:"2.2rem",lineHeight:1}}>{icon}</div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:color,lineHeight:1.2}}>{title}</div>
+              <div style={{fontSize:".82rem",color:"var(--muted)",lineHeight:1.5}}>{desc}</div>
+              <div style={{marginTop:"auto",paddingTop:".5rem",fontSize:".75rem",color:color,opacity:.7,fontWeight:600,letterSpacing:".04em"}}>Openen →</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* ── ARCHIVES ── */}
       {past.length>0&&(
-        <div className="fu2">
+        <div className="fu3">
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"1rem"}}>
             <H style={{marginBottom:0}}>📚 The Archives</H>
             <div style={{height:1,flex:1,background:"var(--border)"}}/>
@@ -1066,21 +1103,28 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
       </div>
 
       {/* Activity sneak-peek strip */}
-      {evt.schedule&&evt.schedule.length>0&&(
-        <div style={{padding:"0 1.4rem 1.2rem",borderTop:"1px solid var(--border)"}}>
-          <div style={{fontSize:".63rem",color:"var(--muted)",letterSpacing:".15em",textTransform:"uppercase",marginBottom:8,marginTop:10}}>What's on the menu</div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {evt.schedule.slice(0,6).map((s,i)=>(
-              <div key={i} style={{display:"flex",alignItems:"center",gap:5,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"5px 10px",fontSize:".76rem",color:"var(--cream)",opacity:.85}}>
-                <span style={{fontSize:"1rem"}}>{s.icon||"📍"}</span>
-                <span>{s.activity}</span>
-                {s.time&&<span style={{color:"var(--amber)",fontSize:".68rem",marginLeft:2}}>{s.time}</span>}
-              </div>
-            ))}
-            {evt.schedule.length>6&&<div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"5px 10px",fontSize:".76rem",color:"var(--muted)"}}>+{evt.schedule.length-6} more 👀</div>}
+      {evt.schedule&&evt.schedule.length>0&&(()=>{
+        const isEditor=can.editSchedule(currentUser);
+        const visible=isEditor?evt.schedule:evt.schedule.filter(s=>!s.secret);
+        const hiddenCount=evt.schedule.filter(s=>s.secret).length;
+        if(!isEditor&&visible.length===0)return null;
+        return(
+          <div style={{padding:"0 1.4rem 1.2rem",borderTop:"1px solid var(--border)"}}>
+            <div style={{fontSize:".63rem",color:"var(--muted)",letterSpacing:".15em",textTransform:"uppercase",marginBottom:8,marginTop:10}}>What's on the menu</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {visible.slice(0,6).map((s,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:5,background:s.secret?"rgba(224,85,85,.08)":"var(--bg3)",border:`1px solid ${s.secret?"rgba(224,85,85,.2)":"var(--border)"}`,borderRadius:8,padding:"5px 10px",fontSize:".76rem",color:s.secret?"rgba(224,85,85,.6)":"var(--cream)",opacity:.85}}>
+                  <span style={{fontSize:"1rem"}}>{s.secret?"🔒":s.icon||"📍"}</span>
+                  <span>{s.secret?"Geheim":s.activity}</span>
+                  {!s.secret&&s.time&&<span style={{color:"var(--amber)",fontSize:".68rem",marginLeft:2}}>{s.time}</span>}
+                </div>
+              ))}
+              {visible.length>6&&<div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"5px 10px",fontSize:".76rem",color:"var(--muted)"}}>+{visible.length-6} more 👀</div>}
+              {!isEditor&&hiddenCount>0&&<div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"5px 10px",fontSize:".76rem",color:"var(--muted)"}}>🔒 +{hiddenCount} geheim</div>}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };
@@ -1094,6 +1138,7 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
   const [tab,setTab]=useState("Overview");
   const [editing,setEditing]=useState(false);
   const [presenting,setPresenting]=useState(false);
+  const [quizDash,setQuizDash]=useState(false);
   const countdown=useCountdown(evt.date,evt.start_time);
   const isPast=evt.archived;
   const isAdmin=can.editEvent(currentUser);
@@ -1190,7 +1235,7 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
       <div className="fu2">
         {tab==="Overview"             &&<OverviewTab evt={evt} onUpdate={onUpdate} isPast={isPast} currentUser={currentUser} users={users}/>}
         {tab==="Polls"                &&<PollsTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users}/>}
-        {tab==="Quiz"                 &&<QuizTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users}/>}
+        {tab==="Quiz"                 &&<QuizTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users} onOpenQuizDash={()=>setQuizDash(true)}/>}
         {tab==="Photos"               &&<PhotosTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast}/>}
         {tab==="FAQ"                  &&<FAQTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
@@ -1199,6 +1244,9 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
 
       {editing&&<EditEventModal evt={evt} users={users} onSave={u=>{onUpdate(u);setEditing(false)}} onClose={()=>setEditing(false)}/>}
       {presenting&&<PresentationMode evt={evt} onClose={()=>setPresenting(false)}/>}
+      {quizDash&&<QuizDashboard evt={evt} onUpdate={onUpdate} users={users} onClose={()=>setQuizDash(false)}/>}
+      {/* Live quiz participant view — shown to everyone when a quiz is being presented */}
+      {(()=>{const liveQ=(evt.quizzes||[]).find(q=>q._liveState);return liveQ&&!quizDash&&<QuizParticipantView evt={evt} liveQ={liveQ} currentUser={currentUser} onUpdate={onUpdate} users={users}/>;})()}
     </div>
   );
 };
@@ -1211,6 +1259,11 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[]})=>{
   const statusOpts=isPast?["went","absent"]:["going","maybe","not coming"];
   const colorOf=s=>statusMap[s]?.color??"var(--muted)";
   const isAdmin=can.editEvent(currentUser);
+  const isScheduleEditor=can.editSchedule(currentUser);
+
+  const toggleSecretStop=(i,secret)=>{
+    onUpdate({...evt,schedule:evt.schedule.map((s,j)=>j===i?{...s,secret}:s)});
+  };
 
   const updateStatus=(idx,val)=>{
     if(!can.updateRsvp(currentUser))return;
@@ -1295,51 +1348,77 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[]})=>{
           </div>
         )}
 
-        <div style={{display:"grid",gap:".55rem"}}>
-          {evt.schedule.map((s,i)=>(
-            <div key={i} className="schedule-card" style={{
-              background:isPast?"var(--bg3)":"linear-gradient(90deg,rgba(29,20,8,.9),rgba(21,14,4,.7))",
-              border:`1px solid ${isPast?"var(--border)":"rgba(232,148,58,.18)"}`,
-              borderRadius:"var(--radius-sm)",padding:".8rem 1rem",
-              position:"relative",overflow:"hidden",
-              animationDelay:`${i*.07}s`,
-            }}>
-              {/* Left accent */}
-              <div style={{position:"absolute",left:0,top:0,bottom:0,width:3,background:isPast?"linear-gradient(to bottom,var(--muted2),var(--muted))":"linear-gradient(to bottom,var(--amber),var(--gold))",opacity:isPast?.4:.7}}/>
+        {(()=>{
+          const visibleStops=isScheduleEditor?evt.schedule:evt.schedule.filter(s=>!s.secret);
+          const hiddenCount=evt.schedule.filter(s=>s.secret).length;
+          return(
+            <>
+              <div style={{display:"grid",gap:".55rem"}}>
+                {visibleStops.map((s,i)=>{
+                  const globalIdx=evt.schedule.indexOf(s);
+                  const isSecret=!!s.secret;
+                  return(
+                    <div key={i} className="schedule-card" style={{
+                      background:isSecret?"rgba(30,10,10,.9)":isPast?"var(--bg3)":"linear-gradient(90deg,rgba(29,20,8,.9),rgba(21,14,4,.7))",
+                      border:`1px solid ${isSecret?"rgba(224,85,85,.28)":isPast?"var(--border)":"rgba(232,148,58,.18)"}`,
+                      borderRadius:"var(--radius-sm)",padding:".8rem 1rem",
+                      position:"relative",overflow:"hidden",
+                      animationDelay:`${i*.07}s`,
+                    }}>
+                      {/* Left accent */}
+                      <div style={{position:"absolute",left:0,top:0,bottom:0,width:3,background:isSecret?"linear-gradient(to bottom,var(--red),rgba(224,85,85,.4))":isPast?"linear-gradient(to bottom,var(--muted2),var(--muted))":"linear-gradient(to bottom,var(--amber),var(--gold))",opacity:isSecret?.7:isPast?.4:.7}}/>
 
-              {/* Top row: icon + time + activity + badge */}
-              <div style={{display:"flex",alignItems:"center",gap:"1rem"}}>
-                <div style={{
-                  width:42,height:42,borderRadius:11,flexShrink:0,
-                  background:isPast?"var(--bg4)":"rgba(232,148,58,.1)",
-                  border:`1px solid ${isPast?"var(--border)":"rgba(232,148,58,.28)"}`,
-                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.25rem",
-                }}>{s.icon||"📍"}</div>
-                {s.time&&<div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:isPast?"var(--muted)":"var(--amber)",fontWeight:700,flexShrink:0,minWidth:38,textAlign:"center"}}>{s.time}</div>}
-                <div style={{flex:1,minWidth:0,fontWeight:600,fontSize:".92rem",color:isPast?"var(--cream)":"var(--amber2)"}}>{s.activity}</div>
-                {isPast
-                  ?<div style={{flexShrink:0,fontSize:".62rem",color:"var(--green)",letterSpacing:".1em",textTransform:"uppercase",opacity:.7,fontWeight:700}}>✓ Done</div>
-                  :<div style={{flexShrink:0,fontSize:".62rem",color:"var(--amber)",letterSpacing:".1em",textTransform:"uppercase",opacity:.65,fontWeight:700}}>Revealed</div>
-                }
-              </div>
+                      {/* Top row: icon + time + activity + badge */}
+                      <div style={{display:"flex",alignItems:"center",gap:"1rem"}}>
+                        <div style={{
+                          width:42,height:42,borderRadius:11,flexShrink:0,
+                          background:isSecret?"rgba(224,85,85,.08)":isPast?"var(--bg4)":"rgba(232,148,58,.1)",
+                          border:`1px solid ${isSecret?"rgba(224,85,85,.2)":isPast?"var(--border)":"rgba(232,148,58,.28)"}`,
+                          display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.25rem",
+                        }}>{isSecret?"🔒":s.icon||"📍"}</div>
+                        {s.time&&<div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:isSecret?"rgba(224,85,85,.7)":isPast?"var(--muted)":"var(--amber)",fontWeight:700,flexShrink:0,minWidth:38,textAlign:"center"}}>{s.time}</div>}
+                        <div style={{flex:1,minWidth:0,fontWeight:600,fontSize:".92rem",color:isSecret?"rgba(224,85,85,.6)":isPast?"var(--cream)":"var(--amber2)"}}>{s.activity}</div>
+                        <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                          {isPast&&!isSecret&&<div style={{fontSize:".62rem",color:"var(--green)",letterSpacing:".1em",textTransform:"uppercase",opacity:.7,fontWeight:700}}>✓ Done</div>}
+                          {!isPast&&!isSecret&&!isScheduleEditor&&<div style={{fontSize:".62rem",color:"var(--amber)",letterSpacing:".1em",textTransform:"uppercase",opacity:.65,fontWeight:700}}>Revealed</div>}
+                          {isScheduleEditor&&(
+                            <button onClick={()=>toggleSecretStop(globalIdx,!isSecret)}
+                              title={isSecret?"Openbaren voor iedereen":"Verbergen voor leden"}
+                              onMouseEnter={e=>{e.currentTarget.style.opacity="1";}}
+                              onMouseLeave={e=>{e.currentTarget.style.opacity=".75";}}
+                              style={{background:isSecret?"rgba(76,175,125,.12)":"rgba(224,85,85,.1)",border:`1px solid ${isSecret?"rgba(76,175,125,.3)":"rgba(224,85,85,.3)"}`,borderRadius:6,cursor:"pointer",padding:"3px 8px",fontSize:".68rem",fontWeight:700,color:isSecret?"var(--green)":"var(--red)",letterSpacing:".04em",opacity:.75,transition:"opacity .15s"}}>
+                              {isSecret?"👁 Reveal":"🔒 Hide"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
 
-              {/* Details row — full width, shown below on all screens */}
-              {(s.location||s.note)&&(
-                <div style={{marginTop:".4rem",paddingLeft:"calc(42px + 1rem)"}}>
-                  {s.location&&(
-                    <div style={{marginBottom:s.note?2:0}}>
-                      {s.locationUrl
-                        ?<a href={s.locationUrl} target="_blank" rel="noreferrer" style={{fontSize:".74rem",color:"var(--amber)",textDecoration:"none",opacity:.8}}>📍 {s.location} ↗</a>
-                        :<span style={{fontSize:".74rem",color:"var(--muted)"}}>📍 {s.location}</span>
-                      }
+                      {/* Details row */}
+                      {!isSecret&&(s.location||s.note)&&(
+                        <div style={{marginTop:".4rem",paddingLeft:"calc(42px + 1rem)"}}>
+                          {s.location&&(
+                            <div style={{marginBottom:s.note?2:0}}>
+                              {s.locationUrl
+                                ?<a href={s.locationUrl} target="_blank" rel="noreferrer" style={{fontSize:".74rem",color:"var(--amber)",textDecoration:"none",opacity:.8}}>📍 {s.location} ↗</a>
+                                :<span style={{fontSize:".74rem",color:"var(--muted)"}}>📍 {s.location}</span>
+                              }
+                            </div>
+                          )}
+                          {s.note&&<div style={{fontSize:".72rem",color:"var(--muted)",fontStyle:"italic"}}>💬 {s.note}</div>}
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {s.note&&<div style={{fontSize:".72rem",color:"var(--muted)",fontStyle:"italic"}}>💬 {s.note}</div>}
+                  );
+                })}
+              </div>
+              {!isScheduleEditor&&hiddenCount>0&&(
+                <div style={{textAlign:"center",padding:".7rem",marginTop:".3rem",background:"var(--bg3)",borderRadius:"var(--radius-sm)",border:"1px solid var(--border)"}}>
+                  <span style={{fontSize:".78rem",color:"var(--muted)"}}>🔒 {hiddenCount} stop{hiddenCount!==1?"s":""} nog geheim — wordt later onthuld</span>
                 </div>
               )}
-            </div>
-          ))}
-        </div>
+            </>
+          );
+        })()}
         {editSched&&<EditScheduleModal evt={evt} onSave={sched=>{onUpdate({...evt,schedule:sched});setEditSched(false)}} onClose={()=>setEditSched(false)}/>}
       </Card>
 
@@ -1357,7 +1436,7 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[]})=>{
               <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--bg3)",borderRadius:10,padding:"9px 12px",border:isMe?"1px solid var(--border2)":"1px solid transparent"}}>
                 <div style={{display:"flex",alignItems:"center",gap:9}}>
                   <Avatar name={a.name} size={28} {...getUA(a.name,users)}/>
-                  <div><span style={{fontWeight:500,fontSize:".86rem"}}>{a.name}</span>{isMe&&<span style={{fontSize:".68rem",color:"var(--amber)",marginLeft:6}}>you</span>}</div>
+                  <div><span style={{fontWeight:500,fontSize:".86rem"}}>{getDisplayName(a.name,users)}</span>{isMe&&<span style={{fontSize:".68rem",color:"var(--amber)",marginLeft:6}}>you</span>}</div>
                 </div>
                 {canChange?(
                   <select value={a.status} onChange={e=>updateStatus(i,e.target.value)} style={{background:colorOf(a.status)+"22",color:colorOf(a.status),border:`1px solid ${colorOf(a.status)}44`,borderRadius:7,padding:"3px 7px",fontSize:".73rem",cursor:"pointer",fontFamily:"var(--font-b)"}}>
@@ -1379,343 +1458,380 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[]})=>{
 
 const ALPHA=["A","B","C","D","E","F","G","H"];
 
+const getYouTubeId=url=>{const m=url?.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([\w-]{11})/);return m?m[1]:null;};
+const getSpotifyTrackId=url=>{const m=url?.match(/spotify\.com\/(?:intl-[a-z-]+\/)?track\/([\w]+)/);return m?m[1]:null;};
+const isSpotifyUrl=url=>/spotify\.com\//.test(url||"");
+const isYouTubeUrl=url=>/youtu(be\.com|\.be)\//.test(url||"");
+
+const blankQuestion=(type="multiple")=>({
+  type,
+  q:"",
+  // multiple choice
+  options:["","","",""],
+  answer:[0],
+  // open
+  openAnswer:"",
+  // music
+  songUrl:"",
+  songPlaySeconds:30,
+  songArtist:"",
+  songTitle:"",
+  // common
+  points:10,
+  timeLimit:null,
+  image:null,
+});
+
+const TEAM_AVATARS=["🦁","🐻","🦊","🐺","🦅","🐉","🦄","🐯","🦈","🦜","🐸","🦀","🐙","🦋","🐊","🦏","🦖","🎭","⚡","🔥","💎","👑","🎸","🏆","🎪","🦝","🐬","🦓"];
+
 // Backwards-compat: old quizzes had flat `questions`, new ones use `rounds`
-const normalizeQuiz=q=>q.rounds?q:{
-  ...q,defaultTime:30,
-  rounds:[{id:"r0",title:"Round 1",theme:"",questions:q.questions||[]}],
+const normalizeQuiz=q=>{
+  const normAnswer=a=>Array.isArray(a)?a:(a!=null?[a]:[0]);
+  const withType=qs=>(qs||[]).map(q=>({...q,type:q.type||"multiple",answer:normAnswer(q.answer),openAnswer:q.openAnswer||"",songUrl:q.songUrl||"",songPlaySeconds:q.songPlaySeconds||30,songArtist:q.songArtist||"",songTitle:q.songTitle||""}));
+  const normTeams=(ts=[])=>ts.map((t,i)=>({avatar:TEAM_AVATARS[i%TEAM_AVATARS.length],...t}));
+  if(q.rounds)return{...q,teams:normTeams(q.teams),rounds:q.rounds.map(r=>({icon:"🎯",description:"",...r,questions:withType(r.questions)}))};
+  return{...q,teams:normTeams(q.teams),defaultTime:30,rounds:[{id:"r0",title:"Round 1",theme:"",icon:"🎯",description:"",questions:withType(q.questions)}]};
 };
 
-const QuizTab=({evt,onUpdate,currentUser,isPast,users=[]})=>{
-  const [view,setView]=useState("list");
-  const [activeQuiz,setActiveQuiz]=useState(null);
-  const [hostState,setHostState]=useState(null);
-  const [playerAnswer,setPlayerAnswer]=useState(null);
-  const [timer,setTimer]=useState(0);
-  const timerRef=useRef(null);
-
-  const isAdmin=can.hostQuiz(currentUser);
+// ─────────────────────────────────────────────────────────────────────────────
+// QUIZ DASHBOARD  (fullscreen modal — list + editor in one place)
+// ─────────────────────────────────────────────────────────────────────────────
+const QuizDashboard=({evt,onUpdate,onClose,users=[]})=>{
   const quizzes=evt.quizzes||[];
   const saveQuizzes=q=>onUpdate({...evt,quizzes:q});
 
-  const startHost=(quiz)=>{
-    const nq=normalizeQuiz(quiz);
-    setActiveQuiz(nq);
-    setHostState({phase:"round-intro",roundIdx:0,qIdx:0,scores:Object.fromEntries(evt.attendees.map(a=>[a.name,0])),answers:{},pausedPhase:null});
-    setView("host");
-  };
+  const [panel,setPanel]=useState("welcome");   // "welcome" | "new" | "edit"
+  const [editTarget,setEditTarget]=useState(null);
+  const [presenterQuiz,setPresenterQuiz]=useState(null);
 
-  const currentRound=activeQuiz&&hostState?activeQuiz.rounds[hostState.roundIdx]:null;
-  const currentQ=currentRound?currentRound.questions[hostState.qIdx]:null;
-  const totalRounds=activeQuiz?.rounds?.length||0;
-  const totalQInRound=currentRound?.questions?.length||0;
+  const openNew=()=>{setEditTarget(null);setPanel("new");};
+  const openEdit=quiz=>{setEditTarget(normalizeQuiz(quiz));setPanel("edit");};
+  const closePanel=()=>{setPanel("welcome");setEditTarget(null);};
 
-  // Timer — fires when entering "question" phase
+  // Keyboard close
   useEffect(()=>{
-    if(view==="host"&&hostState?.phase==="question"&&currentQ){
-      const limit=currentQ.timeLimit||activeQuiz.defaultTime||30;
-      setTimer(limit);
-      timerRef.current=setInterval(()=>{
-        setTimer(t=>{if(t<=1){clearInterval(timerRef.current);revealAnswer();return 0;}return t-1;});
-      },1000);
-    }
-    return()=>clearInterval(timerRef.current);
-  },[hostState?.phase,hostState?.roundIdx,hostState?.qIdx]);
+    const h=e=>{if(e.key==="Escape"&&panel==="welcome")onClose();};
+    window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h);
+  },[panel,onClose]);
 
-  const revealAnswer=useCallback(()=>{
-    clearInterval(timerRef.current);
-    setHostState(s=>{
-      if(!activeQuiz||!s)return s;
-      const q=activeQuiz.rounds[s.roundIdx].questions[s.qIdx];
-      const newScores={...s.scores};
-      Object.entries(s.answers||{}).forEach(([name,picked])=>{
-        if(picked===q.answer)newScores[name]=(newScores[name]||0)+(q.points||100);
-      });
-      return{...s,phase:"answer",scores:newScores};
-    });
-  },[activeQuiz]);
-
-  const nextStep=()=>{
-    setPlayerAnswer(null);
-    setHostState(s=>{
-      if(!s||!activeQuiz)return s;
-      const round=activeQuiz.rounds[s.roundIdx];
-      const isLastQ=s.qIdx>=round.questions.length-1;
-      const isLastRound=s.roundIdx>=activeQuiz.rounds.length-1;
-      if(!isLastQ) return{...s,phase:"question",qIdx:s.qIdx+1,answers:{}};
-      if(!isLastRound) return{...s,phase:"round-scores",answers:{}};
-      const finished={...activeQuiz,status:"finished",scores:s.scores};
-      saveQuizzes(quizzes.map(q=>q.id===activeQuiz.id?finished:q));
-      setActiveQuiz(finished);
-      return{...s,phase:"finished"};
-    });
-  };
-
-  const startRound=()=>setHostState(s=>({...s,phase:"question"}));
-  const startNextRound=()=>setHostState(s=>({...s,phase:"round-intro",roundIdx:s.roundIdx+1,qIdx:0,answers:{}}));
-  const pauseQuiz=()=>{clearInterval(timerRef.current);setHostState(s=>({...s,pausedPhase:s.phase,phase:"paused"}));};
-  const resumeQuiz=()=>setHostState(s=>({...s,phase:s.pausedPhase,pausedPhase:null}));
-
-  const recordAnswer=(name,idx)=>{
-    if(hostState?.phase!=="question")return;
-    setHostState(s=>({...s,answers:{...(s.answers||{}),[name]:idx}}));
-  };
-  const submitPlayerAnswer=(idx)=>{
-    if(playerAnswer!==null)return;
-    setPlayerAnswer(idx);
-    recordAnswer(currentUser.username,idx);
-  };
-
-  if(view==="build") return(
-    <QuizBuilder onSave={quiz=>{saveQuizzes([...(evt.quizzes||[]),{...quiz,id:`qz${Date.now()}`,status:"ready",scores:{}}]);setView("list");}} onCancel={()=>setView("list")}/>
+  // Presenter overlays the entire dashboard
+  if(presenterQuiz) return(
+    <QuizPresenter quiz={presenterQuiz} evt={evt} users={users} onUpdate={onUpdate}
+      onClose={()=>setPresenterQuiz(null)}
+      onFinish={finalScores=>{
+        // For team quizzes: distribute team scores to individual members for stats
+        const pq=normalizeQuiz(presenterQuiz);
+        const hasTeams=(pq.teams||[]).length>0;
+        let memberScores={};
+        if(hasTeams){
+          pq.teams.forEach(t=>{
+            const pts=finalScores[t.name]||0;
+            (t.members||[]).forEach(m=>{memberScores[m]=(memberScores[m]||0)+pts;});
+          });
+        } else {
+          memberScores=finalScores;
+        }
+        saveQuizzes(quizzes.map(q=>q.id===presenterQuiz.id?{...q,status:"finished",scores:finalScores,memberScores,_liveState:null}:q));
+        setPresenterQuiz(null);
+      }}/>
   );
 
-  if(view==="host"&&activeQuiz&&hostState){
-    const sortedScores=Object.entries(hostState.scores).sort((a,b)=>b[1]-a[1]);
-    const {phase,roundIdx,qIdx}=hostState;
-    const timeLimit=currentQ?(currentQ.timeLimit||activeQuiz.defaultTime||30):30;
-    const flatQIdx=activeQuiz.rounds.slice(0,roundIdx).reduce((s,r)=>s+r.questions.length,0)+qIdx;
-    const ScoreList=({compact=false})=>(
-      <div style={{display:"grid",gap:".5rem"}}>
-        {sortedScores.map(([name,score],i)=>(
-          <div key={name} style={{display:"flex",alignItems:"center",gap:10,background:"var(--bg3)",borderRadius:8,padding:compact?"7px 12px":"10px 14px",border:!compact&&i===0?"1px solid var(--gold)":"1px solid var(--border)"}}>
-            <div style={{fontFamily:"var(--font-h)",fontSize:compact?".9rem":"1.1rem",color:["var(--gold)","var(--muted)","#cd7f32"][i]||"var(--muted2)",minWidth:28,textAlign:"center"}}>{["🥇","🥈","🥉"][i]||`${i+1}.`}</div>
-            <Avatar name={name} size={compact?24:28} {...getUA(name,users)}/>
-            <div style={{flex:1,fontWeight:600,fontSize:compact?".88rem":".95rem"}}>{name}</div>
-            <div style={{fontFamily:"var(--font-h)",color:"var(--amber)",fontSize:compact?"1rem":"1.1rem"}}>{score}</div>
-          </div>
-        ))}
-      </div>
-    );
-    return(
-      <div style={{display:"grid",gap:"1.2rem"}}>
-        {/* Header */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+  const SbBtn=({label,active=false,onClick})=>(
+    <button onClick={onClick}
+      style={{display:"block",width:"100%",textAlign:"left",padding:".65rem .85rem",borderRadius:"var(--radius-sm)",border:`1px solid ${active?"rgba(232,148,58,.4)":"transparent"}`,background:active?"rgba(232,148,58,.1)":"transparent",color:active?"var(--amber2)":"var(--cream)",cursor:"pointer",fontFamily:"var(--font-b)",fontSize:".83rem",fontWeight:active?600:400,marginBottom:2,transition:"all .12s"}}
+      onMouseEnter={e=>{if(!active)e.currentTarget.style.background="rgba(255,255,255,.04)";}}
+      onMouseLeave={e=>{if(!active)e.currentTarget.style.background="transparent";}}>
+      {label}
+    </button>
+  );
+
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:998,background:"var(--bg)",display:"flex",flexDirection:"column",fontFamily:"var(--font-b)"}}>
+      {/* Gold shimmer line */}
+      <div style={{height:3,flexShrink:0,background:"linear-gradient(90deg,var(--orange),var(--amber),var(--gold),var(--amber),var(--orange))",backgroundSize:"300% 100%",animation:"goldShimmer 3s linear infinite"}}/>
+
+      {/* Header */}
+      <div style={{flexShrink:0,display:"flex",alignItems:"center",justifyContent:"space-between",padding:".9rem 1.4rem",borderBottom:"1px solid var(--border)",background:"var(--bg2)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:"1.3rem"}}>🧠</span>
           <div>
-            <H size="1.2rem" style={{marginBottom:".2rem"}}>{activeQuiz.title}</H>
-            <div style={{fontSize:".78rem",color:"var(--muted)"}}>🎤 Quizmaster · Round {roundIdx+1}/{totalRounds}{currentRound?.title&&<span style={{color:"var(--amber)"}}> · {currentRound.title}</span>}</div>
-          </div>
-          <div style={{display:"flex",gap:6}}>
-            {phase==="question"&&<Btn onClick={pauseQuiz} variant="ghost" size="sm">⏸ Pause</Btn>}
-            {phase==="paused"&&<Btn onClick={resumeQuiz} variant="gold" size="sm">▶ Resume</Btn>}
-            <Btn onClick={()=>{clearInterval(timerRef.current);setView("list");setHostState(null);setActiveQuiz(null);}} variant="ghost" size="sm">✕ End</Btn>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"1.05rem",color:"var(--amber2)",lineHeight:1.1}}>Quiz Dashboard</div>
+            <div style={{fontSize:".7rem",color:"var(--muted)"}}>{evt.name}</div>
           </div>
         </div>
+        <button onClick={onClose}
+          style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"6px 14px",cursor:"pointer",fontFamily:"var(--font-b)",fontSize:".8rem",transition:"all .15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.background="rgba(224,85,85,.12)";e.currentTarget.style.color="var(--red)";e.currentTarget.style.borderColor="rgba(224,85,85,.4)";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="var(--muted)";e.currentTarget.style.borderColor="var(--border)";}}>
+          ✕ Close
+        </button>
+      </div>
 
-        {/* Progress bar */}
-        {phase!=="finished"&&phase!=="round-intro"&&phase!=="round-scores"&&phase!=="paused"&&(
-          <div>
-            <div style={{display:"flex",gap:3,marginBottom:3}}>
-              {activeQuiz.rounds.map((r,ri)=>r.questions.map((_,qi)=>{
-                const flat=activeQuiz.rounds.slice(0,ri).reduce((s,x)=>s+x.questions.length,0)+qi;
-                return <div key={`${ri}-${qi}`} style={{flex:1,height:4,borderRadius:2,background:flat<flatQIdx?"var(--amber)":flat===flatQIdx?"var(--amber2)":"var(--bg3)",transition:"background .3s"}}/>;
-              }))}
-            </div>
-            {totalRounds>1&&(
-              <div style={{display:"flex",gap:2}}>
-                {activeQuiz.rounds.map((r,ri)=>(
-                  <div key={ri} style={{flex:r.questions.length,fontSize:".65rem",color:ri===roundIdx?"var(--amber)":"var(--muted2)",textAlign:"center",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                    {r.title||`R${ri+1}`}
-                  </div>
-                ))}
+      {/* Body */}
+      <div style={{flex:1,display:"grid",gridTemplateColumns:"270px 1fr",overflow:"hidden"}}>
+
+        {/* ── LEFT SIDEBAR ─────────────────────────────────────────────── */}
+        <div style={{borderRight:"1px solid var(--border)",background:"var(--bg2)",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          {/* New quiz CTA */}
+          <div style={{padding:".85rem",borderBottom:"1px solid var(--border)",flexShrink:0}}>
+            <button onClick={openNew}
+              style={{width:"100%",background:panel==="new"?"rgba(232,148,58,.15)":"rgba(232,148,58,.07)",border:`1px dashed rgba(232,148,58,${panel==="new"?.6:.3})`,borderRadius:"var(--radius-sm)",color:"var(--amber)",padding:"9px 12px",cursor:"pointer",fontFamily:"var(--font-b)",fontSize:".83rem",fontWeight:700,transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}
+              onMouseEnter={e=>{e.currentTarget.style.background="rgba(232,148,58,.15)";}}
+              onMouseLeave={e=>{e.currentTarget.style.background=panel==="new"?"rgba(232,148,58,.15)":"rgba(232,148,58,.07)";}}>
+              + New Quiz
+            </button>
+          </div>
+
+          {/* Quiz list */}
+          <div style={{flex:1,overflowY:"auto",padding:".5rem"}}>
+            {quizzes.length===0&&(
+              <div style={{textAlign:"center",padding:"2.5rem 1rem",color:"var(--muted2)"}}>
+                <div style={{fontSize:"2rem",marginBottom:".5rem"}}>📋</div>
+                <div style={{fontSize:".78rem"}}>No quizzes yet</div>
               </div>
             )}
-          </div>
-        )}
-
-        {/* FINISHED */}
-        {phase==="finished"&&(
-          <Card style={{textAlign:"center",padding:"2.5rem"}}>
-            <div style={{fontSize:"3rem",marginBottom:"1rem"}}>🏆</div>
-            <H size="1.8rem">Quiz Complete!</H>
-            <div style={{maxWidth:360,margin:"1.5rem auto"}}><ScoreList/></div>
-            <Btn onClick={()=>{setView("list");setHostState(null);setActiveQuiz(null);}}>Back to Quizzes</Btn>
-          </Card>
-        )}
-
-        {/* PAUSED */}
-        {phase==="paused"&&(
-          <Card style={{textAlign:"center",padding:"2.5rem"}}>
-            <div style={{fontSize:"3rem",marginBottom:"1rem"}}>⏸</div>
-            <H size="1.5rem">Quiz Paused</H>
-            <div style={{color:"var(--muted)",fontSize:".88rem",marginBottom:"1.5rem"}}>Take a break — resume whenever you're ready.</div>
-            <div style={{maxWidth:340,margin:"0 auto 1.5rem"}}><Divider label="scores so far"/><div style={{marginTop:"1rem"}}><ScoreList compact/></div></div>
-            <Btn onClick={resumeQuiz} variant="gold" size="lg">▶ Resume Quiz</Btn>
-          </Card>
-        )}
-
-        {/* ROUND INTRO */}
-        {phase==="round-intro"&&(
-          <Card style={{textAlign:"center",padding:"3rem",background:"linear-gradient(135deg,#1f1609,#2e1e0a)",borderColor:"var(--border2)"}}>
-            <div style={{fontSize:"2rem",marginBottom:".6rem"}}>🎯</div>
-            <div style={{fontSize:".72rem",color:"var(--muted)",letterSpacing:".12em",textTransform:"uppercase",marginBottom:".5rem"}}>Round {roundIdx+1} of {totalRounds}</div>
-            <H size="1.8rem" style={{marginBottom:".4rem"}}>{currentRound?.title||`Round ${roundIdx+1}`}</H>
-            {currentRound?.theme&&<div style={{color:"var(--muted)",fontSize:".88rem",marginBottom:"1rem"}}>{currentRound.theme}</div>}
-            <div style={{color:"var(--muted2)",fontSize:".8rem",marginBottom:"1.5rem"}}>{currentRound?.questions?.length||0} questions</div>
-            <Btn onClick={startRound} variant="gold" size="lg">Start Round →</Btn>
-          </Card>
-        )}
-
-        {/* ROUND SCORES */}
-        {phase==="round-scores"&&(
-          <Card style={{textAlign:"center",padding:"2.5rem"}}>
-            <div style={{fontSize:"2.5rem",marginBottom:"1rem"}}>📊</div>
-            <H size="1.5rem">After Round {roundIdx+1}</H>
-            <div style={{color:"var(--muted)",fontSize:".82rem",marginBottom:"1.5rem"}}>
-              {totalRounds-roundIdx-1} round{totalRounds-roundIdx-1!==1?"s":""} to go!
-            </div>
-            <div style={{maxWidth:360,margin:"0 auto 1.5rem"}}><ScoreList/></div>
-            <Btn onClick={startNextRound} variant="gold" size="lg">Next Round →</Btn>
-          </Card>
-        )}
-
-        {/* QUESTION / ANSWER */}
-        {(phase==="question"||phase==="answer")&&currentQ&&(
-          <>
-            <Card style={{padding:"2rem",position:"relative"}}>
-              <div style={{fontSize:".75rem",color:"var(--muted)",letterSpacing:".1em",textTransform:"uppercase",marginBottom:"1rem"}}>
-                Q {qIdx+1}/{totalQInRound}{totalRounds>1&&<span style={{color:"var(--amber2)",marginLeft:8}}>{currentRound?.title}</span>}
-              </div>
-
-              {/* Timer ring */}
-              {phase==="question"&&(
-                <div style={{position:"absolute",top:"1.2rem",right:"1.2rem",width:52,height:52}}>
-                  <svg width="52" height="52" style={{transform:"rotate(-90deg)"}}>
-                    <circle cx="26" cy="26" r="22" fill="none" stroke="var(--bg3)" strokeWidth="4"/>
-                    <circle cx="26" cy="26" r="22" fill="none" stroke={timer/timeLimit>0.33?"var(--amber)":"var(--red)"} strokeWidth="4"
-                      strokeDasharray="138" strokeDashoffset={138*(1-timer/timeLimit)} style={{transition:"stroke-dashoffset 1s linear,stroke .3s"}}/>
-                  </svg>
-                  <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"var(--font-h)",fontSize:"1.1rem",color:timer/timeLimit>0.33?"var(--amber)":"var(--red)",fontWeight:900}}>{timer}</div>
-                </div>
-              )}
-
-              {/* Question image */}
-              {currentQ.image&&(
-                <div style={{marginBottom:"1.2rem",textAlign:"center"}}>
-                  <img src={currentQ.image} alt="" style={{maxWidth:"100%",maxHeight:260,objectFit:"contain",borderRadius:"var(--radius-sm)"}}/>
-                </div>
-              )}
-
-              <H size="1.4rem" style={{marginBottom:"1.5rem",paddingRight:currentQ.image?0:60}}>{currentQ.q}</H>
-
-              <div style={{display:"grid",gridTemplateColumns:currentQ.options.length<=2?"1fr":"1fr 1fr",gap:"1rem"}}>
-                {currentQ.options.map((opt,i)=>{
-                  const isCorrect=i===currentQ.answer;
-                  const answeredCount=Object.values(hostState.answers||{}).filter(a=>a===i).length;
-                  const bg=phase==="answer"?(isCorrect?"rgba(76,175,125,.25)":"rgba(224,85,85,.08)"):"var(--bg3)";
-                  const border=phase==="answer"?(isCorrect?"2px solid var(--green)":"1px solid rgba(224,85,85,.15)"):"1px solid var(--border)";
-                  return(
-                    <div key={i} style={{background:bg,border,borderRadius:"var(--radius-sm)",padding:"1rem",transition:"all .3s",position:"relative"}}>
-                      <div style={{fontSize:".88rem",fontWeight:600,color:phase==="answer"&&isCorrect?"var(--green)":"var(--cream)"}}>{ALPHA[i]}. {opt}</div>
-                      {phase==="answer"&&isCorrect&&<div style={{fontSize:".72rem",color:"var(--green)",marginTop:4}}>✓ Correct</div>}
-                      {answeredCount>0&&<div style={{position:"absolute",top:8,right:8,background:"rgba(232,148,58,.15)",borderRadius:6,padding:"2px 7px",fontSize:".7rem",color:"var(--amber)"}}>{answeredCount}</div>}
+            {quizzes.map(quiz=>{
+              const nq=normalizeQuiz(quiz);
+              const totalQ=nq.rounds.reduce((s,r)=>s+r.questions.length,0);
+              const isActive=panel==="edit"&&editTarget?.id===quiz.id;
+              const typeBreakdown=nq.rounds.flatMap(r=>r.questions).reduce((acc,q)=>{acc[q.type||"multiple"]=(acc[q.type||"multiple"]||0)+1;return acc;},{});
+              return(
+                <div key={quiz.id}
+                  style={{borderRadius:"var(--radius-sm)",marginBottom:4,border:`1px solid ${isActive?"rgba(232,148,58,.4)":"transparent"}`,background:isActive?"rgba(232,148,58,.08)":"transparent",overflow:"hidden",transition:"all .15s"}}>
+                  {/* Clickable main row */}
+                  <div onClick={()=>openEdit(quiz)} style={{padding:".65rem .85rem",cursor:"pointer"}}
+                    onMouseEnter={e=>{if(!isActive)e.currentTarget.parentElement.style.background="rgba(255,255,255,.03)";}}
+                    onMouseLeave={e=>{if(!isActive)e.currentTarget.parentElement.style.background="transparent";}}>
+                    <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3}}>
+                      <span style={{fontSize:".95rem",flexShrink:0}}>{nq.rounds[0]?.icon||"🎯"}</span>
+                      <div style={{flex:1,fontWeight:600,fontSize:".82rem",color:isActive?"var(--amber2)":"var(--cream)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{quiz.title}</div>
+                      <span style={{fontSize:".6rem",padding:"1px 6px",borderRadius:4,flexShrink:0,background:quiz.status==="finished"?"rgba(76,175,125,.15)":"rgba(255,255,255,.06)",color:quiz.status==="finished"?"var(--green)":"var(--muted2)",fontWeight:600}}>
+                        {quiz.status==="finished"?"✓ Done":"Ready"}
+                      </span>
                     </div>
-                  );
-                })}
-              </div>
-
-              {phase==="question"&&(
-                <div style={{display:"flex",gap:8,marginTop:"1.5rem",flexWrap:"wrap"}}>
-                  <Btn onClick={revealAnswer} variant="ghost" size="sm">Reveal Answer Early</Btn>
-                  <Btn onClick={pauseQuiz} variant="ghost" size="sm">⏸ Pause</Btn>
+                    <div style={{fontSize:".68rem",color:"var(--muted2)",display:"flex",gap:8}}>
+                      <span>{nq.rounds.length} round{nq.rounds.length!==1?"s":""}</span>
+                      <span>{totalQ}q</span>
+                      {typeBreakdown.music&&<span style={{color:"var(--purple)"}}>🎵 {typeBreakdown.music}</span>}
+                      {typeBreakdown.open&&<span style={{color:"var(--green)"}}>💬 {typeBreakdown.open}</span>}
+                    </div>
+                  </div>
+                  {/* Action bar */}
+                  <div style={{display:"flex",gap:4,padding:"0 .65rem .55rem"}} onClick={e=>e.stopPropagation()}>
+                    {quiz.status!=="finished"&&(
+                      <button onClick={()=>setPresenterQuiz(normalizeQuiz(quiz))}
+                        style={{flex:1,background:"rgba(232,148,58,.12)",border:"1px solid rgba(232,148,58,.3)",borderRadius:6,color:"var(--amber)",padding:"4px 8px",cursor:"pointer",fontSize:".7rem",fontFamily:"var(--font-b)",fontWeight:700,transition:"background .12s"}}
+                        onMouseEnter={e=>e.currentTarget.style.background="rgba(232,148,58,.25)"}
+                        onMouseLeave={e=>e.currentTarget.style.background="rgba(232,148,58,.12)"}>
+                        🎤 Present
+                      </button>
+                    )}
+                    <button onClick={()=>{if(isActive)closePanel();saveQuizzes(quizzes.filter(q=>q.id!==quiz.id));}}
+                      style={{background:"rgba(224,85,85,.08)",border:"1px solid rgba(224,85,85,.2)",borderRadius:6,color:"var(--red)",padding:"4px 9px",cursor:"pointer",fontSize:".7rem",fontFamily:"var(--font-b)",transition:"background .12s"}}
+                      onMouseEnter={e=>e.currentTarget.style.background="rgba(224,85,85,.2)"}
+                      onMouseLeave={e=>e.currentTarget.style.background="rgba(224,85,85,.08)"}>
+                      ✕
+                    </button>
+                  </div>
+                  {/* Finished scores mini-board */}
+                  {quiz.status==="finished"&&quiz.scores&&(
+                    <div style={{padding:"0 .65rem .65rem",display:"flex",gap:4,flexWrap:"wrap"}}>
+                      {Object.entries(quiz.scores).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([name,score],i)=>(
+                        <div key={name} style={{display:"flex",alignItems:"center",gap:4,background:"var(--bg3)",borderRadius:6,padding:"3px 7px"}}>
+                          <span style={{fontSize:".62rem"}}>{["🥇","🥈","🥉"][i]}</span>
+                          <span style={{fontSize:".7rem",fontWeight:600,color:"var(--cream)"}}>{getDisplayName(name,users)}</span>
+                          <span style={{fontSize:".68rem",color:"var(--amber)"}}>{score}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-              {phase==="answer"&&(
-                <Btn onClick={nextStep} style={{marginTop:"1.5rem"}} size="lg">
-                  {qIdx<totalQInRound-1?"Next Question →":roundIdx<totalRounds-1?"End Round & See Scores 📊":"See Final Results 🏆"}
-                </Btn>
-              )}
-            </Card>
+              );
+            })}
+          </div>
 
-            {/* Live scores */}
-            <Card>
-              <H size="1rem" style={{marginBottom:".8rem"}}>Live Scores</H>
-              <ScoreList compact/>
-            </Card>
-          </>
-        )}
+          {/* Sidebar footer stats */}
+          {quizzes.length>0&&(
+            <div style={{flexShrink:0,padding:".6rem 1rem",borderTop:"1px solid var(--border)",fontSize:".68rem",color:"var(--muted2)",display:"flex",gap:"1.2rem"}}>
+              <span>{quizzes.length} quiz{quizzes.length!==1?"zes":""}</span>
+              <span>{quizzes.reduce((s,q)=>s+normalizeQuiz(q).rounds.reduce((rs,r)=>rs+r.questions.length,0),0)} total questions</span>
+            </div>
+          )}
+        </div>
+
+        {/* ── RIGHT PANEL ──────────────────────────────────────────────── */}
+        <div style={{overflowY:"auto",background:"var(--bg)"}}>
+          {panel==="welcome"&&(
+            <div style={{height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",textAlign:"center",padding:"2rem",color:"var(--muted)"}}>
+              <div style={{fontSize:"3.5rem",marginBottom:"1.2rem",filter:"drop-shadow(0 0 30px rgba(232,148,58,.2))"}}>🎯</div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"1.4rem",color:"var(--amber2)",marginBottom:".5rem"}}>Select a quiz to edit</div>
+              <div style={{fontSize:".85rem",marginBottom:"2rem"}}>Or create a new one from the sidebar</div>
+              <Btn onClick={openNew} variant="gold">+ New Quiz</Btn>
+            </div>
+          )}
+
+          {(panel==="new"||panel==="edit")&&(
+            <div style={{padding:"1.5rem",maxWidth:820,margin:"0 auto"}}>
+              <QuizBuilder
+                existing={panel==="edit"?editTarget:null}
+                attendees={evt.attendees||[]}
+                onSave={quiz=>{
+                  if(panel==="new"){
+                    saveQuizzes([...quizzes,{...quiz,id:`qz${Date.now()}`,status:"ready",scores:{}}]);
+                  } else {
+                    saveQuizzes(quizzes.map(q=>q.id===editTarget.id?{...q,...quiz}:q));
+                  }
+                  closePanel();
+                }}
+                onCancel={closePanel}/>
+            </div>
+          )}
+        </div>
       </div>
-    );
-  }
+    </div>
+  );
+};
 
-  // Quiz list
+// ─────────────────────────────────────────────────────────────────────────────
+// QUIZ TAB  (entry point — opens QuizDashboard for admins, read-only for others)
+// ─────────────────────────────────────────────────────────────────────────────
+const QuizTab=({evt,onUpdate,currentUser,isPast,users=[],onOpenQuizDash})=>{
+  const isAdmin=can.hostQuiz(currentUser);
+  const quizzes=evt.quizzes||[];
+
   return(
     <div style={{display:"grid",gap:"1.2rem"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{fontSize:".85rem",color:"var(--muted)"}}>Pub quizzes for this event</div>
-        {isAdmin&&<Btn onClick={()=>setView("build")} size="sm">+ New Quiz</Btn>}
-      </div>
-      {!isAdmin&&<div style={{background:"rgba(232,148,58,.07)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"10px 14px",fontSize:".83rem",color:"var(--muted)"}}>🎤 Only admins can host a quiz. Join when the host starts one!</div>}
-      {quizzes.length===0&&(
-        <Card style={{textAlign:"center",padding:"3rem",color:"var(--muted)"}}>
-          <div style={{fontSize:"2.5rem",marginBottom:"1rem"}}>🧠</div>
-          <div style={{fontFamily:"var(--font-h)",marginBottom:".4rem"}}>No quizzes yet</div>
-          {isAdmin&&<div style={{fontSize:".83rem"}}>Create one to battle it out on the day!</div>}
-        </Card>
-      )}
-      {quizzes.map(quiz=>{
-        const nq=normalizeQuiz(quiz);
-        const totalQ=nq.rounds.reduce((s,r)=>s+r.questions.length,0);
-        const totalPts=nq.rounds.reduce((s,r)=>s+r.questions.reduce((ss,q)=>ss+(q.points||100),0),0);
-        const topScore=quiz.scores?Object.entries(quiz.scores).sort((a,b)=>b[1]-a[1])[0]:null;
-        return(
-          <Card key={quiz.id}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"1rem"}}>
-              <div>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
-                  <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber2)"}}>{quiz.title}</div>
-                  <Tag color={quiz.status==="finished"?"var(--green)":quiz.status==="live"?"var(--red)":"var(--muted)"}>{quiz.status==="finished"?"✓ Done":quiz.status==="live"?"🔴 Live":"Ready"}</Tag>
-                </div>
-                <div style={{fontSize:".78rem",color:"var(--muted)"}}>
-                  {nq.rounds.length>1?`${nq.rounds.length} rounds · `:""}{totalQ} questions · {totalPts} pts total
-                </div>
-                {nq.rounds.length>1&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>{nq.rounds.map((r,i)=><Tag key={i} color="var(--muted2)">{r.title||`Round ${i+1}`}</Tag>)}</div>}
-                {topScore&&quiz.status==="finished"&&<div style={{fontSize:".78rem",color:"var(--gold)",marginTop:3}}>🏆 Winner: {topScore[0]} ({topScore[1]} pts)</div>}
-              </div>
-              <div style={{display:"flex",gap:6,flexShrink:0}}>
-                {isAdmin&&quiz.status!=="finished"&&<Btn onClick={()=>startHost(quiz)} variant="gold" size="sm">🎤 Host</Btn>}
-                {isAdmin&&<Btn onClick={()=>saveQuizzes(quizzes.filter(q=>q.id!==quiz.id))} variant="danger" size="sm">✕</Btn>}
-              </div>
+        {isAdmin&&(
+          <button onClick={onOpenQuizDash}
+            style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,width:"100%",background:"rgba(232,148,58,.1)",border:"1px solid rgba(232,148,58,.35)",borderRadius:"var(--radius)",padding:"1.1rem 1.4rem",cursor:"pointer",fontFamily:"var(--font-b)",color:"var(--amber2)",fontSize:".95rem",fontWeight:700,transition:"all .18s"}}
+            onMouseEnter={e=>{e.currentTarget.style.background="rgba(232,148,58,.18)";e.currentTarget.style.borderColor="rgba(232,148,58,.6)";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="rgba(232,148,58,.1)";e.currentTarget.style.borderColor="rgba(232,148,58,.35)";}}>
+            <span style={{fontSize:"1.3rem"}}>🧠</span>
+            <div style={{textAlign:"left"}}>
+              <div>Open Quiz Dashboard</div>
+              <div style={{fontSize:".72rem",fontWeight:400,color:"var(--muted)",marginTop:1}}>Create, edit and present quizzes</div>
             </div>
-            {quiz.status==="finished"&&quiz.scores&&(
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {Object.entries(quiz.scores).sort((a,b)=>b[1]-a[1]).map(([name,score],i)=>(
-                  <div key={name} style={{display:"flex",alignItems:"center",gap:6,background:"var(--bg3)",borderRadius:8,padding:"5px 10px"}}>
-                    <span style={{fontSize:".72rem",color:["var(--gold)","var(--muted)","#cd7f32"][i]||"var(--muted2)"}}>{["🥇","🥈","🥉"][i]||`${i+1}.`}</span>
-                    <span style={{fontSize:".82rem",fontWeight:600}}>{name}</span>
-                    <span style={{fontSize:".78rem",color:"var(--amber)"}}>{score}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <span style={{marginLeft:"auto",fontSize:"1rem",opacity:.5}}>→</span>
+          </button>
+        )}
+
+        {!isAdmin&&quizzes.length===0&&(
+          <Card style={{textAlign:"center",padding:"3rem",color:"var(--muted)"}}>
+            <div style={{fontSize:"2.5rem",marginBottom:"1rem"}}>🧠</div>
+            <div style={{fontFamily:"var(--font-h)",marginBottom:".4rem"}}>No quiz yet</div>
+            <div style={{fontSize:".83rem"}}>The quizmaster will set one up — stay tuned!</div>
           </Card>
-        );
-      })}
+        )}
+
+        {/* Read-only quiz overview for all users */}
+        {quizzes.map(quiz=>{
+          const nq=normalizeQuiz(quiz);
+          const totalQ=nq.rounds.reduce((s,r)=>s+r.questions.length,0);
+          const topScore=quiz.scores?Object.entries(quiz.scores).sort((a,b)=>b[1]-a[1])[0]:null;
+          const typeBreakdown=nq.rounds.flatMap(r=>r.questions).reduce((acc,q)=>{acc[q.type||"multiple"]=(acc[q.type||"multiple"]||0)+1;return acc;},{});
+          return(
+            <Card key={quiz.id}>
+              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,flexWrap:"wrap"}}>
+                    <span style={{fontSize:"1.1rem"}}>{nq.rounds[0]?.icon||"🎯"}</span>
+                    <div style={{fontFamily:"var(--font-h)",fontSize:"1.05rem",color:"var(--amber2)"}}>{quiz.title}</div>
+                    <Tag color={quiz.status==="finished"?"var(--green)":quiz.status==="live"?"var(--red)":"var(--muted)"}>{quiz.status==="finished"?"✓ Done":quiz.status==="live"?"🔴 Live":"Ready"}</Tag>
+                  </div>
+                  <div style={{fontSize:".78rem",color:"var(--muted)",marginBottom:4}}>{nq.rounds.length>1?`${nq.rounds.length} rounds · `:""}{totalQ} question{totalQ!==1?"s":""}</div>
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                    {typeBreakdown.multiple&&<span style={{background:"rgba(91,155,213,.1)",border:"1px solid rgba(91,155,213,.25)",borderRadius:6,padding:"1px 7px",fontSize:".67rem",color:"var(--blue)"}}>{typeBreakdown.multiple} MC</span>}
+                    {typeBreakdown.open&&<span style={{background:"rgba(76,175,125,.1)",border:"1px solid rgba(76,175,125,.25)",borderRadius:6,padding:"1px 7px",fontSize:".67rem",color:"var(--green)"}}>{typeBreakdown.open} Open</span>}
+                    {typeBreakdown.music&&<span style={{background:"rgba(155,127,232,.1)",border:"1px solid rgba(155,127,232,.25)",borderRadius:6,padding:"1px 7px",fontSize:".67rem",color:"var(--purple)"}}>{typeBreakdown.music} 🎵 Music</span>}
+                  </div>
+                  {topScore&&quiz.status==="finished"&&<div style={{fontSize:".78rem",color:"var(--gold)",marginTop:5}}>🏆 {topScore[0]} · {topScore[1]} pts</div>}
+                </div>
+              </div>
+              {quiz.status==="finished"&&quiz.scores&&(
+                <div style={{display:"flex",gap:5,flexWrap:"wrap",borderTop:"1px solid var(--border)",paddingTop:".8rem",marginTop:".8rem"}}>
+                  {Object.entries(quiz.scores).sort((a,b)=>b[1]-a[1]).map(([name,score],i)=>(
+                    <div key={name} style={{display:"flex",alignItems:"center",gap:5,background:"var(--bg3)",borderRadius:8,padding:"5px 10px"}}>
+                      <span style={{fontSize:".7rem",color:["var(--gold)","rgba(192,192,192,.8)","#cd7f32"][i]||"var(--muted2)"}}>{["🥇","🥈","🥉"][i]||`${i+1}.`}</span>
+                      <Avatar name={name} size={20} {...(users.find(u=>u.username===name)||{})}/>
+                      <span style={{fontSize:".8rem",fontWeight:600}}>{getDisplayName(name,users)}</span>
+                      <span style={{fontSize:".76rem",color:"var(--amber)"}}>{score}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          );
+        })}
     </div>
   );
 };
 
 // Quiz Builder
-const QuizBuilder=({onSave,onCancel})=>{
-  const [title,setTitle]=useState("");
-  const [defaultTime,setDefaultTime]=useState(30);
-  const [rounds,setRounds]=useState([{id:`r${Date.now()}`,title:"Round 1",theme:"",questions:[{q:"",options:["","","",""],answer:0,points:100,timeLimit:null,image:null}]}]);
+const SEL_STYLE={background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"5px 8px",color:"var(--muted)",fontSize:".75rem",fontFamily:"var(--font-b)"};
+const ICON_BTN={background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:5,color:"var(--muted)",padding:"3px 8px",cursor:"pointer",fontSize:".75rem",fontFamily:"var(--font-b)",lineHeight:1.2,transition:"all .12s"};
+const ROUND_ICONS=["🎯","🎵","🧠","🌍","🎬","🍺","⚽","🔬","🎨","🏆","🎭","🌟","🍕","🚀","🦁","🎸","🏎️","💡","🎲","🌈"];
+const SONG_SECS=[3,5,7,10,15,20,25,30,45,60,90,120];
+const TYPE_META={
+  multiple:{label:"Multiple Choice",icon:"🔤",color:"var(--blue)",bg:"rgba(91,155,213,.1)",border:"rgba(91,155,213,.28)"},
+  open:    {label:"Open",          icon:"💬",color:"var(--green)",bg:"rgba(76,175,125,.1)",border:"rgba(76,175,125,.28)"},
+  music:   {label:"Music",         icon:"🎵",color:"var(--purple)",bg:"rgba(155,127,232,.12)",border:"rgba(155,127,232,.28)"},
+};
+
+const QuizBuilder=({onSave,onCancel,existing=null,attendees=[]})=>{
+  const [title,setTitle]=useState(existing?.title||"");
+  const [defaultTime,setDefaultTime]=useState(existing?.defaultTime||30);
+  const [rounds,setRounds]=useState(()=>{
+    if(existing?.rounds)return existing.rounds.map(r=>({icon:"🎯",description:"",...r,questions:r.questions.map(q=>({...blankQuestion(q.type||"multiple"),...q}))}));
+    return[{id:`r${Date.now()}`,title:"Round 1",theme:"",icon:"🎯",description:"",questions:[blankQuestion()]}];
+  });
+  const [teams,setTeams]=useState(existing?.teams||[]);
+  const [newTeamName,setNewTeamName]=useState("");
+  const [avatarPicker,setAvatarPicker]=useState(null);
+  const [activeRi,setActiveRi]=useState(0);
+  const [expandedQ,setExpandedQ]=useState(0);
+  const [builderTab,setBuilderTab]=useState("rounds");
+  const [showDesc,setShowDesc]=useState(false);
   const imgRefs=useRef({});
 
-  const addRound=()=>setRounds(r=>[...r,{id:`r${Date.now()}`,title:`Round ${r.length+1}`,theme:"",questions:[{q:"",options:["","","",""],answer:0,points:100,timeLimit:null,image:null}]}]);
-  const delRound=(ri)=>setRounds(r=>r.length>1?r.filter((_,i)=>i!==ri):r);
+  // ── Round helpers ────────────────────────────────────────────────
+  const addRound=()=>{
+    const ni=rounds.length;
+    setRounds(r=>[...r,{id:`r${Date.now()}`,title:`Round ${r.length+1}`,theme:"",icon:"🎯",description:"",questions:[blankQuestion()]}]);
+    setActiveRi(ni);setExpandedQ(0);
+  };
+  const delRound=ri=>{
+    if(rounds.length<=1)return;
+    setRounds(r=>r.filter((_,i)=>i!==ri));
+    setActiveRi(p=>p>=rounds.length-1?rounds.length-2:p);
+    setExpandedQ(null);
+  };
   const updRound=(ri,f,v)=>setRounds(r=>r.map((x,i)=>i===ri?{...x,[f]:v}:x));
 
-  const addQ=(ri)=>setRounds(r=>r.map((round,i)=>i===ri?{...round,questions:[...round.questions,{q:"",options:["","","",""],answer:0,points:100,timeLimit:null,image:null}]}:round));
+  // ── Question helpers ─────────────────────────────────────────────
+  const addQ=(ri,type="multiple")=>{
+    const ni=rounds[ri].questions.length;
+    setRounds(r=>r.map((round,i)=>i===ri?{...round,questions:[...round.questions,blankQuestion(type)]}:round));
+    setExpandedQ(ni);
+  };
   const delQ=(ri,qi)=>setRounds(r=>r.map((round,i)=>i===ri&&round.questions.length>1?{...round,questions:round.questions.filter((_,j)=>j!==qi)}:round));
+  const moveQ=(ri,qi,d)=>{
+    const j=qi+d;
+    setRounds(r=>r.map((round,i)=>{
+      if(i!==ri||j<0||j>=round.questions.length)return round;
+      const qs=[...round.questions];[qs[qi],qs[j]]=[qs[j],qs[qi]];
+      return{...round,questions:qs};
+    }));
+    setExpandedQ(j);
+  };
   const updQ=(ri,qi,f,v)=>setRounds(r=>r.map((round,i)=>i===ri?{...round,questions:round.questions.map((q,j)=>j===qi?{...q,[f]:v}:q)}:round));
   const updOpt=(ri,qi,oi,v)=>setRounds(r=>r.map((round,i)=>i===ri?{...round,questions:round.questions.map((q,j)=>j===qi?{...q,options:q.options.map((o,k)=>k===oi?v:o)}:q)}:round));
-
   const addOpt=(ri,qi)=>setRounds(r=>r.map((round,i)=>i===ri?{...round,questions:round.questions.map((q,j)=>j===qi&&q.options.length<8?{...q,options:[...q.options,""]}:q)}:round));
   const delOpt=(ri,qi,oi)=>setRounds(r=>r.map((round,i)=>i===ri?{...round,questions:round.questions.map((q,j)=>{
     if(j!==qi)return q;
     const opts=q.options.filter((_,k)=>k!==oi);
-    const ans=q.answer===oi?0:q.answer>oi?q.answer-1:q.answer;
-    return{...q,options:opts,answer:Math.min(ans,opts.length-1)};
+    const cur=Array.isArray(q.answer)?q.answer:[q.answer??0];
+    const ans=cur.filter(a=>a!==oi).map(a=>a>oi?a-1:a).filter(a=>a<opts.length);
+    return{...q,options:opts,answer:ans.length>0?ans:[0]};
   })}:round));
 
   const handleImg=async(ri,qi,e)=>{
@@ -1723,105 +1839,1568 @@ const QuizBuilder=({onSave,onCancel})=>{
     const path=`quiz-images/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
     const{data,error}=await supabase.storage.from("event-photos").upload(path,file);
     if(!error){const{data:{publicUrl}}=supabase.storage.from("event-photos").getPublicUrl(data.path);updQ(ri,qi,"image",publicUrl);}
-    else console.error("Image upload failed:",error);
     e.target.value="";
   };
 
-  const valid=title.trim()&&rounds.every(r=>r.title.trim()&&r.questions.every(q=>q.q.trim()&&q.options.filter(o=>o.trim()).length>=2));
+  // ── Team helpers ─────────────────────────────────────────────────
+  const assignedNames=teams.flatMap(t=>t.members);
+  const unassigned=(attendees||[]).filter(a=>!assignedNames.includes(a.name));
+  const addTeam=()=>{
+    if(!newTeamName.trim())return;
+    const usedAv=teams.map(t=>t.avatar||"");
+    const nextAv=TEAM_AVATARS.find(a=>!usedAv.includes(a))||TEAM_AVATARS[teams.length%TEAM_AVATARS.length];
+    setTeams(t=>[...t,{id:`tm${Date.now()}`,name:newTeamName.trim(),members:[],avatar:nextAv}]);
+    setNewTeamName("");
+  };
+
+  // ── Validation ───────────────────────────────────────────────────
+  const qValid=q=>{
+    if(!q.q.trim())return false;
+    if(q.type==="multiple")return q.options.filter(o=>o.trim()).length>=2;
+    if(q.type==="music")return q.songUrl.trim().length>0;
+    return true;
+  };
+  const valid=title.trim()&&rounds.every(r=>r.title.trim()&&r.questions.every(qValid));
+  const ar=rounds[activeRi]||rounds[0];
+  const ri=activeRi;
+
+  // ── Tab button helper ────────────────────────────────────────────
+  const TabBtn=({id,label,badge})=>(
+    <button onClick={()=>setBuilderTab(id)} style={{background:"none",border:"none",borderBottom:builderTab===id?"2px solid var(--amber)":"2px solid transparent",color:builderTab===id?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"8px 16px",fontFamily:"var(--font-b)",fontWeight:builderTab===id?600:400,fontSize:".85rem",marginBottom:-1,transition:"color .15s",display:"flex",alignItems:"center",gap:5}}>
+      {label}{badge>0&&<span style={{background:"rgba(232,148,58,.2)",borderRadius:10,padding:"0 6px",fontSize:".7rem",color:"var(--amber)"}}>{badge}</span>}
+    </button>
+  );
 
   return(
-    <div style={{display:"grid",gap:"1.2rem"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <H style={{marginBottom:0}}>New Quiz</H>
-        <Btn onClick={onCancel} variant="ghost" size="sm">Cancel</Btn>
+    <div style={{display:"flex",flexDirection:"column",gap:0}}>
+
+      {/* ── Top bar ────────────────────────────────────────────── */}
+      <div style={{display:"flex",gap:"1rem",alignItems:"center",marginBottom:"1.1rem",flexWrap:"wrap"}}>
+        <Inp value={title} onChange={e=>setTitle(e.target.value)} placeholder="Quiz title…" autoFocus
+          style={{flex:1,minWidth:160,fontFamily:"var(--font-h)",fontSize:"1.05rem",color:"var(--amber2)",padding:"10px 14px"}}/>
+        <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+          <Lbl style={{margin:0,whiteSpace:"nowrap"}}>Default time</Lbl>
+          <select value={defaultTime} onChange={e=>setDefaultTime(+e.target.value)} style={{...SEL_STYLE,padding:"9px 8px",color:"var(--cream)"}}>
+            {[10,15,20,30,45,60,90,120].map(t=><option key={t} value={t}>{t}s</option>)}
+          </select>
+        </div>
+        <div style={{display:"flex",gap:6,flexShrink:0}}>
+          <Btn onClick={onCancel} variant="ghost" size="sm">Cancel</Btn>
+          <Btn onClick={()=>onSave({title,defaultTime,rounds,teams})} disabled={!valid} variant="gold" size="sm">
+            {existing?"Save Changes":"Create Quiz"}
+          </Btn>
+        </div>
       </div>
 
-      {/* Quiz-level settings */}
-      <Card style={{background:"var(--bg3)"}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:"1rem",alignItems:"end"}}>
-          <div><Lbl>Quiz Title</Lbl><Inp value={title} onChange={e=>setTitle(e.target.value)} placeholder="Mensday Pub Quiz" autoFocus/></div>
-          <div>
-            <Lbl>Default time / question</Lbl>
-            <select value={defaultTime} onChange={e=>setDefaultTime(+e.target.value)} style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 10px",color:"var(--cream)",fontSize:".88rem",fontFamily:"var(--font-b)"}}>
-              {[10,15,20,30,45,60,90,120].map(t=><option key={t} value={t}>{t}s</option>)}
-            </select>
+      {/* ── Builder tabs ───────────────────────────────────────── */}
+      <div style={{display:"flex",borderBottom:"1px solid var(--border)",marginBottom:"1.2rem"}}>
+        <TabBtn id="rounds" label="📋 Rounds" badge={0}/>
+        <TabBtn id="teams" label="👥 Teams" badge={teams.length}/>
+      </div>
+
+      {/* ════════════════════════════════════════════════════════ */}
+      {/* ROUNDS TAB                                              */}
+      {/* ════════════════════════════════════════════════════════ */}
+      {builderTab==="rounds"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
+
+          {/* Round tab strip */}
+          <div style={{display:"flex",alignItems:"center",gap:0,overflowX:"auto",borderBottom:"1px solid var(--border)"}}>
+            {rounds.map((r,rIdx)=>(
+              <div key={r.id} style={{display:"flex",alignItems:"center",borderBottom:rIdx===activeRi?"2px solid var(--amber2)":"2px solid transparent",marginBottom:-1}}>
+                <button onClick={()=>{setActiveRi(rIdx);setExpandedQ(null);}}
+                  style={{background:"none",border:"none",color:rIdx===activeRi?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"7px 12px",fontFamily:"var(--font-b)",fontSize:".82rem",fontWeight:rIdx===activeRi?600:400,whiteSpace:"nowrap",transition:"color .12s"}}>
+                  {r.icon} {r.title||`Round ${rIdx+1}`}
+                </button>
+                {rounds.length>1&&rIdx===activeRi&&(
+                  <button onClick={()=>delRound(rIdx)}
+                    style={{background:"none",border:"none",color:"var(--muted2)",cursor:"pointer",padding:"0 8px 0 0",fontSize:".7rem",lineHeight:1}}
+                    onMouseEnter={e=>e.target.style.color="var(--red)"}
+                    onMouseLeave={e=>e.target.style.color="var(--muted2)"}>✕</button>
+                )}
+              </div>
+            ))}
+            <button onClick={addRound}
+              style={{background:"none",border:"none",color:"var(--amber)",cursor:"pointer",padding:"7px 12px",fontFamily:"var(--font-b)",fontSize:".82rem",marginBottom:-1,whiteSpace:"nowrap"}}>
+              + Round
+            </button>
           </div>
-        </div>
-      </Card>
 
-      {/* Rounds */}
-      {rounds.map((round,ri)=>(
-        <div key={round.id} style={{border:"1px solid var(--border2)",borderRadius:"var(--radius)",overflow:"hidden"}}>
-          {/* Round header */}
-          <div style={{background:"rgba(232,148,58,.08)",borderBottom:"1px solid var(--border)",padding:"1rem 1.2rem",display:"flex",gap:"1rem",alignItems:"center",flexWrap:"wrap"}}>
-            <div style={{fontFamily:"var(--font-h)",color:"var(--amber)",fontSize:"1rem",flexShrink:0}}>Round {ri+1}</div>
-            <div style={{flex:1,minWidth:140}}><Inp value={round.title} onChange={e=>updRound(ri,"title",e.target.value)} placeholder="Round title…" style={{padding:"7px 10px",fontSize:".85rem"}}/></div>
-            <div style={{flex:1,minWidth:140}}><Inp value={round.theme} onChange={e=>updRound(ri,"theme",e.target.value)} placeholder="Theme (optional)…" style={{padding:"7px 10px",fontSize:".85rem"}}/></div>
-            {rounds.length>1&&<Btn onClick={()=>delRound(ri)} variant="danger" size="sm">✕ Remove</Btn>}
+          {/* Active round settings */}
+          <div style={{background:"rgba(232,148,58,.05)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".85rem 1rem"}}>
+            <div style={{display:"flex",gap:"1rem",alignItems:"center",flexWrap:"wrap"}}>
+              <select value={ar.icon} onChange={e=>updRound(ri,"icon",e.target.value)} style={{...SEL_STYLE,fontSize:"1.1rem",padding:"6px 4px",cursor:"pointer"}}>
+                {ROUND_ICONS.map(ic=><option key={ic} value={ic}>{ic}</option>)}
+              </select>
+              <Inp value={ar.title} onChange={e=>updRound(ri,"title",e.target.value)} placeholder="Round title…" style={{flex:1,minWidth:110,padding:"8px 10px",fontSize:".88rem"}}/>
+              <Inp value={ar.theme} onChange={e=>updRound(ri,"theme",e.target.value)} placeholder="Theme (optional)…" style={{flex:1,minWidth:110,padding:"8px 10px",fontSize:".88rem"}}/>
+              <button onClick={()=>setShowDesc(v=>!v)}
+                style={{...ICON_BTN,color:"var(--muted)",padding:"7px 10px",whiteSpace:"nowrap"}}>
+                {showDesc?"▲":"▼"} Intro text
+              </button>
+            </div>
+            {showDesc&&(
+              <div style={{marginTop:".7rem"}}>
+                <Inp value={ar.description} onChange={e=>updRound(ri,"description",e.target.value)} placeholder="Shown on screen before this round starts…" style={{fontSize:".82rem"}}/>
+              </div>
+            )}
           </div>
 
-          {/* Questions */}
-          <div style={{padding:"1rem",display:"grid",gap:"1rem"}}>
-            {round.questions.map((q,qi)=>(
-              <div key={qi} style={{background:"var(--bg3)",borderRadius:"var(--radius-sm)",padding:"1.1rem",border:"1px solid var(--border)"}}>
-                {/* Question header row */}
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:6}}>
-                  <div style={{fontWeight:600,fontSize:".88rem",color:"var(--amber)"}}>Q{qi+1}</div>
-                  <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                    <select value={q.points} onChange={e=>updQ(ri,qi,"points",+e.target.value)} style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"5px 8px",color:"var(--muted)",fontSize:".75rem",fontFamily:"var(--font-b)"}}>
-                      {[50,100,200,300,500].map(p=><option key={p} value={p}>{p} pts</option>)}
-                    </select>
-                    <select value={q.timeLimit??""} onChange={e=>updQ(ri,qi,"timeLimit",e.target.value===""?null:+e.target.value)} style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"5px 8px",color:"var(--muted)",fontSize:".75rem",fontFamily:"var(--font-b)"}}>
-                      <option value="">⏱ {defaultTime}s (default)</option>
-                      {[10,15,20,30,45,60,90,120].map(t=><option key={t} value={t}>⏱ {t}s</option>)}
-                    </select>
-                    {round.questions.length>1&&<Btn onClick={()=>delQ(ri,qi)} variant="danger" size="sm" style={{padding:"5px 10px"}}>✕</Btn>}
-                  </div>
-                </div>
+          {/* Questions accordion */}
+          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+            {ar.questions.map((q,qi)=>{
+              const meta=TYPE_META[q.type]||TYPE_META.multiple;
+              const isOpen=expandedQ===qi;
+              return(
+                <div key={qi} style={{border:`1px solid ${isOpen?meta.border:"var(--border)"}`,borderRadius:"var(--radius-sm)",overflow:"hidden",transition:"border-color .2s"}}>
 
-                {/* Question text */}
-                <div style={{marginBottom:".8rem"}}>
-                  <Lbl>Question</Lbl>
-                  <Inp value={q.q} onChange={e=>updQ(ri,qi,"q",e.target.value)} placeholder="Type your question here…"/>
-                </div>
-
-                {/* Image */}
-                <div style={{marginBottom:"1rem"}}>
-                  {q.image?(
-                    <div style={{position:"relative",display:"inline-block"}}>
-                      <img src={q.image} alt="" style={{maxWidth:"100%",maxHeight:150,borderRadius:"var(--radius-sm)",objectFit:"contain",display:"block"}}/>
-                      <button onClick={()=>updQ(ri,qi,"image",null)} style={{position:"absolute",top:4,right:4,background:"rgba(0,0,0,.75)",border:"none",borderRadius:"50%",color:"#fff",width:22,height:22,cursor:"pointer",fontSize:"13px",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"var(--font-b)"}}>✕</button>
+                  {/* Card header (always visible) */}
+                  <div onClick={()=>setExpandedQ(isOpen?null:qi)}
+                    style={{display:"flex",alignItems:"center",gap:8,padding:".65rem 1rem",cursor:"pointer",background:isOpen?meta.bg:"var(--bg3)",transition:"background .15s",userSelect:"none"}}>
+                    <span style={{fontSize:".78rem",fontWeight:700,color:meta.color,flexShrink:0}}>{meta.icon} Q{qi+1}</span>
+                    <span style={{fontSize:".67rem",padding:"1px 7px",borderRadius:4,border:`1px solid ${meta.border}`,color:meta.color,flexShrink:0}}>{meta.label}</span>
+                    <span style={{flex:1,fontSize:".82rem",color:q.q?"var(--cream)":"var(--muted2)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontStyle:q.q?"normal":"italic"}}>
+                      {q.q||"No question text yet…"}
+                    </span>
+                    <span style={{fontSize:".7rem",color:"var(--amber)",flexShrink:0}}>{q.points}pt</span>
+                    {/* Move + delete */}
+                    <div style={{display:"flex",gap:2,flexShrink:0}} onClick={e=>e.stopPropagation()}>
+                      <button style={{...ICON_BTN,opacity:qi===0?.3:1}} disabled={qi===0} onClick={()=>moveQ(ri,qi,-1)}>↑</button>
+                      <button style={{...ICON_BTN,opacity:qi===ar.questions.length-1?.3:1}} disabled={qi===ar.questions.length-1} onClick={()=>moveQ(ri,qi,1)}>↓</button>
+                      {ar.questions.length>1&&<button style={{...ICON_BTN,color:"var(--red)"}} onClick={()=>{delQ(ri,qi);if(expandedQ===qi)setExpandedQ(null);}}>✕</button>}
                     </div>
-                  ):(
-                    <>
-                      <input ref={el=>imgRefs.current[`${ri}-${qi}`]=el} type="file" accept="image/*" onChange={e=>handleImg(ri,qi,e)} style={{display:"none"}}/>
-                      <Btn onClick={()=>imgRefs.current[`${ri}-${qi}`]?.click()} variant="ghost" size="sm" style={{fontSize:".75rem"}}>📷 Add image</Btn>
-                    </>
+                    <span style={{color:"var(--muted2)",fontSize:".78rem",flexShrink:0}}>{isOpen?"▲":"▼"}</span>
+                  </div>
+
+                  {/* Expanded editor */}
+                  {isOpen&&(
+                    <div style={{padding:"1rem",background:"var(--bg2)",borderTop:`1px solid ${meta.border}`,display:"flex",flexDirection:"column",gap:".9rem"}}>
+                      {/* Type / pts / time row */}
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                        <select value={q.type} onChange={e=>updQ(ri,qi,"type",e.target.value)} style={{...SEL_STYLE,color:"var(--cream)",fontWeight:600,padding:"8px 8px"}}>
+                          <option value="multiple">🔤 Multiple Choice</option>
+                          <option value="open">💬 Open Question</option>
+                          <option value="music">🎵 Music</option>
+                        </select>
+                        <select value={q.points} onChange={e=>updQ(ri,qi,"points",+e.target.value)} style={SEL_STYLE}>
+                          {[1,2,3,5,10,20,50].map(p=><option key={p} value={p}>{p} pt{p!==1?"s":""}</option>)}
+                        </select>
+                        {q.type!=="music"&&(
+                          <select value={q.timeLimit??""} onChange={e=>updQ(ri,qi,"timeLimit",e.target.value===""?null:+e.target.value)} style={SEL_STYLE}>
+                            <option value="">⏱ {defaultTime}s (default)</option>
+                            {[10,15,20,30,45,60,90,120].map(t=><option key={t} value={t}>⏱ {t}s</option>)}
+                          </select>
+                        )}
+                      </div>
+
+                      {/* Question text */}
+                      <div>
+                        <Lbl>Question</Lbl>
+                        <Inp value={q.q} onChange={e=>updQ(ri,qi,"q",e.target.value)}
+                          placeholder={q.type==="music"?"Guess: artist and/or song title…":q.type==="open"?"Ask your open question…":"Type your question…"}/>
+                      </div>
+
+                      {/* ── Image — available for all question types ── */}
+                      <div>
+                        {q.image?(
+                          <div style={{position:"relative",display:"inline-block",marginBottom:4}}>
+                            <img src={q.image} alt="" style={{maxHeight:120,borderRadius:6,objectFit:"contain",display:"block"}}/>
+                            <button onClick={()=>updQ(ri,qi,"image",null)} style={{position:"absolute",top:3,right:3,background:"rgba(0,0,0,.8)",border:"none",borderRadius:"50%",color:"#fff",width:20,height:20,cursor:"pointer",fontSize:"11px",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                          </div>
+                        ):(
+                          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                            <input ref={el=>imgRefs.current[`${ri}-${qi}`]=el} type="file" accept="image/*" onChange={e=>handleImg(ri,qi,e)} style={{display:"none"}}/>
+                            <Btn onClick={()=>imgRefs.current[`${ri}-${qi}`]?.click()} variant="ghost" size="sm" style={{fontSize:".75rem"}}>📷 Upload</Btn>
+                            <span style={{fontSize:".7rem",color:"var(--muted)"}}>or</span>
+                            <input placeholder="Paste image URL…"
+                              onBlur={e=>{const v=e.target.value.trim();if(v)updQ(ri,qi,"image",v);e.target.value="";}}
+                              onKeyDown={e=>{if(e.key==="Enter"){const v=e.target.value.trim();if(v)updQ(ri,qi,"image",v);e.target.value="";}}}
+                              style={{flex:1,minWidth:140,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"6px 9px",color:"var(--cream)",fontSize:".78rem",outline:"none",fontFamily:"var(--font-b)"}}/>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* ── MULTIPLE CHOICE ── */}
+                      {q.type==="multiple"&&(
+                        <>
+                          <div>
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:5}}>
+                              <Lbl style={{margin:0}}>Options — tick ✓ to mark correct</Lbl>
+                              <span style={{fontSize:".68rem",color:"var(--muted)",fontStyle:"italic"}}>multiple allowed</span>
+                            </div>
+                            <div style={{display:"flex",flexDirection:"column",gap:5,marginTop:4}}>
+                              {q.options.map((opt,oi)=>{
+                                const correctArr=Array.isArray(q.answer)?q.answer:[q.answer??0];
+                                const isChk=correctArr.includes(oi);
+                                const toggle=()=>{const next=isChk?correctArr.filter(x=>x!==oi):[...correctArr,oi].sort((a,b)=>a-b);updQ(ri,qi,"answer",next);};
+                                return(
+                                  <div key={oi} style={{display:"flex",alignItems:"center",gap:7}}>
+                                    <div onClick={toggle}
+                                      style={{width:18,height:18,borderRadius:4,border:`2px solid ${isChk?"var(--green)":"var(--border)"}`,background:isChk?"var(--green)":"transparent",cursor:"pointer",flexShrink:0,transition:"all .15s",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                                      {isChk&&<span style={{color:"#fff",fontSize:10,fontWeight:900,lineHeight:1}}>✓</span>}
+                                    </div>
+                                    <span style={{width:"1rem",flexShrink:0,color:"var(--muted)",fontSize:".78rem",fontWeight:700}}>{ALPHA[oi]}</span>
+                                    <Inp value={opt} onChange={e=>updOpt(ri,qi,oi,e.target.value)} placeholder={`Option ${ALPHA[oi]}`} style={{padding:"7px 9px",fontSize:".82rem"}}/>
+                                    {q.options.length>2&&<button style={{...ICON_BTN,color:"var(--red)"}} onClick={()=>delOpt(ri,qi,oi)}>✕</button>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {q.options.length<8&&<Btn onClick={()=>addOpt(ri,qi)} variant="ghost" size="sm" style={{marginTop:6,fontSize:".75rem"}}>+ Add option</Btn>}
+                          </div>
+                        </>
+                      )}
+
+                      {/* ── OPEN QUESTION ── */}
+                      {q.type==="open"&&(
+                        <div>
+                          <Lbl>Expected answer (quizmaster reference only)</Lbl>
+                          <Inp value={q.openAnswer} onChange={e=>updQ(ri,qi,"openAnswer",e.target.value)} placeholder="Correct answer…"/>
+                          <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:3}}>Not shown to players — you award points verbally.</div>
+                        </div>
+                      )}
+
+                      {/* ── MUSIC QUESTION ── */}
+                      {q.type==="music"&&(
+                        <div style={{display:"flex",flexDirection:"column",gap:".85rem"}}>
+                          <div>
+                            <Lbl>Song link (YouTube or Spotify)</Lbl>
+                            <Inp value={q.songUrl} onChange={e=>updQ(ri,qi,"songUrl",e.target.value)} placeholder="https://youtu.be/… or https://open.spotify.com/track/…"/>
+                            {q.songUrl&&!isYouTubeUrl(q.songUrl)&&!isSpotifyUrl(q.songUrl)&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:3}}>⚠ Use a YouTube or Spotify link</div>}
+                            {q.songUrl&&isYouTubeUrl(q.songUrl)&&!getYouTubeId(q.songUrl)&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:3}}>⚠ Couldn't detect video ID</div>}
+                          </div>
+                          <div style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr",gap:"1rem",alignItems:"end"}}>
+                            <div>
+                              <Lbl>Play for</Lbl>
+                              <select value={q.songPlaySeconds} onChange={e=>updQ(ri,qi,"songPlaySeconds",+e.target.value)} style={{...SEL_STYLE,padding:"9px 8px",color:"var(--cream)"}}>
+                                {SONG_SECS.map(t=><option key={t} value={t}>{t}s</option>)}
+                              </select>
+                            </div>
+                            <div><Lbl>Artist (reveal)</Lbl><Inp value={q.songArtist} onChange={e=>updQ(ri,qi,"songArtist",e.target.value)} placeholder="Artist name…"/></div>
+                            <div><Lbl>Song title (reveal)</Lbl><Inp value={q.songTitle} onChange={e=>updQ(ri,qi,"songTitle",e.target.value)} placeholder="Song title…"/></div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
+              );
+            })}
+          </div>
 
-                {/* Answer options */}
-                <Lbl>Options — click ○ to mark correct answer</Lbl>
-                <div style={{display:"grid",gap:6,marginTop:6}}>
-                  {q.options.map((opt,oi)=>(
-                    <div key={oi} style={{display:"flex",alignItems:"center",gap:8}}>
-                      <div onClick={()=>updQ(ri,qi,"answer",oi)} style={{width:20,height:20,borderRadius:"50%",border:`2px solid ${q.answer===oi?"var(--green)":"var(--border)"}`,background:q.answer===oi?"var(--green)":"transparent",cursor:"pointer",flexShrink:0,transition:"all .2s"}}/>
-                      <div style={{width:"1.2rem",flexShrink:0,color:"var(--muted)",fontSize:".78rem",fontWeight:600}}>{ALPHA[oi]}</div>
-                      <Inp value={opt} onChange={e=>updOpt(ri,qi,oi,e.target.value)} placeholder={`Option ${ALPHA[oi]}`} style={{padding:"8px 10px",fontSize:".83rem"}}/>
-                      {q.options.length>2&&<Btn onClick={()=>delOpt(ri,qi,oi)} variant="ghost" size="sm" style={{padding:"5px 8px",flexShrink:0,fontSize:".72rem"}}>✕</Btn>}
+          {/* Add question */}
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",paddingTop:".2rem"}}>
+            <Btn onClick={()=>addQ(ri,"multiple")} variant="subtle" size="sm">+ Multiple Choice</Btn>
+            <Btn onClick={()=>addQ(ri,"open")} variant="subtle" size="sm">+ Open</Btn>
+            <Btn onClick={()=>addQ(ri,"music")} variant="subtle" size="sm">+ 🎵 Music</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════ */}
+      {/* TEAMS TAB                                               */}
+      {/* ════════════════════════════════════════════════════════ */}
+      {builderTab==="teams"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
+          {/* Create team */}
+          <div style={{display:"flex",gap:8}}>
+            <Inp value={newTeamName} onChange={e=>setNewTeamName(e.target.value)} placeholder="Team name…"
+              onKeyDown={e=>{if(e.key==="Enter")addTeam();}} style={{flex:1}}/>
+            <Btn onClick={addTeam} disabled={!newTeamName.trim()} size="sm">+ Create Team</Btn>
+          </div>
+
+          {attendees.length===0&&(
+            <div style={{textAlign:"center",padding:"2rem",color:"var(--muted)",fontSize:".85rem"}}>
+              No attendees on this event yet — add them first via RSVP.
+            </div>
+          )}
+
+          {/* Team cards */}
+          {teams.map((team,ti)=>(
+            <Card key={team.id} style={{background:"var(--bg3)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:".6rem"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div onClick={()=>setAvatarPicker(avatarPicker===ti?null:ti)}
+                    title="Change avatar"
+                    style={{fontSize:"1.5rem",cursor:"pointer",lineHeight:1,padding:"3px 5px",borderRadius:6,border:"1px solid var(--border)",background:"var(--bg2)",userSelect:"none"}}>
+                    {team.avatar||"🎯"}
+                  </div>
+                  <div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:"var(--amber2)"}}>{team.name}</div>
+                </div>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <span style={{fontSize:".7rem",color:"var(--muted)"}}>{team.members.length} member{team.members.length!==1?"s":""}</span>
+                  <Btn onClick={()=>setTeams(t=>t.filter((_,i)=>i!==ti))} variant="danger" size="sm" style={{padding:"3px 8px"}}>✕</Btn>
+                </div>
+              </div>
+              {avatarPicker===ti&&(
+                <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:".6rem",padding:".4rem",background:"var(--bg)",borderRadius:8,border:"1px solid var(--border)"}}>
+                  {TEAM_AVATARS.map(e=>(
+                    <div key={e} onClick={()=>{setTeams(ts=>ts.map((t,i)=>i===ti?{...t,avatar:e}:t));setAvatarPicker(null);}}
+                      style={{fontSize:"1.3rem",cursor:"pointer",padding:"4px 5px",borderRadius:6,border:team.avatar===e?"2px solid var(--amber)":"1px solid transparent",background:team.avatar===e?"rgba(232,148,58,.12)":"transparent",userSelect:"none"}}>
+                      {e}
                     </div>
                   ))}
                 </div>
-                {q.options.length<8&&<Btn onClick={()=>addOpt(ri,qi)} variant="ghost" size="sm" style={{marginTop:8,fontSize:".75rem"}}>+ Add option</Btn>}
+              )}
+              {/* Current members */}
+              {team.members.length>0&&(
+                <div style={{fontSize:".65rem",color:"var(--muted)",marginBottom:4,textTransform:"uppercase",letterSpacing:".06em"}}>
+                  Members · tap 👑 to set captain
+                </div>
+              )}
+              <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:team.members.length>0?".6rem":0}}>
+                {team.members.map(name=>{
+                  const isCap=team.captain===name;
+                  return(
+                    <div key={name} style={{display:"flex",alignItems:"center",gap:4,
+                      background:isCap?"rgba(201,146,42,.18)":"rgba(232,148,58,.1)",
+                      border:isCap?"1px solid rgba(201,146,42,.5)":"1px solid rgba(232,148,58,.28)",
+                      borderRadius:20,padding:"3px 8px 3px 6px",transition:"all .15s"}}>
+                      <button
+                        onClick={()=>setTeams(ts=>ts.map((t,i)=>i===ti?{...t,captain:t.captain===name?null:name}:t))}
+                        title={isCap?"Remove captain":"Make team captain"}
+                        style={{background:"none",border:"none",cursor:"pointer",fontSize:".75rem",padding:0,opacity:isCap?1:.3,lineHeight:1,transition:"opacity .15s",userSelect:"none"}}>
+                        👑
+                      </button>
+                      <span style={{fontSize:".82rem",fontWeight:isCap?700:600,color:isCap?"var(--gold)":"var(--cream)"}}>{name}</span>
+                      <button onClick={()=>setTeams(ts=>ts.map((t,i)=>i===ti?{...t,members:t.members.filter(m=>m!==name),captain:t.captain===name?null:t.captain}:t))}
+                        style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:".75rem",padding:"0 0 0 2px",lineHeight:1}}>✕</button>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-            <Btn onClick={()=>addQ(ri)} variant="subtle" size="sm">+ Add Question to {round.title||`Round ${ri+1}`}</Btn>
+              {team.captain&&<div style={{fontSize:".7rem",color:"var(--gold)",marginBottom:".4rem"}}>👑 Captain: <strong>{team.captain}</strong> · answers for the team during live quiz</div>}
+              {/* Add member */}
+              {unassigned.length>0&&(
+                <select defaultValue="" onChange={e=>{if(!e.target.value)return;const n=e.target.value;setTeams(ts=>ts.map((t,i)=>i===ti?{...t,members:[...t.members,n]}:t));e.target.value="";}}>
+                  <option value="" disabled>+ Add member…</option>
+                  {unassigned.map(a=><option key={a.name} value={a.name}>{a.name}</option>)}
+                </select>
+              )}
+              {unassigned.length===0&&team.members.length===0&&<div style={{fontSize:".78rem",color:"var(--muted2)",fontStyle:"italic"}}>All lads are assigned elsewhere</div>}
+            </Card>
+          ))}
+
+          {/* Unassigned list */}
+          {unassigned.length>0&&teams.length>0&&(
+            <div>
+              <Lbl>Unassigned lads</Lbl>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:5}}>
+                {unassigned.map(a=>(
+                  <span key={a.name} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:20,padding:"3px 10px",fontSize:".8rem",color:"var(--muted)"}}>{a.name}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {teams.length===0&&attendees.length>0&&(
+            <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted)",fontSize:".85rem"}}>
+              Create a team above, then assign lads to it.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QUIZ PRESENTER (full-screen, second-screen style)
+// ─────────────────────────────────────────────────────────────────────────────
+const fmtTime=s=>`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
+
+const MusicPlayer=({q,onPlayStart,onPlayEnd,musicPhase,musicTimer})=>{
+  const ytId=getYouTubeId(q.songUrl);
+  const spId=getSpotifyTrackId(q.songUrl);
+  const totalSecs=q.songPlaySeconds||30;
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:"1.6rem"}}>
+      {/* YouTube audio-only: mount hidden so audio keeps playing, video never shown */}
+      {ytId&&musicPhase==="playing"&&(
+        <div style={{position:"fixed",left:"-9999px",top:0,width:1,height:1,overflow:"hidden",pointerEvents:"none"}} aria-hidden>
+          <iframe
+            src={`https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1&controls=0&modestbranding=1&rel=0`}
+            allow="autoplay; encrypted-media"
+            style={{width:320,height:180,border:"none"}}
+            title="audio"/>
+        </div>
+      )}
+
+      {/* Spotify — already audio-only embed */}
+      {spId&&musicPhase!=="ready"&&(
+        <iframe
+          src={`https://open.spotify.com/embed/track/${spId}?utm_source=generator&theme=0`}
+          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          style={{width:300,height:80,borderRadius:12,border:"none"}}
+          title="spotify"/>
+      )}
+
+      {/* Big music timer ring */}
+      {musicPhase==="playing"&&(
+        <div style={{position:"relative",width:140,height:140}}>
+          <svg width="140" height="140" style={{transform:"rotate(-90deg)"}}>
+            <circle cx="70" cy="70" r="62" fill="none" stroke="rgba(255,255,255,.07)" strokeWidth="6"/>
+            <circle cx="70" cy="70" r="62" fill="none" stroke={musicTimer/totalSecs>0.33?"var(--amber)":"var(--red)"} strokeWidth="6"
+              strokeDasharray="390" strokeDashoffset={390*(1-musicTimer/totalSecs)}
+              style={{transition:"stroke-dashoffset 1s linear,stroke .5s"}}/>
+          </svg>
+          <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2}}>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"3rem",color:musicTimer/totalSecs>0.33?"var(--amber)":"var(--red)",fontWeight:900,lineHeight:1,
+              ...(musicTimer<=5?{animation:"timerPulse .6s ease-in-out infinite"}:{})}}>{musicTimer}</div>
+            <div style={{fontSize:".62rem",color:"rgba(255,255,255,.3)",letterSpacing:".1em",textTransform:"uppercase"}}>sec</div>
           </div>
         </div>
-      ))}
+      )}
 
-      <Btn onClick={addRound} variant="ghost" size="sm" style={{borderStyle:"dashed"}}>+ Add Round</Btn>
-      <Btn onClick={()=>onSave({title,defaultTime,rounds})} disabled={!valid} size="lg">Save Quiz</Btn>
+      {/* Waveform bars when playing */}
+      {musicPhase==="playing"&&(
+        <div style={{display:"flex",gap:4,alignItems:"flex-end",height:36}}>
+          {[1,1.6,1.2,1.8,1,1.4,1.2,1.7,1,1.5].map((h,i)=>(
+            <div key={i} style={{width:5,borderRadius:3,background:"var(--amber)",height:`${h*12}px`,animation:`musicWave ${0.5+i*.08}s ease-in-out infinite alternate`,animationDelay:`${i*.06}s`}}/>
+          ))}
+        </div>
+      )}
+
+      {musicPhase==="ready"&&<div style={{fontSize:"3.5rem",filter:"drop-shadow(0 0 24px rgba(232,148,58,.45))"}}>🎵</div>}
+      {musicPhase==="done"&&<div style={{fontSize:"2.5rem",opacity:.5}}>⏹</div>}
+
+      {/* Controls */}
+      <div style={{display:"flex",gap:10}}>
+        {musicPhase==="ready"&&(
+          <button onClick={onPlayStart} style={{background:"rgba(232,148,58,.2)",border:"1px solid var(--amber)",borderRadius:12,color:"var(--amber2)",padding:"12px 32px",fontSize:"1rem",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:700,letterSpacing:".05em",backdropFilter:"blur(8px)"}}>
+            ▶ Play ({totalSecs}s)
+          </button>
+        )}
+        {musicPhase==="playing"&&(
+          <button onClick={onPlayEnd} style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.2)",borderRadius:12,color:"rgba(255,255,255,.6)",padding:"12px 26px",fontSize:".88rem",cursor:"pointer",fontFamily:"var(--font-b)",backdropFilter:"blur(8px)"}}>
+            ⏹ Stop early
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
+  const quiz=normalizeQuiz(rawQuiz);
+  const totalRounds=quiz.rounds.length;
+  const isTeamQuiz=(quiz.teams||[]).length>0;
+  const evtRef=useRef(evt);
+  evtRef.current=evt;
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [phase,setPhase]=useState("intro");
+  // phases: intro | round-intro | question | pause | round-summary | round-scores | final
+  const [roundIdx,setRoundIdx]=useState(0);
+  const [qIdx,setQIdx]=useState(0);
+  const [slidePhase,setSlidePhase]=useState("question"); // question | answer
+  const [scores,setScores]=useState(()=>isTeamQuiz
+    ?Object.fromEntries((quiz.teams||[]).map(t=>[t.name,0]))
+    :Object.fromEntries((evt.attendees||[]).map(a=>[a.name,0]))
+  );
+  const [answers,setAnswers]=useState({}); // participant answers: key→optionIdx (synced from liveState)
+  const [timer,setTimer]=useState(0);
+  const [fading,setFading]=useState(false);
+  const timerRef=useRef(null);
+
+  // Pause timer
+  const [prevPhase,setPrevPhase]=useState(null);
+  const [pauseMins,setPauseMins]=useState(5);
+  const [pauseSecs,setPauseSecs]=useState(0);
+  const [pauseTotal,setPauseTotal]=useState(300);
+  const [pauseRunning,setPauseRunning]=useState(false);
+  const [editingPause,setEditingPause]=useState(false);
+  const [pauseInput,setPauseInput]=useState("5:00");
+  const pauseRef=useRef(null);
+
+  // Round summary
+  const [summaryRevealed,setSummaryRevealed]=useState([]); // question indices revealed in round-summary
+
+  // Pause break-screen config (shown to participants)
+  const [pauseConfig,setPauseConfig]=useState({title:"Break Time",text:"The quizmaster will be right back!",image:null,musicUrl:""});
+  const [editPauseConfig,setEditPauseConfig]=useState(false);
+
+  // Music
+  const [musicPhase,setMusicPhase]=useState("ready"); // ready | playing | done
+  const [musicTimer,setMusicTimer]=useState(0);
+  const musicRef=useRef(null);
+
+  const currentRound=quiz.rounds[roundIdx];
+
+  // ── Live publishing helpers ───────────────────────────────────────────────
+  // Publish current presenter state into quiz._liveState so participants can follow
+  const publishLive=(overrides={})=>{
+    const e=evtRef.current;
+    const liveState={
+      phase:overrides.phase??phase,
+      roundIdx:overrides.roundIdx??roundIdx,
+      qIdx:overrides.qIdx??qIdx,
+      slidePhase:overrides.slidePhase??slidePhase,
+      scores:overrides.scores??scores,
+      answers:overrides.answers!==undefined?overrides.answers:(e.quizzes?.find(q=>q.id===quiz.id)?._liveState?.answers||{}),
+      teams:quiz.teams||[],
+      isTeamQuiz,
+      summaryRevealed:overrides.summaryRevealed??summaryRevealed,
+      pauseConfig,
+    };
+    const updatedQuizzes=(e.quizzes||[]).map(q=>q.id===quiz.id?{...q,_liveState:liveState}:q);
+    onUpdate({...e,quizzes:updatedQuizzes});
+  };
+
+  const clearLive=()=>{
+    const e=evtRef.current;
+    const updatedQuizzes=(e.quizzes||[]).map(q=>q.id===quiz.id?{...q,_liveState:null}:q);
+    onUpdate({...e,quizzes:updatedQuizzes});
+  };
+
+  const handleClose=()=>{clearLive();onClose();};
+  const currentQ=currentRound?.questions[qIdx];
+  const totalQInRound=currentRound?.questions?.length||0;
+  const timeLimit=currentQ?(currentQ.timeLimit||quiz.defaultTime||30):30;
+
+  // ── Effects ─────────────────────────────────────────────────────────────────
+  useEffect(()=>{
+    const el=document.documentElement;
+    if(el.requestFullscreen)el.requestFullscreen().catch(()=>{});
+    return()=>{if(document.exitFullscreen&&document.fullscreenElement)document.exitFullscreen().catch(()=>{});};
+  },[]);
+
+  useEffect(()=>{
+    const h=e=>{
+      if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA"||e.target.tagName==="SELECT")return;
+      const k=kbRef.current;
+      if(e.key==="Escape"){k.handleClose();return;}
+      if((e.key==="r"||e.key==="R")&&k.phase==="question"&&k.slidePhase==="question"){
+        k.doRevealAnswer();return;
+      }
+      if(e.key==="ArrowRight"||e.key==="ArrowDown"){
+        e.preventDefault();
+        if(k.fading)return;
+        if(k.phase==="intro"){k.fade(()=>setPhase("round-intro"));return;}
+        if(k.phase==="round-intro"){k.fade(()=>{setPhase("question");setSlidePhase("question");setMusicPhase("ready");setAnswers({});k.publishLive({phase:"question",slidePhase:"question",qIdx:0,answers:{},roundIdx:k.roundIdx});});return;}
+        if(k.phase==="question"){k.doNextStep();return;}
+        if(k.phase==="round-summary"){k.doAfterSummary();return;}
+        if(k.phase==="round-scores"){
+          const nr=k.roundIdx+1;
+          k.fade(()=>{setRoundIdx(nr);setQIdx(0);setPhase("round-intro");setAnswers({});setMusicPhase("ready");k.publishLive({phase:"round-intro",roundIdx:nr,qIdx:0,answers:{},slidePhase:"question"});});
+          return;
+        }
+      }
+      if(e.key==="ArrowLeft"||e.key==="ArrowUp"){
+        e.preventDefault();
+        if(k.fading)return;
+        clearInterval(timerRef.current);
+        if(k.phase==="question"){
+          if(k.qIdx>0){
+            const pq=k.qIdx-1;
+            k.fade(()=>{setQIdx(pq);setSlidePhase("question");setAnswers({});setMusicPhase("ready");k.publishLive({qIdx:pq,slidePhase:"question",answers:{},roundIdx:k.roundIdx});});
+          } else {
+            k.fade(()=>{setPhase("round-intro");k.publishLive({phase:"round-intro",roundIdx:k.roundIdx,qIdx:0});});
+          }
+          return;
+        }
+        if(k.phase==="round-summary"){
+          const lq=k.currentRound.questions.length-1;
+          k.fade(()=>{setPhase("question");setQIdx(lq);setSlidePhase("question");setAnswers({});k.publishLive({phase:"question",qIdx:lq,slidePhase:"question",answers:{},roundIdx:k.roundIdx});});
+          return;
+        }
+        if(k.phase==="round-scores"){
+          k.fade(()=>{setPhase("round-summary");setSummaryRevealed([]);k.publishLive({phase:"round-summary",summaryRevealed:[]});});
+          return;
+        }
+        if(k.phase==="round-intro"){
+          if(k.roundIdx>0){const pr=k.roundIdx-1;k.fade(()=>{setRoundIdx(pr);setPhase("round-scores");k.publishLive({phase:"round-scores",roundIdx:pr});});}
+          else{k.fade(()=>{setPhase("intro");k.publishLive({phase:"intro"});});}
+          return;
+        }
+        if(k.phase==="final"){
+          const lr=k.totalRounds-1;
+          k.fade(()=>{setRoundIdx(lr);setPhase("round-summary");setSummaryRevealed([]);k.publishLive({phase:"round-summary",roundIdx:lr,summaryRevealed:[]});});
+          return;
+        }
+      }
+    };
+    window.addEventListener("keydown",h);
+    return()=>window.removeEventListener("keydown",h);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
+  useEffect(()=>{
+    if(phase==="question"&&slidePhase==="question"&&currentQ&&currentQ.type!=="music"&&currentQ.type!=="open"){
+      setTimer(timeLimit);
+      timerRef.current=setInterval(()=>{
+        setTimer(t=>{if(t<=1){clearInterval(timerRef.current);return 0;}return t-1;});
+      },1000);
+    }
+    return()=>clearInterval(timerRef.current);
+  },[phase,slidePhase,roundIdx,qIdx]);
+
+  useEffect(()=>{
+    if(musicPhase==="playing"&&currentQ?.type==="music"){
+      const secs=currentQ.songPlaySeconds||30;
+      setMusicTimer(secs);
+      musicRef.current=setInterval(()=>{
+        setMusicTimer(t=>{if(t<=1){clearInterval(musicRef.current);setMusicPhase("done");return 0;}return t-1;});
+      },1000);
+    }
+    return()=>clearInterval(musicRef.current);
+  },[musicPhase]);
+
+  useEffect(()=>{
+    if(pauseRunning){
+      pauseRef.current=setInterval(()=>{
+        setPauseTotal(t=>{
+          if(t<=1){clearInterval(pauseRef.current);setPauseRunning(false);return 0;}
+          return t-1;
+        });
+      },1000);
+    }
+    return()=>clearInterval(pauseRef.current);
+  },[pauseRunning]);
+
+  // Publish state whenever slide changes (except during fade transitions)
+  useEffect(()=>{
+    if(fading)return;
+    publishLive({});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[phase,roundIdx,qIdx,slidePhase,scores,summaryRevealed,fading]);
+
+  // Poll for fresh participant answers every 2s (fast sync)
+  useEffect(()=>{
+    const evtId=evtRef.current.id;
+    const qid=quiz.id;
+    const poll=setInterval(async()=>{
+      const {data}=await supabase.from("events").select("quizzes").eq("id",evtId).single();
+      if(!data)return;
+      const ls=data.quizzes?.find(q=>q.id===qid)?._liveState;
+      if(ls?.qIdx===qIdx&&ls?.roundIdx===roundIdx)setAnswers(ls.answers||{});
+    },2000);
+    return()=>clearInterval(poll);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[quiz.id,qIdx,roundIdx]);
+
+  // ── Actions ──────────────────────────────────────────────────────────────────
+  const fade=cb=>{setFading(true);setTimeout(()=>{cb();setFading(false);},220);};
+
+  const doRevealAnswer=useCallback(()=>{
+    clearInterval(timerRef.current);
+    const correctSet=Array.isArray(currentQ?.answer)?currentQ.answer:[currentQ?.answer??0];
+    let newScores={...scores};
+    if(currentQ?.type==="multiple"){
+      Object.entries(answers).forEach(([key,picked])=>{
+        const pickedArr=Array.isArray(picked)?picked:[picked];
+        const isCorrect=correctSet.length===pickedArr.length&&correctSet.every(c=>pickedArr.includes(c));
+        if(isCorrect)newScores[key]=(newScores[key]||0)+(currentQ.points||10);
+      });
+    }
+    setScores(newScores);
+    setSlidePhase("answer");
+    publishLive({slidePhase:"answer",scores:newScores,answers});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[currentQ,answers,scores]);
+
+  const doNextStep=()=>{
+    clearInterval(timerRef.current);
+    clearInterval(musicRef.current);
+    const isLastQ=qIdx>=totalQInRound-1;
+    fade(()=>{
+      if(!isLastQ){
+        const nextQ=qIdx+1;
+        setQIdx(nextQ);setSlidePhase("question");setAnswers({});setMusicPhase("ready");
+        publishLive({qIdx:nextQ,slidePhase:"question",answers:{},roundIdx});
+      } else {
+        setSummaryRevealed([]);
+        setPhase("round-summary");
+        publishLive({phase:"round-summary",summaryRevealed:[]});
+      }
+    });
+  };
+
+  const revealSummaryQ=qi=>{
+    const next=[...summaryRevealed,qi].filter((v,i,a)=>a.indexOf(v)===i).sort((a,b)=>a-b);
+    setSummaryRevealed(next);
+    publishLive({summaryRevealed:next});
+  };
+
+  const revealAllSummary=()=>{
+    const all=currentRound.questions.map((_,i)=>i);
+    setSummaryRevealed(all);
+    publishLive({summaryRevealed:all});
+  };
+
+  const doAfterSummary=()=>{
+    const isLastRound=roundIdx>=totalRounds-1;
+    fade(()=>{
+      if(!isLastRound){setPhase("round-scores");publishLive({phase:"round-scores"});}
+      else{setPhase("final");publishLive({phase:"final"});}
+    });
+  };
+
+  const enterPause=()=>{
+    clearInterval(timerRef.current);
+    setPrevPhase({phase,slidePhase});
+    setPauseTotal(pauseMins*60+pauseSecs);
+    setPauseRunning(false);
+    fade(()=>setPhase("pause"));
+  };
+  const resumeFromPause=()=>{
+    clearInterval(pauseRef.current);setPauseRunning(false);
+    if(prevPhase)fade(()=>{setPhase(prevPhase.phase);setSlidePhase(prevPhase.slidePhase);setPrevPhase(null);});
+    else fade(()=>setPhase("round-intro"));
+  };
+
+  const parsePauseInput=v=>{
+    const parts=v.split(":");
+    const m=parseInt(parts[0])||0,s=parseInt(parts[1])||0;
+    const total=Math.max(10,Math.min(3600,m*60+s));
+    setPauseMins(Math.floor(total/60));setPauseSecs(total%60);
+    setPauseTotal(total);
+  };
+
+  const sortedScores=Object.entries(scores).sort((a,b)=>b[1]-a[1]);
+  const medal=["🥇","🥈","🥉"];
+
+  // ── Shared styles ────────────────────────────────────────────────────────────
+  const presenterBtn=(label,onClick,accent=false,shortcut=null)=>(
+    <button onClick={onClick} style={{background:accent?"rgba(232,148,58,.22)":"rgba(255,255,255,.07)",border:`1px solid ${accent?"rgba(232,148,58,.55)":"rgba(255,255,255,.15)"}`,borderRadius:10,color:accent?"var(--amber2)":"rgba(255,255,255,.85)",padding:"10px 22px",fontSize:".88rem",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:accent?700:500,backdropFilter:"blur(8px)",transition:"background .15s",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}
+      onMouseEnter={e=>{e.currentTarget.style.background=accent?"rgba(232,148,58,.35)":"rgba(255,255,255,.14)";}}
+      onMouseLeave={e=>{e.currentTarget.style.background=accent?"rgba(232,148,58,.22)":"rgba(255,255,255,.07)";}}>
+      {label}
+      {shortcut&&<span style={{fontSize:".6rem",opacity:.45,fontWeight:400,letterSpacing:".03em"}}>[{shortcut}]</span>}
+    </button>
+  );
+
+  // ── Keyboard ref (must be after all actions are defined) ────────────────────
+  const kbRef=useRef({});
+  kbRef.current={phase,slidePhase,qIdx,roundIdx,fading,totalQInRound,totalRounds,currentRound,
+    doRevealAnswer,doNextStep,doAfterSummary,fade,publishLive,handleClose};
+
+  // ── Render ───────────────────────────────────────────────────────────────────
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:1000,background:"#070501",overflow:"hidden",fontFamily:"var(--font-b)"}}>
+      {/* Gold top bar */}
+      <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,var(--orange),var(--amber),var(--gold),var(--amber),var(--orange))",backgroundSize:"300% 100%",animation:"goldShimmer 3s linear infinite",zIndex:30}}/>
+
+      {/* Background glow */}
+      <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 70% 50% at 50% 40%,rgba(232,148,58,.07),transparent 70%)",pointerEvents:"none"}}/>
+
+      {/* Top HUD */}
+      <div style={{position:"absolute",top:0,left:0,right:0,padding:"1.2rem 2rem",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:20}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{fontFamily:"var(--font-h)",fontSize:".9rem",color:"rgba(255,255,255,.4)",letterSpacing:".06em"}}>{quiz.title}</div>
+          {phase==="question"&&<span style={{background:"rgba(232,148,58,.15)",border:"1px solid rgba(232,148,58,.3)",borderRadius:20,padding:"2px 10px",fontSize:".7rem",color:"var(--amber)",fontWeight:700}}>Q{qIdx+1}/{totalQInRound}</span>}
+          {phase==="round-intro"&&<span style={{background:"rgba(255,255,255,.06)",borderRadius:20,padding:"2px 10px",fontSize:".7rem",color:"rgba(255,255,255,.45)"}}>Round {roundIdx+1}/{totalRounds}</span>}
+          {phase==="round-summary"&&<span style={{background:"rgba(91,155,213,.15)",border:"1px solid rgba(91,155,213,.3)",borderRadius:20,padding:"2px 10px",fontSize:".7rem",color:"var(--blue)",fontWeight:700}}>Round {roundIdx+1} Summary</span>}
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {phase!=="pause"&&phase!=="intro"&&<button onClick={enterPause} style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.12)",borderRadius:8,color:"rgba(255,255,255,.55)",padding:"6px 14px",cursor:"pointer",fontSize:".75rem",fontFamily:"var(--font-b)",backdropFilter:"blur(6px)"}}>⏸ Pause</button>}
+          <button onClick={handleClose} style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.14)",borderRadius:8,color:"rgba(255,255,255,.65)",padding:"6px 14px",cursor:"pointer",fontSize:".75rem",fontFamily:"var(--font-b)",backdropFilter:"blur(6px)"}}
+            onMouseEnter={e=>e.currentTarget.style.background="rgba(224,85,85,.2)"}
+            onMouseLeave={e=>e.currentTarget.style.background="rgba(255,255,255,.06)"}>
+            ✕ Exit
+          </button>
+        </div>
+      </div>
+
+      {/* Slide content */}
+      <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"5rem 2rem 6rem",opacity:fading?0:1,transition:"opacity .2s ease",zIndex:10,overflow:"auto"}}>
+
+        {/* ── INTRO ─────────────────────────────────────────────────────── */}
+        {phase==="intro"&&(
+          <div style={{textAlign:"center",maxWidth:700}}>
+            <div style={{fontSize:"3rem",marginBottom:"1.2rem",filter:"drop-shadow(0 0 30px rgba(232,148,58,.4))"}}>🧠</div>
+            <div style={{fontSize:".75rem",color:"var(--amber)",letterSpacing:".2em",textTransform:"uppercase",fontWeight:700,marginBottom:"1rem",opacity:.8}}>{evt.name}</div>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(2.4rem,7vw,5rem)",color:"#fff",lineHeight:1.08,marginBottom:"1.2rem",textShadow:"0 0 60px rgba(232,148,58,.2)"}}>{quiz.title}</div>
+            <div style={{color:"rgba(255,255,255,.4)",fontSize:"1rem",marginBottom:"3rem"}}>{totalRounds} round{totalRounds!==1?"s":""} · {quiz.rounds.reduce((s,r)=>s+r.questions.length,0)} questions</div>
+            <button onClick={()=>fade(()=>setPhase("round-intro"))} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"14px 40px",fontSize:"1.05rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)",letterSpacing:".04em"}}>
+              Start Quiz →
+            </button>
+          </div>
+        )}
+
+        {/* ── ROUND INTRO ───────────────────────────────────────────────── */}
+        {phase==="round-intro"&&currentRound&&(
+          <div style={{textAlign:"center",maxWidth:680}}>
+            <div style={{fontSize:"4rem",marginBottom:"1.2rem",filter:"drop-shadow(0 0 30px rgba(232,148,58,.3))",animation:"float 3.5s ease-in-out infinite"}}>{currentRound.icon||"🎯"}</div>
+            <div style={{fontSize:".72rem",color:"var(--muted)",letterSpacing:".18em",textTransform:"uppercase",marginBottom:".8rem"}}>Round {roundIdx+1} of {totalRounds}</div>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(2rem,6vw,4rem)",color:"#fff",lineHeight:1.1,marginBottom:".6rem",textShadow:"0 2px 30px rgba(0,0,0,.5)"}}>{currentRound.title}</div>
+            {currentRound.theme&&<div style={{color:"var(--amber2)",fontSize:"1.05rem",marginBottom:".8rem",opacity:.8}}>{currentRound.theme}</div>}
+            {currentRound.description&&<div style={{color:"rgba(255,255,255,.42)",fontSize:".95rem",lineHeight:1.6,marginBottom:"1.2rem",maxWidth:480,margin:"0 auto 1.2rem"}}>{currentRound.description}</div>}
+            <div style={{color:"rgba(255,255,255,.3)",fontSize:".82rem",marginBottom:"2.5rem"}}>{currentRound.questions.length} question{currentRound.questions.length!==1?"s":""}</div>
+            <button onClick={()=>fade(()=>{setPhase("question");setSlidePhase("question");setMusicPhase("ready");setAnswers({});publishLive({phase:"question",slidePhase:"question",qIdx:0,answers:{},roundIdx});})} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"14px 40px",fontSize:"1.05rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)"}}>
+              Start Round →
+            </button>
+          </div>
+        )}
+
+        {/* ── QUESTION ──────────────────────────────────────────────────── */}
+        {phase==="question"&&currentQ&&(
+          <div style={{width:"100%",maxWidth:860}}>
+            {/* Question header */}
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"1.6rem",flexWrap:"wrap"}}>
+              <span style={{background:"rgba(232,148,58,.18)",border:"1px solid rgba(232,148,58,.4)",borderRadius:20,padding:"4px 14px",fontSize:".72rem",color:"var(--amber)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase"}}>
+                {currentQ.type==="music"?"🎵 Music":currentQ.type==="open"?"💬 Open":null} Q{qIdx+1} / {totalQInRound}
+              </span>
+              {totalRounds>1&&<span style={{color:"rgba(255,255,255,.35)",fontSize:".85rem"}}>{currentRound.title}</span>}
+              <span style={{marginLeft:"auto",color:"rgba(255,255,255,.3)",fontSize:".78rem"}}>{currentQ.points} pts</span>
+            </div>
+
+            {/* ── Big central timer — multiple choice questions only ── */}
+            {currentQ.type==="multiple"&&slidePhase==="question"&&(
+              <div style={{textAlign:"center",marginBottom:"2rem"}}>
+                <div style={{position:"relative",width:120,height:120,margin:"0 auto"}}>
+                  <svg width="120" height="120" style={{transform:"rotate(-90deg)"}}>
+                    <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,.07)" strokeWidth="6"/>
+                    <circle cx="60" cy="60" r="52" fill="none"
+                      stroke={timer/timeLimit>0.33?"var(--amber)":"var(--red)"} strokeWidth="6"
+                      strokeDasharray="327" strokeDashoffset={327*(1-timer/timeLimit)}
+                      style={{transition:"stroke-dashoffset 1s linear,stroke .5s"}}/>
+                  </svg>
+                  <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:1,
+                    ...(timer<=5?{animation:"timerPulse .6s ease-in-out infinite"}:{})}}>
+                    <div style={{fontFamily:"var(--font-h)",fontSize:"2.8rem",fontWeight:900,lineHeight:1,
+                      color:timer/timeLimit>0.33?"var(--amber)":"var(--red)"}}>{timer}</div>
+                    <div style={{fontSize:".58rem",color:"rgba(255,255,255,.3)",letterSpacing:".12em",textTransform:"uppercase"}}>sec</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Question image */}
+            {currentQ.image&&slidePhase==="question"&&(
+              <div style={{textAlign:"center",marginBottom:"1.2rem"}}>
+                <img src={currentQ.image} alt="" style={{maxWidth:"100%",maxHeight:"28vh",objectFit:"contain",borderRadius:12,boxShadow:"0 8px 40px rgba(0,0,0,.5)"}}/>
+              </div>
+            )}
+            <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.5rem,4vw,2.8rem)",color:"#fff",lineHeight:1.2,marginBottom:"1.8rem",textShadow:"0 2px 20px rgba(0,0,0,.4)"}}>
+              {currentQ.q}
+            </div>
+
+            {/* "meerdere antwoorden" hint */}
+            {currentQ.type==="multiple"&&slidePhase==="question"&&(Array.isArray(currentQ.answer)?currentQ.answer:[currentQ.answer]).length>1&&(
+              <div style={{textAlign:"center",color:"rgba(255,255,255,.5)",fontSize:".82rem",fontStyle:"italic",marginBottom:"1rem",letterSpacing:".02em"}}>
+                meerdere antwoorden zijn mogelijk
+              </div>
+            )}
+
+            {/* MULTIPLE CHOICE options */}
+            {currentQ.type==="multiple"&&(()=>{
+              const correctSet=Array.isArray(currentQ.answer)?currentQ.answer:[currentQ.answer??0];
+              return(
+                <div style={{display:"grid",gridTemplateColumns:currentQ.options.length<=2?"1fr":"1fr 1fr",gap:"1rem"}}>
+                  {currentQ.options.map((opt,i)=>{
+                    const isCorrect=correctSet.includes(i);
+                    const aCount=Object.values(answers).filter(a=>(Array.isArray(a)?a:[a]).includes(i)).length;
+                    const bg=slidePhase==="answer"?(isCorrect?"rgba(76,175,125,.22)":"rgba(224,85,85,.07)"):"rgba(255,255,255,.05)";
+                    const border=slidePhase==="answer"?(isCorrect?"2px solid var(--green)":"1px solid rgba(255,255,255,.08)"):"1px solid rgba(255,255,255,.12)";
+                    return(
+                      <div key={i} style={{background:bg,border,borderRadius:12,padding:"1.1rem 1.4rem",transition:"all .35s",position:"relative",backdropFilter:"blur(6px)"}}>
+                        <div style={{fontSize:"clamp(.9rem,2.5vw,1.15rem)",fontWeight:600,color:slidePhase==="answer"&&isCorrect?"var(--green)":"#fff"}}>{ALPHA[i]}. {opt}</div>
+                        {slidePhase==="answer"&&isCorrect&&<div style={{fontSize:".75rem",color:"var(--green)",marginTop:5,fontWeight:700}}>✓ Correct</div>}
+                        {aCount>0&&<div style={{position:"absolute",top:8,right:10,background:"rgba(232,148,58,.15)",borderRadius:8,padding:"2px 8px",fontSize:".72rem",color:"var(--amber)",fontWeight:700}}>{aCount}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* OPEN QUESTION */}
+            {currentQ.type==="open"&&(
+              <div style={{textAlign:"center"}}>
+                {slidePhase==="question"&&<div style={{color:"rgba(255,255,255,.35)",fontSize:"1rem",marginBottom:".8rem"}}>Open your answer books…</div>}
+                {slidePhase==="answer"&&currentQ.openAnswer&&(
+                  <div style={{background:"rgba(76,175,125,.12)",border:"2px solid var(--green)",borderRadius:14,padding:"1.4rem 2rem",display:"inline-block",marginTop:".5rem"}}>
+                    <div style={{fontSize:".75rem",color:"var(--green)",letterSpacing:".1em",textTransform:"uppercase",marginBottom:".5rem",fontWeight:700}}>✓ Answer</div>
+                    <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.3rem,4vw,2.2rem)",color:"#fff"}}>{currentQ.openAnswer}</div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* MUSIC QUESTION */}
+            {currentQ.type==="music"&&slidePhase==="question"&&(
+              <MusicPlayer q={currentQ} musicPhase={musicPhase} musicTimer={musicTimer}
+                onPlayStart={()=>setMusicPhase("playing")}
+                onPlayEnd={()=>{clearInterval(musicRef.current);setMusicPhase("done");}}/>
+            )}
+            {currentQ.type==="music"&&slidePhase==="answer"&&(
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:".72rem",color:"var(--green)",letterSpacing:".14em",textTransform:"uppercase",fontWeight:700,marginBottom:".6rem"}}>🎵 The song was…</div>
+                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.6rem,4.5vw,2.8rem)",color:"var(--amber2)",marginBottom:".25rem",lineHeight:1.15}}>{currentQ.songTitle||"?"}</div>
+                {currentQ.songArtist&&<div style={{color:"rgba(255,255,255,.5)",fontSize:"1.1rem",marginBottom:"1.6rem"}}>{currentQ.songArtist}</div>}
+                {/* Reveal the video now */}
+                {getYouTubeId(currentQ.songUrl)&&(
+                  <div style={{display:"inline-block",borderRadius:14,overflow:"hidden",boxShadow:"0 16px 60px rgba(0,0,0,.6)",border:"1px solid rgba(255,255,255,.12)"}}>
+                    <iframe
+                      src={`https://www.youtube-nocookie.com/embed/${getYouTubeId(currentQ.songUrl)}?autoplay=1&controls=1&modestbranding=1&rel=0`}
+                      allow="autoplay; accelerometer; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                      style={{width:480,height:270,maxWidth:"80vw",display:"block",border:"none"}}
+                      title="reveal"/>
+                  </div>
+                )}
+                {getSpotifyTrackId(currentQ.songUrl)&&!getYouTubeId(currentQ.songUrl)&&(
+                  <iframe
+                    src={`https://open.spotify.com/embed/track/${getSpotifyTrackId(currentQ.songUrl)}?utm_source=generator&theme=0`}
+                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                    style={{width:320,height:80,borderRadius:12,border:"none",marginTop:".5rem"}}
+                    title="spotify-reveal"/>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── ROUND SUMMARY ─────────────────────────────────────────────── */}
+        {phase==="round-summary"&&currentRound&&(
+          <div style={{width:"100%",maxWidth:860,overflowY:"auto"}}>
+            <div style={{textAlign:"center",marginBottom:"1.8rem"}}>
+              <div style={{fontSize:"2rem",marginBottom:".5rem"}}>📋</div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.5rem,4vw,2.5rem)",color:"#fff",marginBottom:".3rem"}}>Round {roundIdx+1} Summary</div>
+              <div style={{color:"rgba(255,255,255,.35)",fontSize:".85rem"}}>{currentRound.title} · {totalQInRound} questions</div>
+            </div>
+            <div style={{display:"grid",gap:".75rem",marginBottom:"2rem"}}>
+              {currentRound.questions.map((q,qi)=>{
+                const revealed=summaryRevealed.includes(qi);
+                const correctSet=Array.isArray(q.answer)?q.answer:[q.answer??0];
+                return(
+                  <div key={qi} style={{background:revealed?"rgba(76,175,125,.07)":"rgba(255,255,255,.04)",border:revealed?"1px solid rgba(76,175,125,.28)":"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:"1rem 1.3rem",transition:"all .35s"}}>
+                    <div style={{display:"flex",alignItems:"flex-start",gap:10,justifyContent:"space-between"}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:".65rem",color:"var(--muted)",marginBottom:4,textTransform:"uppercase",letterSpacing:".08em"}}>
+                          Q{qi+1} · {q.type==="music"?"🎵":q.type==="open"?"💬":"🔤"} · {q.points}pts
+                        </div>
+                        <div style={{color:"#fff",fontSize:".95rem",fontWeight:600,lineHeight:1.35,marginBottom:revealed?".65rem":0}}>{q.q}</div>
+                        {revealed&&q.type==="multiple"&&(
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                            {q.options.map((opt,oi)=>(
+                              <span key={oi} style={{borderRadius:8,padding:"3px 11px",fontSize:".78rem",fontWeight:correctSet.includes(oi)?700:400,
+                                background:correctSet.includes(oi)?"rgba(76,175,125,.2)":"rgba(255,255,255,.05)",
+                                border:correctSet.includes(oi)?"1px solid rgba(76,175,125,.5)":"1px solid rgba(255,255,255,.1)",
+                                color:correctSet.includes(oi)?"var(--green)":"rgba(255,255,255,.4)"}}>
+                                {correctSet.includes(oi)&&"✓ "}{ALPHA[oi]}. {opt}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {revealed&&q.type==="open"&&q.openAnswer&&(
+                          <div style={{color:"var(--green)",fontSize:".85rem",fontWeight:600}}>✓ {q.openAnswer}</div>
+                        )}
+                        {revealed&&q.type==="music"&&(
+                          <div style={{color:"var(--amber2)",fontSize:".85rem"}}>{q.songTitle||"?"}{q.songArtist&&` — ${q.songArtist}`}</div>
+                        )}
+                      </div>
+                      {!revealed
+                        ?<button onClick={()=>revealSummaryQ(qi)} style={{background:"rgba(232,148,58,.15)",border:"1px solid rgba(232,148,58,.35)",borderRadius:8,color:"var(--amber2)",padding:"6px 14px",fontSize:".75rem",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:600,flexShrink:0,whiteSpace:"nowrap"}}>Reveal</button>
+                        :<span style={{color:"var(--green)",fontSize:"1rem",flexShrink:0}}>✓</span>
+                      }
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
+              {summaryRevealed.length<totalQInRound&&(
+                <button onClick={revealAllSummary} style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.14)",borderRadius:12,color:"rgba(255,255,255,.65)",padding:"10px 22px",fontSize:".85rem",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:500}}>
+                  Reveal All
+                </button>
+              )}
+              <button onClick={doAfterSummary} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"12px 36px",fontSize:"1rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)"}}>
+                {roundIdx>=totalRounds-1?"Final Results →":"View Scores →"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── ROUND SCORES ──────────────────────────────────────────────── */}
+        {phase==="round-scores"&&(
+          <div style={{textAlign:"center",maxWidth:520,width:"100%"}}>
+            <div style={{fontSize:"2.5rem",marginBottom:"1rem"}}>📊</div>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.5rem,4vw,2.5rem)",color:"#fff",marginBottom:".4rem"}}>After Round {roundIdx+1}</div>
+            <div style={{color:"rgba(255,255,255,.35)",fontSize:".85rem",marginBottom:"2rem"}}>{totalRounds-roundIdx-1} round{totalRounds-roundIdx-1!==1?"s":""} to go</div>
+            <div style={{display:"grid",gap:".6rem",textAlign:"left",marginBottom:"2.5rem"}}>
+              {sortedScores.map(([name,score],i)=>{
+                const team=isTeamQuiz?(quiz.teams||[]).find(t=>t.name===name):null;
+                const teamMembers=team?.members||[];
+                return(
+                  <div key={name} className="qp-score-row" style={{display:"flex",alignItems:"center",gap:12,background:"rgba(255,255,255,.05)",border:i===0?"1px solid rgba(232,148,58,.35)":"1px solid rgba(255,255,255,.07)",borderRadius:10,padding:"10px 16px",animationDelay:`${i*.06}s`}}>
+                    <div style={{fontSize:"1.1rem",minWidth:28,textAlign:"center"}}>{medal[i]||`${i+1}.`}</div>
+                    {isTeamQuiz?<span style={{fontSize:"1.4rem"}}>{team?.avatar||"🎯"}</span>:<Avatar name={name} size={28} {...(users.find(u=>u.username===name)||{})}/>}
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:600,color:"#fff",fontSize:".95rem"}}>{isTeamQuiz?name:getDisplayName(name,users)}</div>
+                      {isTeamQuiz&&teamMembers.length>0&&(
+                        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>
+                          {teamMembers.map(m=><span key={m} style={{background:"rgba(255,255,255,.08)",borderRadius:20,padding:"2px 8px",fontSize:".65rem",color:"rgba(255,255,255,.55)"}}>{getDisplayName(m,users)}</span>)}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{fontFamily:"var(--font-h)",color:"var(--amber2)",fontSize:"1.1rem",fontWeight:700}}>{score}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <button onClick={()=>{const nr=roundIdx+1;fade(()=>{setRoundIdx(nr);setQIdx(0);setPhase("round-intro");setAnswers({});setMusicPhase("ready");publishLive({phase:"round-intro",roundIdx:nr,qIdx:0,answers:{},slidePhase:"question"});});}} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"14px 40px",fontSize:"1.05rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)"}}>
+              Next Round →
+            </button>
+          </div>
+        )}
+
+        {/* ── FINAL ─────────────────────────────────────────────────────── */}
+        {phase==="final"&&(
+          <div style={{textAlign:"center",maxWidth:540,width:"100%"}}>
+            <div style={{fontSize:"3rem",marginBottom:"1rem",animation:"float 3.5s ease-in-out infinite"}}>🏆</div>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(2rem,5vw,3.5rem)",color:"var(--amber2)",marginBottom:".4rem"}}>Quiz Complete!</div>
+            <div style={{color:"rgba(255,255,255,.35)",fontSize:".85rem",marginBottom:"2rem"}}>{quiz.title}</div>
+            <div style={{display:"grid",gap:".6rem",textAlign:"left",marginBottom:"2.5rem"}}>
+              {sortedScores.map(([name,score],i)=>{
+                const team=isTeamQuiz?(quiz.teams||[]).find(t=>t.name===name):null;
+                const teamMembers=team?.members||[];
+                return(
+                  <div key={name} className="qp-score-row" style={{display:"flex",alignItems:"center",gap:12,background:i===0?"rgba(232,148,58,.12)":"rgba(255,255,255,.05)",border:i===0?"1px solid rgba(232,148,58,.45)":"1px solid rgba(255,255,255,.07)",borderRadius:10,padding:i===0?"13px 18px":"10px 16px",animationDelay:`${i*.08}s`}}>
+                    <div style={{fontSize:i===0?"1.5rem":"1.1rem",minWidth:32,textAlign:"center"}}>{medal[i]||`${i+1}.`}</div>
+                    {isTeamQuiz?<span style={{fontSize:i===0?"1.8rem":"1.4rem"}}>{team?.avatar||"🎯"}</span>:<Avatar name={name} size={i===0?34:28} {...(users.find(u=>u.username===name)||{})}/>}
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:i===0?700:600,color:i===0?"var(--amber2)":"#fff",fontSize:i===0?"1.05rem":".95rem"}}>{isTeamQuiz?name:getDisplayName(name,users)}</div>
+                      {isTeamQuiz&&teamMembers.length>0&&(
+                        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>
+                          {teamMembers.map(m=><span key={m} style={{background:"rgba(255,255,255,.08)",borderRadius:20,padding:"2px 8px",fontSize:".65rem",color:"rgba(255,255,255,.55)"}}>{getDisplayName(m,users)}</span>)}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{fontFamily:"var(--font-h)",color:i===0?"var(--amber2)":"rgba(255,255,255,.65)",fontSize:i===0?"1.3rem":"1.1rem",fontWeight:700}}>{score}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <button onClick={()=>{clearLive();onFinish(scores);}} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"14px 40px",fontSize:"1.05rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)"}}>
+              Close Presenter
+            </button>
+          </div>
+        )}
+
+        {/* ── PAUSE ─────────────────────────────────────────────────────── */}
+        {phase==="pause"&&(
+          <div style={{width:"100%",maxWidth:700,display:"flex",flexDirection:"column",gap:"1.4rem",alignItems:"center"}}>
+
+            {/* Break-screen preview / editor */}
+            {editPauseConfig?(
+              /* ── Editor ── */
+              <div style={{width:"100%",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.12)",borderRadius:14,padding:"1.4rem"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}>
+                  <div style={{fontFamily:"var(--font-h)",color:"var(--amber2)",fontSize:".95rem"}}>✏️ Edit Break Screen</div>
+                  <button onClick={()=>{setEditPauseConfig(false);publishLive({});}}
+                    style={{background:"rgba(76,175,125,.18)",border:"1px solid rgba(76,175,125,.4)",borderRadius:8,color:"var(--green)",padding:"6px 16px",fontSize:".8rem",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:700}}>
+                    ✓ Done
+                  </button>
+                </div>
+                <div style={{display:"grid",gap:".85rem"}}>
+                  <div>
+                    <div style={{fontSize:".68rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:4}}>Title</div>
+                    <input value={pauseConfig.title} onChange={e=>setPauseConfig(p=>({...p,title:e.target.value}))} placeholder="Break Time"
+                      style={{width:"100%",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 12px",color:"var(--cream)",fontFamily:"var(--font-b)",fontSize:".9rem",outline:"none"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:".68rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:4}}>Message</div>
+                    <input value={pauseConfig.text} onChange={e=>setPauseConfig(p=>({...p,text:e.target.value}))} placeholder="Back in 5 minutes!"
+                      style={{width:"100%",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 12px",color:"var(--cream)",fontFamily:"var(--font-b)",fontSize:".9rem",outline:"none"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:".68rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:4}}>Image / GIF URL <span style={{textTransform:"none",fontStyle:"italic",opacity:.6}}>(shown on participants' screens)</span></div>
+                    <input value={pauseConfig.image||""} onChange={e=>setPauseConfig(p=>({...p,image:e.target.value||null}))} placeholder="https://media.giphy.com/…"
+                      style={{width:"100%",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 12px",color:"var(--cream)",fontFamily:"var(--font-b)",fontSize:".9rem",outline:"none"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:".68rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:4}}>Background Music (YouTube URL)</div>
+                    <input value={pauseConfig.musicUrl||""} onChange={e=>setPauseConfig(p=>({...p,musicUrl:e.target.value||""}))} placeholder="https://youtu.be/…"
+                      style={{width:"100%",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 12px",color:"var(--cream)",fontFamily:"var(--font-b)",fontSize:".9rem",outline:"none"}}/>
+                    <div style={{fontSize:".65rem",color:"var(--muted)",marginTop:4}}>Plays silently for participants during the break · YouTube links only</div>
+                  </div>
+                </div>
+              </div>
+            ):(
+              /* ── Preview (what participants see) ── */
+              <div style={{width:"100%",background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.08)",borderRadius:14,padding:"1.4rem",textAlign:"center",position:"relative"}}>
+                <button onClick={()=>setEditPauseConfig(true)}
+                  style={{position:"absolute",top:10,right:10,background:"rgba(255,255,255,.07)",border:"1px solid rgba(255,255,255,.13)",borderRadius:8,color:"rgba(255,255,255,.55)",padding:"5px 12px",fontSize:".72rem",cursor:"pointer",fontFamily:"var(--font-b)"}}>
+                  ✏️ Edit
+                </button>
+                {pauseConfig.image
+                  ?<img src={pauseConfig.image} alt="" style={{maxHeight:140,maxWidth:"90%",borderRadius:10,marginBottom:"1rem",objectFit:"contain"}} onError={e=>{e.target.style.display="none";}}/>
+                  :<div style={{fontSize:"2.5rem",marginBottom:".8rem"}}>⏸</div>
+                }
+                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.3rem,4vw,2rem)",color:"#fff",marginBottom:".3rem"}}>{pauseConfig.title||"Break Time"}</div>
+                <div style={{color:"rgba(255,255,255,.4)",fontSize:".85rem"}}>{pauseConfig.text||"Back shortly!"}</div>
+                {pauseConfig.musicUrl&&getYouTubeId(pauseConfig.musicUrl)&&(
+                  <div style={{marginTop:".8rem",display:"inline-flex",alignItems:"center",gap:5,background:"rgba(76,175,125,.1)",border:"1px solid rgba(76,175,125,.25)",borderRadius:8,padding:"4px 12px",fontSize:".7rem",color:"var(--green)"}}>
+                    🎵 Background music active
+                  </div>
+                )}
+                <div style={{marginTop:"1rem",fontSize:".65rem",color:"rgba(255,255,255,.2)"}}>Preview — what participants see</div>
+              </div>
+            )}
+
+            {/* Quizmaster timer controls */}
+            <div style={{textAlign:"center"}}>
+              <div style={{marginBottom:"1.5rem"}}>
+                {editingPause?(
+                  <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:"1rem"}}>
+                    <input value={pauseInput} onChange={e=>setPauseInput(e.target.value)} onBlur={()=>{parsePauseInput(pauseInput);setEditingPause(false);}} onKeyDown={e=>{if(e.key==="Enter"){parsePauseInput(pauseInput);setEditingPause(false);}}} autoFocus
+                      style={{fontFamily:"var(--font-h)",fontSize:"3.5rem",background:"transparent",border:"none",borderBottom:"2px solid var(--amber)",color:"var(--amber2)",textAlign:"center",width:180,outline:"none"}}/>
+                    <div style={{fontSize:".75rem",color:"rgba(255,255,255,.3)"}}>Format: M:SS or MM:SS · press Enter</div>
+                  </div>
+                ):(
+                  <div onClick={()=>{setPauseInput(fmtTime(pauseTotal));setEditingPause(true);setPauseRunning(false);clearInterval(pauseRef.current);}} style={{cursor:"pointer",display:"inline-block"}}>
+                    <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(3.5rem,10vw,6rem)",color:pauseRunning&&pauseTotal<30?"var(--red)":"var(--amber2)",lineHeight:1,textShadow:"0 0 60px rgba(232,148,58,.3)",transition:"color .5s"}}>
+                      {fmtTime(pauseTotal)}
+                    </div>
+                    <div style={{fontSize:".7rem",color:"rgba(255,255,255,.25)",marginTop:".3rem"}}>click to edit timer</div>
+                  </div>
+                )}
+              </div>
+              <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap",marginBottom:"1.5rem"}}>
+                {!pauseRunning
+                  ?<button onClick={()=>{if(pauseTotal>0)setPauseRunning(true);}} style={{background:"rgba(76,175,125,.2)",border:"1px solid rgba(76,175,125,.4)",borderRadius:12,color:"var(--green)",padding:"10px 28px",fontSize:".9rem",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:700}}>▶ Start Timer</button>
+                  :<button onClick={()=>{clearInterval(pauseRef.current);setPauseRunning(false);}} style={{background:"rgba(255,255,255,.07)",border:"1px solid rgba(255,255,255,.15)",borderRadius:12,color:"rgba(255,255,255,.7)",padding:"10px 24px",fontSize:".9rem",cursor:"pointer",fontFamily:"var(--font-b)"}}>⏹ Stop</button>
+                }
+                <button onClick={()=>{clearInterval(pauseRef.current);setPauseRunning(false);setPauseTotal(pauseMins*60+pauseSecs);}} style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.12)",borderRadius:12,color:"rgba(255,255,255,.5)",padding:"10px 18px",fontSize:".85rem",cursor:"pointer",fontFamily:"var(--font-b)"}}>↺ Reset</button>
+              </div>
+              <button onClick={resumeFromPause} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"12px 36px",fontSize:".95rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)"}}>
+                ▶ Resume Quiz
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Bottom control bar (quizmaster) ───────────────────────────── */}
+      {phase==="question"&&(
+        <div style={{position:"absolute",bottom:0,left:0,right:0,padding:".9rem 2rem",background:"linear-gradient(to top,rgba(7,5,1,.95),rgba(7,5,1,.6))",backdropFilter:"blur(12px)",zIndex:20,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:".6rem"}}>
+          {/* Answer count */}
+          <div style={{fontSize:".78rem",color:"rgba(255,255,255,.35)",minWidth:80}}>
+            {slidePhase==="question"&&currentQ?.type==="multiple"&&`${Object.keys(answers).length} answered`}
+          </div>
+
+          {/* Action buttons */}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {slidePhase==="question"&&presenterBtn("Reveal Answer",doRevealAnswer,true,"R")}
+            {presenterBtn(
+              qIdx<totalQInRound-1?"Next Question →":roundIdx<totalRounds-1?"End Round →":"Final Results →",
+              doNextStep,slidePhase==="answer","→"
+            )}
+          </div>
+
+          {/* Score mini-board */}
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {sortedScores.slice(0,4).map(([name,score],i)=>(
+              <div key={name} style={{display:"flex",alignItems:"center",gap:5,background:"rgba(255,255,255,.04)",borderRadius:8,padding:"4px 9px"}}>
+                <span style={{fontSize:".68rem",color:["var(--gold)","rgba(192,192,192,.8)","#cd7f32"][i]||"rgba(255,255,255,.3)"}}>{medal[i]||`${i+1}`}</span>
+                <span style={{fontSize:".75rem",color:"rgba(255,255,255,.55)",fontWeight:600}}>{getDisplayName(name,users)}</span>
+                <span style={{fontSize:".72rem",color:"var(--amber)",fontWeight:700}}>{score}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QUIZ PARTICIPANT VIEW  (live — shown to all non-presenter users during a quiz)
+// ─────────────────────────────────────────────────────────────────────────────
+const ALPHA_P=["A","B","C","D","E","F"];
+const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[]})=>{
+  const ls=liveQ._liveState||{};
+  const quiz=normalizeQuiz(liveQ);
+  const currentRound=quiz.rounds[ls.roundIdx]||quiz.rounds[0];
+  const currentQ=currentRound?.questions[ls.qIdx];
+  const [myAnswer,setMyAnswer]=useState([]); // always an array
+  const [submitted,setSubmitted]=useState(false);
+  const [showAvatarPicker,setShowAvatarPicker]=useState(false);
+  const evtRef=useRef(evt);
+  evtRef.current=evt;
+
+  // Determine if this user is in a team (use live teams which may have updated avatars)
+  const myTeam=(ls.teams||[]).find(t=>(t.members||[]).some(m=>m.toLowerCase()===currentUser.username.toLowerCase()));
+  const answerKey=ls.isTeamQuiz?(myTeam?.name||null):currentUser.username;
+  // Captain gate: if a team has a captain set, only that person can submit answers
+  const isCaptain=!ls.isTeamQuiz||!myTeam?.captain||myTeam.captain.toLowerCase()===currentUser.username.toLowerCase();
+  const canAnswer=!!answerKey&&isCaptain;
+
+  // Reset submission state when question changes
+  useEffect(()=>{
+    setMyAnswer([]);
+    setSubmitted(false);
+    setShowAvatarPicker(false);
+  },[ls.qIdx,ls.roundIdx,ls.phase]);
+
+  // Reflect existing answer (e.g. team member already answered)
+  useEffect(()=>{
+    const existing=(ls.answers||{})[answerKey];
+    if(existing!=null){setMyAnswer(Array.isArray(existing)?existing:[existing]);setSubmitted(true);}
+  },[ls.answers,answerKey]);
+
+  // Fast-poll for fresh liveState every 2s
+  useEffect(()=>{
+    const evtId=evtRef.current.id;
+    const poll=setInterval(async()=>{
+      const {data}=await supabase.from("events").select("*").eq("id",evtId).single();
+      if(data)onUpdate(data);
+    },2000);
+    return()=>clearInterval(poll);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[evt.id]);
+
+  const writeAnswer=async(newAns)=>{
+    const {data:fresh}=await supabase.from("events").select("*").eq("id",evtRef.current.id).single();
+    if(!fresh)return;
+    const freshLiveQ=(fresh.quizzes||[]).find(q=>q.id===liveQ.id);
+    if(!freshLiveQ?._liveState)return;
+    const updatedQuizzes=(fresh.quizzes||[]).map(q=>q.id===liveQ.id
+      ?{...q,_liveState:{...q._liveState,answers:{...(q._liveState.answers||{}),[answerKey]:newAns}}}
+      :q
+    );
+    const updated={...fresh,quizzes:updatedQuizzes};
+    await supabase.from("events").upsert([updated]);
+    onUpdate(updated);
+  };
+
+  const toggleAnswer=async(optIdx)=>{
+    if(!canAnswer||ls.slidePhase==="answer")return;
+    const correctSet=Array.isArray(currentQ?.answer)?currentQ.answer:[currentQ?.answer??0];
+    const isMulti=correctSet.length>1;
+    const newAns=isMulti
+      ?(myAnswer.includes(optIdx)?myAnswer.filter(x=>x!==optIdx):[...myAnswer,optIdx])
+      :[optIdx];
+    setMyAnswer(newAns);
+    setSubmitted(newAns.length>0);
+    await writeAnswer(newAns);
+  };
+
+  const changeTeamAvatar=async(emoji)=>{
+    setShowAvatarPicker(false);
+    const {data:fresh}=await supabase.from("events").select("*").eq("id",evtRef.current.id).single();
+    if(!fresh)return;
+    const updatedQuizzes=(fresh.quizzes||[]).map(q=>q.id===liveQ.id?{
+      ...q,_liveState:{...q._liveState,
+        teams:(q._liveState?.teams||[]).map(t=>t.name===myTeam?.name?{...t,avatar:emoji}:t)
+      }}:q);
+    const updated={...fresh,quizzes:updatedQuizzes};
+    await supabase.from("events").upsert([updated]);
+    onUpdate(updated);
+  };
+
+  const scores=ls.scores||{};
+  const sortedScores=Object.entries(scores).sort((a,b)=>b[1]-a[1]);
+  const medal=["🥇","🥈","🥉"];
+
+  const phaseBg={background:"#070501",color:"#fff",fontFamily:"var(--font-b)"};
+  const Waiting=({icon,title,sub})=>(
+    <div style={{textAlign:"center",padding:"3rem 2rem"}}>
+      <div style={{fontSize:"3rem",marginBottom:"1rem"}}>{icon}</div>
+      <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.4rem,5vw,2.2rem)",color:"var(--amber2)",marginBottom:".6rem"}}>{title}</div>
+      {sub&&<div style={{color:"rgba(255,255,255,.4)",fontSize:".9rem"}}>{sub}</div>}
+    </div>
+  );
+
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:999,...phaseBg,overflowY:"auto"}}>
+      {/* Gold top bar */}
+      <div style={{position:"fixed",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,var(--orange),var(--amber),var(--gold),var(--amber),var(--orange))",backgroundSize:"300% 100%",animation:"goldShimmer 3s linear infinite",zIndex:30}}/>
+
+      {/* Header */}
+      <div style={{position:"fixed",top:3,left:0,right:0,background:"rgba(7,5,1,.92)",backdropFilter:"blur(12px)",zIndex:20,borderBottom:"1px solid rgba(255,255,255,.07)"}}>
+        <div style={{padding:".7rem 1.2rem",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            {ls.isTeamQuiz&&myTeam?(
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <div onClick={()=>setShowAvatarPicker(p=>!p)} title="Change team avatar"
+                  style={{fontSize:"1.4rem",cursor:"pointer",lineHeight:1,padding:"2px 4px",borderRadius:6,border:"1px solid rgba(255,255,255,.12)",background:"rgba(255,255,255,.05)",userSelect:"none"}}>
+                  {myTeam.avatar||"🎯"}
+                </div>
+                <div>
+                  <div style={{fontFamily:"var(--font-h)",fontSize:".85rem",color:"var(--amber2)",lineHeight:1}}>{quiz.title}</div>
+                  <div style={{fontSize:".65rem",color:"var(--muted)",marginTop:2}}>
+                    Team <strong style={{color:"var(--amber)"}}>{myTeam.name}</strong>
+                    {isCaptain&&myTeam?.captain&&<span style={{color:"var(--gold)",marginLeft:5}}>👑 Captain</span>}
+                  </div>
+                </div>
+              </div>
+            ):(
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:"1rem"}}>🧠</span>
+                <div>
+                  <div style={{fontFamily:"var(--font-h)",fontSize:".85rem",color:"var(--amber2)",lineHeight:1}}>{quiz.title}</div>
+                  {ls.isTeamQuiz&&<div style={{fontSize:".65rem",color:"var(--muted)",marginTop:2}}>👀 Watching</div>}
+                </div>
+              </div>
+            )}
+          </div>
+          <div style={{fontSize:".7rem",color:"rgba(255,255,255,.3)",letterSpacing:".06em",textTransform:"uppercase"}}>
+            {ls.phase==="question"&&`Q${(ls.qIdx||0)+1} · Round ${(ls.roundIdx||0)+1}`}
+            {ls.phase==="round-intro"&&`Round ${(ls.roundIdx||0)+1}`}
+            {ls.phase==="round-summary"&&`Round ${(ls.roundIdx||0)+1} Summary`}
+            {ls.phase==="final"&&"Final Results"}
+          </div>
+        </div>
+        {/* Avatar picker dropdown */}
+        {showAvatarPicker&&myTeam&&(
+          <div style={{padding:".4rem .8rem .6rem",borderTop:"1px solid rgba(255,255,255,.07)"}}>
+            <div style={{fontSize:".6rem",color:"rgba(255,255,255,.3)",marginBottom:5,letterSpacing:".06em",textTransform:"uppercase"}}>Choose team avatar</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+              {TEAM_AVATARS.map(e=>(
+                <div key={e} onClick={()=>changeTeamAvatar(e)}
+                  style={{fontSize:"1.3rem",cursor:"pointer",padding:"4px 5px",borderRadius:6,border:myTeam.avatar===e?"2px solid var(--amber)":"1px solid transparent",background:myTeam.avatar===e?"rgba(232,148,58,.12)":"transparent",userSelect:"none"}}>
+                  {e}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Content */}
+      <div style={{paddingTop:"4rem",paddingBottom:"2rem",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+
+        {/* ── Intro ── */}
+        {ls.phase==="intro"&&(
+          <Waiting icon="🧠" title={quiz.title} sub={`${(quiz.rounds||[]).reduce((s,r)=>s+(r.questions||[]).length,0)} questions · Get ready!`}/>
+        )}
+
+        {/* ── Round intro ── */}
+        {ls.phase==="round-intro"&&(
+          <Waiting icon={currentRound?.icon||"🎯"} title={currentRound?.title||"Next Round"} sub={currentRound?.theme||`${(currentRound?.questions||[]).length} questions`}/>
+        )}
+
+        {/* ── Pause ── */}
+        {ls.phase==="pause"&&(
+          <div style={{textAlign:"center",padding:"2rem 1.4rem",maxWidth:480,width:"100%"}}>
+            {ls.pauseConfig?.image
+              ?<img src={ls.pauseConfig.image} alt="" style={{maxWidth:"90%",maxHeight:200,borderRadius:12,marginBottom:"1.5rem",objectFit:"contain"}} onError={e=>{e.target.style.display="none";}}/>
+              :<div style={{fontSize:"3rem",marginBottom:"1.2rem"}}>⏸</div>
+            }
+            <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.5rem,5vw,2.4rem)",color:"var(--amber2)",marginBottom:".6rem",lineHeight:1.1}}>{ls.pauseConfig?.title||"Break Time"}</div>
+            <div style={{color:"rgba(255,255,255,.45)",fontSize:".9rem",lineHeight:1.5}}>{ls.pauseConfig?.text||"The quizmaster will resume shortly…"}</div>
+            {ls.pauseConfig?.musicUrl&&getYouTubeId(ls.pauseConfig.musicUrl)&&(
+              <iframe
+                src={`https://www.youtube-nocookie.com/embed/${getYouTubeId(ls.pauseConfig.musicUrl)}?autoplay=1&controls=0&loop=1&playlist=${getYouTubeId(ls.pauseConfig.musicUrl)}&modestbranding=1`}
+                allow="autoplay"
+                style={{position:"absolute",width:1,height:1,opacity:0,pointerEvents:"none"}}
+                title="break-music"/>
+            )}
+          </div>
+        )}
+
+        {/* ── Round summary ── */}
+        {ls.phase==="round-summary"&&(
+          <div style={{width:"100%",maxWidth:580,padding:"0 1.2rem"}}>
+            <div style={{textAlign:"center",marginBottom:"1.4rem"}}>
+              <div style={{fontSize:"1.8rem",marginBottom:".4rem"}}>📋</div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"1.6rem",color:"#fff"}}>Round {(ls.roundIdx||0)+1} Summary</div>
+              <div style={{color:"rgba(255,255,255,.4)",fontSize:".78rem",marginTop:3}}>{currentRound?.title}</div>
+            </div>
+            <div style={{display:"grid",gap:".65rem"}}>
+              {(currentRound?.questions||[]).map((q,qi)=>{
+                const revealed=(ls.summaryRevealed||[]).includes(qi);
+                const correctSet=Array.isArray(q.answer)?q.answer:[q.answer??0];
+                return(
+                  <div key={qi} style={{background:revealed?"rgba(76,175,125,.07)":"rgba(255,255,255,.04)",border:revealed?"1px solid rgba(76,175,125,.22)":"1px solid rgba(255,255,255,.07)",borderRadius:10,padding:"10px 14px",transition:"all .4s"}}>
+                    <div style={{fontSize:".62rem",color:"var(--muted)",marginBottom:3}}>Q{qi+1}</div>
+                    <div style={{color:"#fff",fontSize:".9rem",fontWeight:600,lineHeight:1.3,marginBottom:revealed?".5rem":0}}>{q.q}</div>
+                    {revealed&&q.type==="multiple"&&(
+                      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                        {q.options.map((opt,oi)=>correctSet.includes(oi)&&(
+                          <span key={oi} style={{background:"rgba(76,175,125,.18)",border:"1px solid rgba(76,175,125,.4)",borderRadius:8,padding:"2px 9px",fontSize:".75rem",color:"var(--green)",fontWeight:700}}>✓ {opt}</span>
+                        ))}
+                      </div>
+                    )}
+                    {revealed&&q.type==="open"&&q.openAnswer&&(
+                      <div style={{color:"var(--green)",fontSize:".82rem",fontWeight:600}}>✓ {q.openAnswer}</div>
+                    )}
+                    {revealed&&q.type==="music"&&(
+                      <div style={{color:"var(--amber2)",fontSize:".82rem"}}>{q.songTitle||"?"}{q.songArtist&&` — ${q.songArtist}`}</div>
+                    )}
+                    {!revealed&&<div style={{color:"rgba(255,255,255,.22)",fontSize:".72rem",fontStyle:"italic",marginTop:3}}>Waiting for reveal…</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── Round scores ── */}
+        {ls.phase==="round-scores"&&(
+          <div style={{width:"100%",maxWidth:480,padding:"0 1.2rem"}}>
+            <div style={{textAlign:"center",marginBottom:"1.5rem"}}>
+              <div style={{fontSize:"2rem",marginBottom:".5rem"}}>📊</div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"1.8rem",color:"#fff"}}>After Round {(ls.roundIdx||0)+1}</div>
+            </div>
+            <div style={{display:"grid",gap:".5rem"}}>
+              {sortedScores.map(([name,score],i)=>{
+                const team=ls.isTeamQuiz?(ls.teams||[]).find(t=>t.name===name):null;
+                const teamMembers=team?.members||[];
+                return(
+                  <div key={name} style={{display:"flex",alignItems:"center",gap:10,background:"rgba(255,255,255,.05)",border:i===0?"1px solid rgba(232,148,58,.35)":"1px solid rgba(255,255,255,.07)",borderRadius:10,padding:"10px 14px"}}>
+                    <div style={{minWidth:24,textAlign:"center"}}>{medal[i]||`${i+1}.`}</div>
+                    {ls.isTeamQuiz&&<span style={{fontSize:"1.2rem"}}>{team?.avatar||"🎯"}</span>}
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:600,color:"#fff"}}>{ls.isTeamQuiz?name:getDisplayName(name,users)}</div>
+                      {ls.isTeamQuiz&&teamMembers.length>0&&(
+                        <div style={{display:"flex",gap:3,flexWrap:"wrap",marginTop:3}}>
+                          {teamMembers.map(m=><span key={m} style={{background:"rgba(255,255,255,.08)",borderRadius:20,padding:"2px 7px",fontSize:".6rem",color:"rgba(255,255,255,.5)"}}>{getDisplayName(m,users)}</span>)}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{fontFamily:"var(--font-h)",color:"var(--amber2)",fontWeight:700}}>{score}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── Final ── */}
+        {ls.phase==="final"&&(
+          <div style={{width:"100%",maxWidth:480,padding:"0 1.2rem"}}>
+            <div style={{textAlign:"center",marginBottom:"1.5rem"}}>
+              <div style={{fontSize:"3rem",marginBottom:".5rem",animation:"float 3.5s ease-in-out infinite"}}>🏆</div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"2rem",color:"var(--amber2)"}}>Quiz Complete!</div>
+            </div>
+            <div style={{display:"grid",gap:".5rem"}}>
+              {sortedScores.map(([name,score],i)=>{
+                const team=ls.isTeamQuiz?(ls.teams||[]).find(t=>t.name===name):null;
+                const teamMembers=team?.members||[];
+                return(
+                  <div key={name} style={{display:"flex",alignItems:"center",gap:10,background:i===0?"rgba(232,148,58,.12)":"rgba(255,255,255,.05)",border:i===0?"1px solid rgba(232,148,58,.45)":"1px solid rgba(255,255,255,.07)",borderRadius:10,padding:i===0?"13px 16px":"10px 14px"}}>
+                    <div style={{minWidth:28,textAlign:"center",fontSize:i===0?"1.3rem":"1rem"}}>{medal[i]||`${i+1}.`}</div>
+                    {ls.isTeamQuiz&&<span style={{fontSize:i===0?"1.6rem":"1.2rem"}}>{team?.avatar||"🎯"}</span>}
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:i===0?700:600,color:i===0?"var(--amber2)":"#fff"}}>{ls.isTeamQuiz?name:getDisplayName(name,users)}</div>
+                      {ls.isTeamQuiz&&teamMembers.length>0&&(
+                        <div style={{display:"flex",gap:3,flexWrap:"wrap",marginTop:3}}>
+                          {teamMembers.map(m=><span key={m} style={{background:"rgba(255,255,255,.08)",borderRadius:20,padding:"2px 7px",fontSize:".6rem",color:"rgba(255,255,255,.5)"}}>{getDisplayName(m,users)}</span>)}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{fontFamily:"var(--font-h)",color:i===0?"var(--amber2)":"rgba(255,255,255,.65)",fontWeight:700,fontSize:i===0?"1.2rem":"1rem"}}>{score}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── Question ── */}
+        {ls.phase==="question"&&currentQ&&(
+          <div style={{width:"100%",maxWidth:580,padding:"0 1.2rem"}}>
+            {/* Question type badge */}
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1.2rem",flexWrap:"wrap"}}>
+              <span style={{background:"rgba(232,148,58,.18)",border:"1px solid rgba(232,148,58,.4)",borderRadius:20,padding:"3px 12px",fontSize:".68rem",color:"var(--amber)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase"}}>
+                {currentQ.type==="music"?"🎵 Music":currentQ.type==="open"?"💬 Open":"🔤 Multiple Choice"} · Q{(ls.qIdx||0)+1}
+              </span>
+              <span style={{marginLeft:"auto",color:"rgba(255,255,255,.3)",fontSize:".75rem"}}>{currentQ.points||100} pts</span>
+            </div>
+
+            {/* Question text */}
+            <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.2rem,4vw,1.9rem)",color:"#fff",lineHeight:1.25,marginBottom:"1.5rem",textShadow:"0 2px 15px rgba(0,0,0,.4)"}}>{currentQ.q}</div>
+
+            {/* ── Answer phase: show correct answer ── */}
+            {ls.slidePhase==="answer"&&currentQ.type==="multiple"&&(()=>{
+              const correctSet=Array.isArray(currentQ.answer)?currentQ.answer:[currentQ.answer??0];
+              const isMyCorrect=correctSet.length>0&&correctSet.every(c=>myAnswer.includes(c))&&myAnswer.length===correctSet.length;
+              return(
+                <div style={{display:"grid",gap:".7rem"}}>
+                  {currentQ.options.map((opt,i)=>{
+                    const isCorrect=correctSet.includes(i);
+                    const iMine=myAnswer.includes(i);
+                    return(
+                      <div key={i} style={{borderRadius:10,padding:"12px 16px",border:isCorrect?"2px solid var(--green)":iMine?"1px solid rgba(224,85,85,.5)":"1px solid rgba(255,255,255,.08)",background:isCorrect?"rgba(76,175,125,.15)":iMine?"rgba(224,85,85,.07)":"rgba(255,255,255,.04)",transition:"all .3s"}}>
+                        <div style={{fontSize:".95rem",fontWeight:600,color:isCorrect?"var(--green)":iMine?"rgba(224,85,85,.8)":"rgba(255,255,255,.7)"}}>{ALPHA_P[i]}. {opt}</div>
+                        {isCorrect&&<div style={{fontSize:".72rem",color:"var(--green)",marginTop:3,fontWeight:700}}>✓ Correct</div>}
+                        {iMine&&!isCorrect&&<div style={{fontSize:".72rem",color:"rgba(224,85,85,.8)",marginTop:3}}>Your pick</div>}
+                      </div>
+                    );
+                  })}
+                  {isMyCorrect&&<div style={{textAlign:"center",padding:".8rem",color:"var(--green)",fontWeight:700,fontSize:"1.1rem"}}>🎉 +{currentQ.points||10} pts!</div>}
+                </div>
+              );
+            })()}
+
+            {/* ── Answer phase: open question ── */}
+            {ls.slidePhase==="answer"&&currentQ.type==="open"&&currentQ.openAnswer&&(
+              <div style={{background:"rgba(76,175,125,.12)",border:"2px solid var(--green)",borderRadius:12,padding:"1.2rem 1.6rem",textAlign:"center"}}>
+                <div style={{fontSize:".7rem",color:"var(--green)",letterSpacing:".1em",textTransform:"uppercase",marginBottom:".4rem",fontWeight:700}}>✓ Answer</div>
+                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.1rem,4vw,1.8rem)",color:"#fff"}}>{currentQ.openAnswer}</div>
+              </div>
+            )}
+
+            {/* ── Answer phase: music ── */}
+            {ls.slidePhase==="answer"&&currentQ.type==="music"&&(
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:".72rem",color:"var(--green)",letterSpacing:".14em",textTransform:"uppercase",fontWeight:700,marginBottom:".5rem"}}>🎵 The song was…</div>
+                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.3rem,4vw,2rem)",color:"var(--amber2)",marginBottom:".2rem"}}>{currentQ.songTitle||"?"}</div>
+                {currentQ.songArtist&&<div style={{color:"rgba(255,255,255,.5)",marginBottom:"1rem"}}>{currentQ.songArtist}</div>}
+              </div>
+            )}
+
+            {/* ── Question phase: multiple choice ── */}
+            {ls.slidePhase==="question"&&currentQ.type==="multiple"&&(()=>{
+              const correctSet=Array.isArray(currentQ.answer)?currentQ.answer:[currentQ.answer??0];
+              const isMulti=correctSet.length>1;
+              return(
+                <div>
+                  {isMulti&&<div style={{color:"rgba(255,255,255,.45)",fontSize:".76rem",fontStyle:"italic",marginBottom:".7rem",textAlign:"center"}}>meerdere antwoorden zijn mogelijk</div>}
+                  {!canAnswer&&(
+                    <div style={{textAlign:"center",color:"rgba(255,255,255,.35)",padding:"1.5rem",fontSize:".85rem",lineHeight:1.6}}>
+                      {!answerKey
+                        ?"You're not assigned to a team — watching only"
+                        :<span>Only 👑 <strong style={{color:"var(--amber)"}}>{myTeam?.captain}</strong> can answer for {myTeam?.name}</span>
+                      }
+                    </div>
+                  )}
+                  {canAnswer&&(
+                    <div style={{display:"grid",gap:".7rem"}}>
+                      {currentQ.options.map((opt,i)=>{
+                        const isSel=myAnswer.includes(i);
+                        return(
+                          <button key={i} onClick={()=>toggleAnswer(i)}
+                            style={{background:isSel?"rgba(232,148,58,.2)":"rgba(255,255,255,.06)",border:isSel?"2px solid rgba(232,148,58,.7)":"1px solid rgba(255,255,255,.12)",borderRadius:10,padding:"13px 16px",cursor:"pointer",textAlign:"left",color:isSel?"var(--amber2)":"#fff",fontSize:".95rem",fontWeight:isSel?700:500,fontFamily:"var(--font-b)",transition:"all .15s",display:"flex",alignItems:"center",gap:10}}>
+                            {isMulti&&<div style={{width:18,height:18,borderRadius:4,border:`2px solid ${isSel?"var(--amber)":"rgba(255,255,255,.3)"}`,background:isSel?"rgba(232,148,58,.3)":"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                              {isSel&&<span style={{color:"var(--amber2)",fontSize:10,fontWeight:900}}>✓</span>}
+                            </div>}
+                            <span>{ALPHA_P[i]}. {opt}</span>
+                          </button>
+                        );
+                      })}
+                      {submitted&&<div style={{textAlign:"center",color:"rgba(76,175,125,.85)",fontSize:".78rem",padding:".4rem 0",fontWeight:600}}>
+                        {isMulti?`${myAnswer.length} selected — tap to change`:"✓ Answer locked in — tap to change"}
+                      </div>}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* ── Question phase: open ── */}
+            {ls.slidePhase==="question"&&currentQ.type==="open"&&(
+              <div style={{textAlign:"center",padding:"1.5rem",color:"rgba(255,255,255,.4)",fontSize:"1rem"}}>
+                <div style={{fontSize:"2rem",marginBottom:".6rem"}}>✏️</div>
+                Write down your answer!
+              </div>
+            )}
+
+            {/* ── Question phase: music ── */}
+            {ls.slidePhase==="question"&&currentQ.type==="music"&&(
+              <div style={{textAlign:"center",padding:"1.5rem"}}>
+                <div style={{fontSize:"2.5rem",marginBottom:".5rem"}}>🎵</div>
+                <div style={{color:"rgba(255,255,255,.5)",fontSize:".9rem"}}>Listen and guess the song!</div>
+                {currentQ.songTitle&&<div style={{marginTop:"1rem",color:"rgba(255,255,255,.2)",fontSize:".75rem"}}>⚠️ No peeking at the title</div>}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -2408,7 +3987,7 @@ const AnnouncementBanner=({announcements,currentUser,onArchive,onHardDelete,onRe
 // PRESENTATION MODE
 // ─────────────────────────────────────────────────────────────────────────────
 const PresentationMode=({evt,onClose})=>{
-  const stops=evt.schedule||[];
+  const stops=(evt.schedule||[]).filter(s=>!s.secret);
   const total=stops.length+1;
   const [idx,setIdx]=useState(0);
   const [fading,setFading]=useState(false);
@@ -2517,20 +4096,27 @@ const PresentationMode=({evt,onClose})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // EDIT MODALS
 // ─────────────────────────────────────────────────────────────────────────────
-const blankStop={time:"",activity:"",location:"",locationUrl:"",icon:"📍",note:"",image:""};
+const blankStop={time:"",activity:"",location:"",locationUrl:"",icon:"📍",note:"",image:"",secret:false};
 const EditScheduleModal=({evt,onSave,onClose})=>{
   const [sched,setSched]=useState(evt.schedule.map(s=>({...blankStop,...s})));
   const [iconPicker,setIconPicker]=useState(null);
   const upd=(i,f,v)=>setSched(s=>s.map((r,j)=>j===i?{...r,[f]:v}:r));
   const move=(i,d)=>{const s=[...sched];const j=i+d;if(j<0||j>=s.length)return;[s[i],s[j]]=[s[j],s[i]];setSched(s);};
   return(<Modal onClose={onClose} maxWidth={640}><H>Edit Schedule</H><div style={{display:"grid",gap:".9rem"}}>{sched.map((s,i)=>(
-    <div key={i} style={{background:"var(--bg3)",borderRadius:"var(--radius-sm)",padding:"1rem",border:"1px solid var(--border)"}}>
+    <div key={i} style={{background:"var(--bg3)",borderRadius:"var(--radius-sm)",padding:"1rem",border:`1px solid ${s.secret?"rgba(224,85,85,.35)":"var(--border)"}`,position:"relative",overflow:"hidden"}}>
+      {s.secret&&<div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,var(--red),rgba(224,85,85,.4))"}}/>}
       <div style={{display:"flex",gap:7,marginBottom:".7rem",alignItems:"center"}}>
         <div style={{position:"relative"}}><button onClick={()=>setIconPicker(iconPicker===i?null:i)} style={{width:38,height:38,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontSize:"17px"}}>{s.icon||"📍"}</button>{iconPicker===i&&<div style={{position:"absolute",top:42,left:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:10,padding:8,display:"flex",flexWrap:"wrap",gap:4,width:214,zIndex:10}}>{ICONS.map(ic=><button key={ic} onClick={()=>{upd(i,"icon",ic);setIconPicker(null)}} style={{background:s.icon===ic?"rgba(232,148,58,.2)":"transparent",border:"none",borderRadius:6,cursor:"pointer",fontSize:"17px",width:30,height:30}}>{ic}</button>)}</div>}</div>
         <Inp value={s.time} onChange={e=>upd(i,"time",e.target.value)} placeholder="12:00" style={{width:70,flexShrink:0}}/>
         <Inp value={s.activity} onChange={e=>upd(i,"activity",e.target.value)} placeholder="Activity"/>
-        <div style={{display:"flex",gap:4,flexShrink:0}}><Btn onClick={()=>move(i,-1)} variant="ghost" size="sm" disabled={i===0} style={{padding:"6px 9px"}}>↑</Btn><Btn onClick={()=>move(i,1)} variant="ghost" size="sm" disabled={i===sched.length-1} style={{padding:"6px 9px"}}>↓</Btn><Btn onClick={()=>setSched(s=>s.filter((_,j)=>j!==i))} variant="danger" size="sm" style={{padding:"6px 9px"}}>✕</Btn></div>
+        <div style={{display:"flex",gap:4,flexShrink:0}}>
+          <button onClick={()=>upd(i,"secret",!s.secret)} title={s.secret?"Secret — klik om te openbaren":"Publiek — klik om te verbergen"} style={{width:32,height:32,background:s.secret?"rgba(224,85,85,.12)":"rgba(76,175,125,.1)",border:`1px solid ${s.secret?"rgba(224,85,85,.4)":"rgba(76,175,125,.3)"}`,borderRadius:7,cursor:"pointer",fontSize:"15px",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>{s.secret?"🔒":"👁"}</button>
+          <Btn onClick={()=>move(i,-1)} variant="ghost" size="sm" disabled={i===0} style={{padding:"6px 9px"}}>↑</Btn>
+          <Btn onClick={()=>move(i,1)} variant="ghost" size="sm" disabled={i===sched.length-1} style={{padding:"6px 9px"}}>↓</Btn>
+          <Btn onClick={()=>setSched(s=>s.filter((_,j)=>j!==i))} variant="danger" size="sm" style={{padding:"6px 9px"}}>✕</Btn>
+        </div>
       </div>
+      {s.secret&&<div style={{fontSize:".72rem",color:"var(--red)",marginBottom:".6rem",display:"flex",alignItems:"center",gap:5,opacity:.85}}><span>🔒</span>Geheim — verborgen voor gewone leden</div>}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:7}}><div><Lbl>Location</Lbl><Inp value={s.location} onChange={e=>upd(i,"location",e.target.value)} placeholder="Café de Kroeg"/></div><div><Lbl>Maps URL</Lbl><Inp value={s.locationUrl} onChange={e=>upd(i,"locationUrl",e.target.value)} placeholder="https://maps.google.com/…"/></div></div>
       <Lbl>Note</Lbl><Inp value={s.note} onChange={e=>upd(i,"note",e.target.value)} placeholder="e.g. reservation under Joris"/>
       <div style={{marginTop:7}}><Lbl>Slide Image / Video URL</Lbl><Inp value={s.image||""} onChange={e=>upd(i,"image",e.target.value)} placeholder="https://… (background in presentation mode)"/></div>
@@ -2736,6 +4322,257 @@ const UpdatesPage=({notifications,notifLastRead,onMarkAllRead,onOpenEvent})=>{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// TEAM CREATOR PAGE
+// ─────────────────────────────────────────────────────────────────────────────
+const TEAM_COLORS=["var(--amber)","var(--blue)","var(--green)","var(--purple)","var(--orange)","var(--red)","#56b4a0","#e08050","#9b7fe8","#5b9bd5"];
+const TeamCreatorPage=({users})=>{
+  const [teamSize,setTeamSize]=useState(3);
+  const [participants,setParticipants]=useState([]);
+  const [input,setInput]=useState("");
+  const [teams,setTeams]=useState(null);
+  const [generating,setGenerating]=useState(false);
+  const [showPicker,setShowPicker]=useState(false);
+  const appUsers=users.filter(u=>ACTIVE_ROLES.includes(u.role));
+
+  const add=name=>{const t=name.trim();if(!t||participants.includes(t))return;setParticipants(p=>[...p,t]);setTeams(null);};
+  const addInput=()=>{input.split(",").map(s=>s.trim()).filter(Boolean).forEach(add);setInput("");};
+  const remove=name=>{setParticipants(p=>p.filter(x=>x!==name));setTeams(null);};
+  const generate=()=>{
+    if(participants.length<2)return;
+    setGenerating(true);setTeams(null);
+    setTimeout(()=>{
+      const shuffled=[...participants].sort(()=>Math.random()-.5);
+      const result=[];
+      for(let i=0;i<shuffled.length;i+=teamSize)result.push(shuffled.slice(i,i+teamSize));
+      setTeams(result);setGenerating(false);
+    },1800);
+  };
+  const pickedNames=new Set(participants);
+  const teamCount=participants.length>0?Math.ceil(participants.length/teamSize):0;
+
+  return(
+    <div className="fu">
+      <H size="1.7rem" style={{marginBottom:"1.5rem"}}>🎲 Team Creator</H>
+
+      <Card style={{marginBottom:"1.2rem"}}>
+        <H size="1rem" style={{marginBottom:".8rem"}}>Personen per team</H>
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <button onClick={()=>setTeamSize(t=>Math.max(1,t-1))} style={{width:38,height:38,borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border)",color:"var(--cream)",fontSize:"1.3rem",cursor:"pointer",fontFamily:"var(--font-b)",lineHeight:1}}>−</button>
+          <span style={{fontFamily:"var(--font-h)",fontSize:"2.2rem",color:"var(--amber)",minWidth:44,textAlign:"center",lineHeight:1}}>{teamSize}</span>
+          <button onClick={()=>setTeamSize(t=>Math.min(20,t+1))} style={{width:38,height:38,borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border)",color:"var(--cream)",fontSize:"1.3rem",cursor:"pointer",fontFamily:"var(--font-b)",lineHeight:1}}>+</button>
+          {participants.length>0&&<div style={{color:"var(--muted)",fontSize:".83rem",marginLeft:6}}>
+            → <strong style={{color:"var(--cream)"}}>{teamCount}</strong> {teamCount===1?"team":"teams"}
+            {participants.length%teamSize!==0&&<span style={{marginLeft:4,opacity:.7}}>(1 team met {participants.length%teamSize})</span>}
+          </div>}
+        </div>
+      </Card>
+
+      <Card style={{marginBottom:"1.2rem"}}>
+        <H size="1rem" style={{marginBottom:".8rem"}}>
+          Deelnemers{participants.length>0&&<span style={{color:"var(--muted)",fontFamily:"var(--font-b)",fontSize:".78rem",fontWeight:400,marginLeft:6}}>({participants.length})</span>}
+        </H>
+        <div style={{display:"flex",gap:8,marginBottom:"1rem",flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:180,display:"flex",gap:8}}>
+            <Inp value={input} onChange={e=>setInput(e.target.value)} placeholder="Naam (komma voor meerdere)" onKeyDown={e=>{if(e.key==="Enter")addInput();}} style={{flex:1}}/>
+            <Btn onClick={addInput} variant="subtle" size="sm" style={{flexShrink:0}}>+ Voeg toe</Btn>
+          </div>
+          <Btn onClick={()=>setShowPicker(p=>!p)} variant={showPicker?"primary":"ghost"} size="sm">👥 Uit app</Btn>
+        </div>
+
+        {showPicker&&(
+          <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".75rem",marginBottom:"1rem",display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))",gap:6}}>
+            {appUsers.map(u=>{
+              const name=u.display_name||u.username;
+              const picked=pickedNames.has(name);
+              return(
+                <div key={u.id} onClick={()=>picked?remove(name):add(name)}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--amber2)";}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor=picked?"var(--amber)":"var(--border)";}}
+                  style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:8,border:`1px solid ${picked?"var(--amber)":"var(--border)"}`,background:picked?"rgba(232,148,58,.12)":"var(--bg2)",cursor:"pointer",transition:"border-color .15s"}}>
+                  <Avatar name={u.username} size={24} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>
+                  <span style={{fontSize:".82rem",color:picked?"var(--amber2)":"var(--cream)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{name}</span>
+                  {picked&&<span style={{color:"var(--amber)",fontSize:".75rem",flexShrink:0}}>✓</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {participants.length>0?(
+          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {participants.map(name=>(
+              <span key={name} style={{display:"flex",alignItems:"center",gap:5,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:20,padding:"4px 10px 4px 13px",fontSize:".83rem",color:"var(--cream)"}}>
+                {name}
+                <button onClick={()=>remove(name)} style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:".95rem",lineHeight:1,padding:"0 0 0 4px",display:"flex",alignItems:"center"}}>×</button>
+              </span>
+            ))}
+          </div>
+        ):(
+          <div style={{color:"var(--muted)",fontSize:".83rem"}}>Voeg deelnemers toe via de app of typ ze handmatig.</div>
+        )}
+      </Card>
+
+      <div style={{textAlign:"center",marginBottom:"1.5rem"}}>
+        <Btn onClick={generate} variant="gold" size="lg" disabled={participants.length<2||generating} style={{minWidth:220}}>
+          {generating?"🎲 Loten...":"🎲 Genereer Teams"}
+        </Btn>
+        {participants.length<2&&<div style={{color:"var(--muted)",fontSize:".78rem",marginTop:6}}>Voeg minimaal 2 deelnemers toe</div>}
+      </div>
+
+      {generating&&(
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:"1.2rem",padding:"3rem 1rem"}}>
+          <div style={{width:56,height:56,border:"4px solid var(--bg3)",borderTopColor:"var(--amber)",borderRadius:"50%",animation:"spin .75s linear infinite"}}/>
+          <div style={{fontFamily:"var(--font-h)",fontSize:"1.15rem",color:"var(--amber2)"}}>Teams worden geloot…</div>
+          <div style={{color:"var(--muted)",fontSize:".83rem"}}>Schud… schud… schud…</div>
+        </div>
+      )}
+
+      {teams&&!generating&&(
+        <div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem",flexWrap:"wrap",gap:8}}>
+            <H size="1.1rem" style={{marginBottom:0}}>🏁 Teams ({teams.length})</H>
+            <Btn onClick={generate} variant="ghost" size="sm">🔀 Opnieuw loten</Btn>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))",gap:"1rem"}}>
+            {teams.map((team,i)=>{
+              const col=TEAM_COLORS[i%TEAM_COLORS.length];
+              return(
+                <div key={i} style={{background:"var(--bg2)",border:`1px solid ${col}44`,borderRadius:"var(--radius)",padding:"1.1rem",animation:"teamReveal .4s ease both",animationDelay:`${i*70}ms`}}>
+                  <div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:col,marginBottom:".75rem",display:"flex",alignItems:"center",gap:7}}>
+                    <div style={{width:10,height:10,borderRadius:"50%",background:col,flexShrink:0}}/>
+                    Team {i+1}
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:0}}>
+                    {team.map((name,j)=>{
+                      const u=users.find(x=>(x.display_name||x.username)===name);
+                      return(
+                        <div key={j} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderTop:j>0?"1px solid var(--border)":"none"}}>
+                          {u?<Avatar name={u.username} size={22} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>:<div style={{width:22,height:22,borderRadius:"50%",background:"var(--bg4)",border:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:".6rem",color:"var(--muted)",flexShrink:0}}>?</div>}
+                          <span style={{fontSize:".88rem",color:"var(--cream)"}}>{name}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TIMER PAGE
+// ─────────────────────────────────────────────────────────────────────────────
+const TIMER_PRESETS=[[30,"30s"],[60,"1m"],[120,"2m"],[300,"5m"],[600,"10m"],[900,"15m"],[1800,"30m"],[3600,"1u"]];
+const TimerPage=()=>{
+  const [totalSec,setTotalSec]=useState(60);
+  const [remaining,setRemaining]=useState(60);
+  const [running,setRunning]=useState(false);
+  const [finished,setFinished]=useState(false);
+  const [cMin,setCMin]=useState("1");
+  const [cSec,setCsec]=useState("00");
+  const intervalRef=useRef(null);
+
+  useEffect(()=>{
+    if(running){
+      intervalRef.current=setInterval(()=>{
+        setRemaining(r=>{
+          if(r<=1){clearInterval(intervalRef.current);setRunning(false);setFinished(true);return 0;}
+          return r-1;
+        });
+      },1000);
+    } else clearInterval(intervalRef.current);
+    return()=>clearInterval(intervalRef.current);
+  },[running]);
+
+  const applyPreset=s=>{
+    clearInterval(intervalRef.current);setRunning(false);setFinished(false);
+    setTotalSec(s);setRemaining(s);
+    setCMin(String(Math.floor(s/60)));setCsec(String(s%60).padStart(2,"0"));
+  };
+  const applyCustom=()=>{
+    const t=(parseInt(cMin)||0)*60+(parseInt(cSec)||0);
+    if(t>0)applyPreset(t);
+  };
+  const start=()=>{if(remaining>0){setFinished(false);setRunning(true);}};
+  const pause=()=>setRunning(false);
+  const reset=()=>{clearInterval(intervalRef.current);setRunning(false);setFinished(false);setRemaining(totalSec);};
+
+  const m=Math.floor(remaining/60);
+  const s=remaining%60;
+  const progress=totalSec>0?remaining/totalSec:0;
+  const R=80;const circ=2*Math.PI*R;const dashOff=circ*(1-progress);
+  const atStart=remaining===totalSec&&!running&&!finished;
+
+  return(
+    <div className="fu">
+      <H size="1.7rem" style={{marginBottom:"1.5rem"}}>⏱ Timer</H>
+
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:"2rem"}}>
+        <div style={{position:"relative",width:200,height:200}}>
+          <svg width="200" height="200" style={{transform:"rotate(-90deg)"}}>
+            <circle cx="100" cy="100" r={R} fill="none" stroke="var(--bg3)" strokeWidth="9"/>
+            <circle cx="100" cy="100" r={R} fill="none"
+              stroke={finished?"var(--red)":running?"var(--amber)":"var(--muted2)"}
+              strokeWidth="9" strokeDasharray={circ} strokeDashoffset={dashOff} strokeLinecap="round"
+              style={{transition:running?"stroke-dashoffset 1s linear":"stroke-dashoffset .35s ease",filter:(running||finished)?`drop-shadow(0 0 8px ${finished?"var(--red)":"rgba(232,148,58,.7)"})`:"none"}}/>
+          </svg>
+          <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+            <div className={finished?"qp-timer-warn":""} style={{fontFamily:"var(--font-h)",fontSize:finished?"2.8rem":"2.5rem",color:finished?"var(--red)":running?"var(--amber2)":"var(--cream)",lineHeight:1,letterSpacing:"-.02em"}}>
+              {finished?"TIJD!": `${m}:${String(s).padStart(2,"0")}`}
+            </div>
+            {!finished&&<div style={{color:"var(--muted)",fontSize:".75rem",marginTop:5}}>
+              {!atStart?`${Math.round((1-progress)*100)}% voorbij`:"klaar om te starten"}
+            </div>}
+          </div>
+        </div>
+      </div>
+
+      <div style={{display:"flex",justifyContent:"center",gap:10,marginBottom:"1.8rem",flexWrap:"wrap"}}>
+        {!running&&!finished&&remaining===totalSec&&<Btn onClick={start} variant="primary" size="lg" disabled={totalSec===0}>▶ Start</Btn>}
+        {!running&&!finished&&remaining<totalSec&&<Btn onClick={start} variant="primary" size="lg">▶ Hervat</Btn>}
+        {running&&<Btn onClick={pause} variant="subtle" size="lg">⏸ Pauze</Btn>}
+        {finished&&<Btn onClick={applyPreset.bind(null,totalSec)} variant="primary" size="lg">▶ Opnieuw</Btn>}
+        {(!atStart||finished)&&<Btn onClick={reset} variant="ghost" size="lg">↺ Reset</Btn>}
+      </div>
+
+      <Card style={{marginBottom:"1.2rem"}}>
+        <H size="1rem" style={{marginBottom:".75rem"}}>Snelle instellingen</H>
+        <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+          {TIMER_PRESETS.map(([sec,label])=>{
+            const active=totalSec===sec;
+            return(
+              <button key={sec} onClick={()=>applyPreset(sec)}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--amber)";e.currentTarget.style.color="var(--amber2)";}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor=active?"var(--amber)":"var(--border)";e.currentTarget.style.color=active?"var(--amber2)":"var(--cream)";}}
+                style={{background:active?"rgba(232,148,58,.12)":"var(--bg3)",border:`1px solid ${active?"var(--amber)":"var(--border)"}`,borderRadius:8,color:active?"var(--amber2)":"var(--cream)",padding:"8px 16px",cursor:"pointer",fontSize:".87rem",fontFamily:"var(--font-b)",fontWeight:active?600:400,transition:"all .15s"}}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card>
+        <H size="1rem" style={{marginBottom:".75rem"}}>Eigen tijd</H>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <Inp value={cMin} onChange={e=>setCMin(e.target.value.replace(/\D/g,""))} style={{width:72,textAlign:"center"}} placeholder="min" onKeyDown={e=>{if(e.key==="Enter")applyCustom();}}/>
+            <span style={{color:"var(--muted)",fontWeight:700}}>:</span>
+            <Inp value={cSec} onChange={e=>setCsec(e.target.value.replace(/\D/g,""))} style={{width:72,textAlign:"center"}} placeholder="sec" onKeyDown={e=>{if(e.key==="Enter")applyCustom();}}/>
+          </div>
+          <Btn onClick={applyCustom} variant="subtle">Instellen</Btn>
+        </div>
+        <div style={{color:"var(--muted)",fontSize:".75rem",marginTop:6}}>Minuten : Seconden</div>
+      </Card>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // APP ROOT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function App(){
@@ -2744,7 +4581,7 @@ export default function App(){
   const [currentUser,setCurrentUser]=useState(null);
   const [authView,setAuthView]=useState("login");
   const [activeId,setActiveId]=useState(null);
-  const [pageView,setPageView]=useState("home"); // home | event | hof
+  const [pageView,setPageView]=useState("home"); // home | event | hof | members | member | updates | teams | timer
   const [showAdmin,setShowAdmin]=useState(false);
   const [newEvent,setNewEvent]=useState(false);
   const [loaded,setLoaded]=useState(false);
@@ -2796,7 +4633,13 @@ export default function App(){
         if(data){
           setUsers(data);
           const cu=currentUserRef.current;
-          if(cu){const fresh=data.find(u=>u.id===cu.id);if(fresh&&fresh.role!==cu.role)setCurrentUser(fresh);}
+          if(cu){
+            const fresh=data.find(u=>u.id===cu.id);
+            if(fresh){
+              const changed=["role","display_name","photo_url","animal_avatar","bio","age"].some(k=>fresh[k]!==cu[k]);
+              if(changed)setCurrentUser(fresh);
+            }
+          }
         }
       });
       supabase.from("events").select("*").order("date").then(({data})=>{
@@ -2902,6 +4745,8 @@ export default function App(){
     else goHome();
   };
   const openMember=id=>{setActiveMemberId(id);setPageView("member");};
+  const openTeams=()=>setPageView("teams");
+  const openTimer=()=>setPageView("timer");
   const saveProfile=async updates=>{
     const{error}=await supabase.from("users").update(updates).eq("id",currentUser.id);
     if(!error){
@@ -2923,15 +4768,17 @@ export default function App(){
   return(
     <div style={{minHeight:"100vh",background:"var(--bg)"}}>
       <GS/>
-      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onUpdates={()=>setPageView("updates")}/>
+      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onUpdates={()=>setPageView("updates")} onProfile={()=>openMember(currentUser.id)} onTeams={openTeams} onTimer={openTimer}/>
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
         <AnnouncementBanner announcements={announcements} currentUser={currentUser} onArchive={archiveAnnouncement} onHardDelete={hardDeleteAnnouncement} onReactivate={reactivateAnnouncement} onEdit={ann=>{setEditingAnn(ann);setShowAnnounce(true);}} onNew={()=>{setEditingAnn(null);setShowAnnounce(true);}}/>
-        {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users}/>}
+        {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users} onTeams={openTeams} onTimer={openTimer}/>}
         {pageView==="hof"&&<HallOfFame events={events} users={users}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
         {pageView==="event"&&activeEvent&&<EventPage evt={activeEvent} onUpdate={updateEvent} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users}/>}
         {pageView==="updates"&&<UpdatesPage notifications={notifications} notifLastRead={notifLastRead} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={id=>{openEvent(id);}}/>}
+        {pageView==="teams"&&<TeamCreatorPage users={users}/>}
+        {pageView==="timer"&&<TimerPage/>}
       </main>
       <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted2)",fontSize:".72rem",borderTop:"1px solid var(--border)",letterSpacing:".1em"}}>🍺 MensApp · Built for the lads</div>
       {showAdmin&&<AdminPanel users={users} onUpdateUsers={updateUsers} onDeleteUser={deleteUser} onClose={()=>setShowAdmin(false)}/>}
