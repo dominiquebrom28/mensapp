@@ -72,6 +72,15 @@ const GS = () => (
     .nav-logout:active{transform:scale(.95)!important}
     .notif-item{transition:background .15s ease}
     .notif-item:hover{background:var(--bg4)!important}
+    @keyframes sj-reveal{0%{transform:scale(.93);opacity:0}100%{transform:scale(1);opacity:1}}
+    @keyframes sj-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
+    @keyframes sj-correct{0%{transform:scale(1)}50%{transform:scale(1.06)}100%{transform:scale(1)}}
+    .sj-img{animation:sj-reveal .35s cubic-bezier(.4,0,.2,1) both}
+    .sj-wrong{animation:sj-shake .4s ease both}
+    .sj-correct{animation:sj-correct .35s ease both}
+    .sj-btn{transition:all .18s cubic-bezier(.4,0,.2,1)!important;user-select:none}
+    .sj-btn:hover:not(:disabled){transform:translateY(-3px) scale(1.03)!important}
+    .sj-btn:active:not(:disabled){transform:scale(.95)!important}
   `}</style>
 );
 
@@ -432,7 +441,7 @@ const PendingScreen = ({user,onLogout}) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // NAV
 // ─────────────────────────────────────────────────────────────────────────────
-const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onUpdates,onProfile,onTeams,onTimer}) => {
+const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onUpdates,onProfile,onTeams,onTimer,onSaraJay,saraJayUnlocked}) => {
   const [menuOpen,setMenuOpen]=useState(false);
   const isMobile=useIsMobile();
   const unread=notifications.filter(n=>n.timestamp>notifLastRead).length;
@@ -453,7 +462,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
         <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}}>
           {view!=="home"&&<button onClick={onBack} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Terug</button>}
           <div onClick={onHome} onMouseEnter={e=>e.currentTarget.style.opacity=".72"} onMouseLeave={e=>e.currentTarget.style.opacity=""} style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer",transition:"opacity .15s"}}>
-            {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":view==="teams"?"🎲 Team Creator":view==="timer"?"⏱ Timer":eventName}
+            {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":view==="teams"?"🎲 Team Creator":view==="timer"?"⏱ Timer":view==="sarajay"?"🤖 Sara Jay":eventName}
           </div>
         </div>
         {!isMobile&&(
@@ -462,6 +471,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
             <button onClick={onHof} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
             <button onClick={onTeams} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🎲 Teams</button>
             <button onClick={onTimer} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⏱ Timer</button>
+            <button onClick={saraJayUnlocked?onSaraJay:undefined} className="nav-btn" style={{background:view==="sarajay"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:saraJayUnlocked?"var(--amber2)":"var(--muted)",padding:"5px 12px",cursor:saraJayUnlocked?"pointer":"not-allowed",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,opacity:saraJayUnlocked?1:.55}}>{saraJayUnlocked?"🤖":"🔒"} Sara Jay</button>
             {can.announce(currentUser)&&<button onClick={onAnnounce} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>📢 Announce</button>}
             {can.manageUsers(currentUser)&&<button onClick={onAdmin} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
             {bellBtn()}
@@ -488,6 +498,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
           <button onClick={()=>{onHof();setMenuOpen(false);}} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
           <button onClick={()=>{onTeams();setMenuOpen(false);}} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🎲 Team Creator</button>
           <button onClick={()=>{onTimer();setMenuOpen(false);}} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>⏱ Timer</button>
+          <button onClick={saraJayUnlocked?()=>{onSaraJay();setMenuOpen(false);}:undefined} className="nav-btn" style={{background:view==="sarajay"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:saraJayUnlocked?"var(--amber2)":"var(--muted)",padding:"10px 14px",cursor:saraJayUnlocked?"pointer":"not-allowed",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",opacity:saraJayUnlocked?1:.55}}>{saraJayUnlocked?"🤖":"🔒"} Sara Jay or JAI{!saraJayUnlocked?" · Binnenkort":""}</button>
           {can.announce(currentUser)&&<button onClick={()=>{onAnnounce();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>📢 Announce</button>}
           {can.manageUsers(currentUser)&&<button onClick={()=>{onAdmin();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:".7rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{pendingCount}</span>}</button>}
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"8px 14px"}}>
@@ -503,7 +514,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
 // ─────────────────────────────────────────────────────────────────────────────
 // ADMIN PANEL
 // ─────────────────────────────────────────────────────────────────────────────
-const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
+const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose,saraJayUnlocked,onToggleSaraJay}) => {
   const [tab,setTab]=useState("pending");
   const pending=users.filter(u=>u.role==="pending");
   const approved=users.filter(u=>u.role!=="pending");
@@ -526,7 +537,7 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
       </div>
       {pending.length>0&&<div style={{background:"rgba(232,148,58,.1)",border:"1px solid var(--border2)",borderRadius:"var(--radius-sm)",padding:"10px 14px",marginBottom:"1.2rem",display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:"1.2rem"}}>⏳</span><span style={{color:"var(--amber2)",fontSize:".88rem",fontWeight:600}}>{pending.length} pending approval{pending.length>1?"s":""}</span></div>}
       <div style={{display:"flex",gap:".3rem",borderBottom:"1px solid var(--border)",marginBottom:"1.2rem"}}>
-        {tabBtn("pending","Pending")}{tabBtn("users","All Users")}
+        {tabBtn("pending","Pending")}{tabBtn("users","All Users")}{tabBtn("features","🎮 Features")}
       </div>
       {tab==="pending"&&<div style={{display:"grid",gap:".8rem"}}>
         {pending.length===0&&<div style={{color:"var(--muted)",fontSize:".88rem",textAlign:"center",padding:"2rem"}}>No pending requests 🎉</div>}
@@ -542,6 +553,23 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose}) => {
             </div>
           </div>
         ))}
+      </div>}
+      {tab==="features"&&<div style={{display:"grid",gap:"1rem"}}>
+        <div style={{fontSize:".75rem",color:"var(--muted)",letterSpacing:".08em",textTransform:"uppercase",marginBottom:".2rem"}}>Mini Games</div>
+        <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"1rem 1.2rem",display:"flex",alignItems:"center",gap:"1rem"}}>
+          <div style={{fontSize:"2rem"}}>🤖</div>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:600,fontSize:".95rem",color:"var(--cream)"}}>Sara Jay or Sara JAI</div>
+            <div style={{fontSize:".75rem",color:"var(--muted)",marginTop:2}}>Real vs AI guessing game · Streak-based arcade</div>
+          </div>
+          <button onClick={onToggleSaraJay}
+            style={{padding:"8px 18px",borderRadius:50,border:"none",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:700,fontSize:".82rem",transition:"all .18s ease",
+              background:saraJayUnlocked?"rgba(76,175,125,.18)":"rgba(232,148,58,.12)",
+              color:saraJayUnlocked?"var(--green)":"var(--amber)",
+              boxShadow:saraJayUnlocked?"0 0 0 1.5px rgba(76,175,125,.4)":"0 0 0 1.5px rgba(232,148,58,.3)"}}>
+            {saraJayUnlocked?"🔓 Live":"🔒 Locked"}
+          </button>
+        </div>
       </div>}
       {tab==="users"&&<div style={{display:"grid",gap:".7rem"}}>
         {approved.map(u=>(
@@ -906,7 +934,7 @@ const EditProfileModal=({user,onSave,onClose})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────────────────────────────────────
-const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer}) => {
+const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onSaraJay,saraJayUnlocked}) => {
   const upcoming=events.filter(e=>!e.archived).sort((a,b)=>new Date(a.date)-new Date(b.date));
   const past=events.filter(e=>e.archived).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const nextEvt=upcoming[0];
@@ -979,15 +1007,16 @@ const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer}) => {
           {[
             {icon:"🎲",title:"Team Creator",desc:"Schud willekeurige teams voor je activiteiten",onClick:onTeams,color:"var(--amber)"},
             {icon:"⏱",title:"Timer",desc:"Afteltimer voor spelletjes en activiteiten",onClick:onTimer,color:"var(--blue)"},
-          ].map(({icon,title,desc,onClick,color})=>(
+            {icon:saraJayUnlocked?"🤖":"🔒",title:"Sara Jay or JAI",desc:saraJayUnlocked?"Echt of AI? Één fout = game over. Bouw je streak.":"Binnenkort beschikbaar... 👀",onClick:saraJayUnlocked?onSaraJay:undefined,color:saraJayUnlocked?"var(--purple)":"var(--muted)",isLocked:!saraJayUnlocked},
+          ].map(({icon,title,desc,onClick,color,isLocked})=>(
             <div key={title} onClick={onClick}
-              onMouseEnter={e=>{e.currentTarget.style.borderColor=color;e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow=`0 8px 28px ${color}22`;}}
+              onMouseEnter={e=>{if(!isLocked){e.currentTarget.style.borderColor=color;e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow=`0 8px 28px ${color}22`;}}}
               onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="";}}
-              style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"1.5rem 1.4rem",cursor:"pointer",transition:"all .2s cubic-bezier(.4,0,.2,1)",display:"flex",flexDirection:"column",gap:".65rem"}}>
+              style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"1.5rem 1.4rem",cursor:isLocked?"not-allowed":"pointer",transition:"all .2s cubic-bezier(.4,0,.2,1)",display:"flex",flexDirection:"column",gap:".65rem",opacity:isLocked?.65:1}}>
               <div style={{fontSize:"2.2rem",lineHeight:1}}>{icon}</div>
               <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:color,lineHeight:1.2}}>{title}</div>
               <div style={{fontSize:".82rem",color:"var(--muted)",lineHeight:1.5}}>{desc}</div>
-              <div style={{marginTop:"auto",paddingTop:".5rem",fontSize:".75rem",color:color,opacity:.7,fontWeight:600,letterSpacing:".04em"}}>Openen →</div>
+              <div style={{marginTop:"auto",paddingTop:".5rem",fontSize:".75rem",color:color,opacity:.7,fontWeight:600,letterSpacing:".04em"}}>{isLocked?"Binnenkort beschikbaar":"Openen →"}</div>
             </div>
           ))}
         </div>
@@ -1132,7 +1161,65 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // EVENT PAGE
 // ─────────────────────────────────────────────────────────────────────────────
-const TABS=["Overview","Polls","Quiz","Photos","Winners & Highlights","FAQ","Kretjes 🍺"];
+const TABS=["Overview","Polls","Quiz","Teams","Photos","Winners & Highlights","FAQ","Kretjes 🍺"];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEAMS TAB
+// ─────────────────────────────────────────────────────────────────────────────
+const TeamsTab=({evt,onUpdate,currentUser,users=[]})=>{
+  const team_sets=evt.team_sets||[];
+  const isAdmin=can.editEvent(currentUser);
+  const deleteSet=id=>onUpdate({...evt,team_sets:team_sets.filter(ts=>ts.id!==id)});
+  if(team_sets.length===0)return(
+    <div style={{textAlign:"center",padding:"3rem 1rem",color:"var(--muted)"}}>
+      <div style={{fontSize:"2.5rem",marginBottom:"1rem"}}>🎲</div>
+      <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",marginBottom:".5rem",color:"var(--cream)"}}>Geen teams opgeslagen</div>
+      <div style={{fontSize:".85rem"}}>Genereer teams via de Team Creator en sla ze op bij dit event.</div>
+    </div>
+  );
+  return(
+    <div style={{display:"grid",gap:"1.2rem"}}>
+      {team_sets.map(ts=>(
+        <Card key={ts.id}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:8}}>
+            <div>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <span style={{fontFamily:"var(--font-h)",fontSize:"1.05rem",color:"var(--amber2)"}}>{ts.name}</span>
+                {ts.category&&<span style={{background:"rgba(232,148,58,.15)",border:"1px solid rgba(232,148,58,.3)",borderRadius:20,padding:"2px 9px",fontSize:".7rem",fontFamily:"var(--font-b)",fontWeight:600,color:"var(--amber2)",letterSpacing:".04em"}}>{ts.category}</span>}
+              </div>
+              <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{ts.teams.length} teams · {ts.teams.reduce((s,t)=>s+t.members.length,0)} deelnemers</div>
+            </div>
+            {isAdmin&&<Btn onClick={()=>deleteSet(ts.id)} variant="danger" size="sm">Verwijder</Btn>}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(175px,1fr))",gap:".75rem"}}>
+            {ts.teams.map((team,i)=>{
+              const col=TEAM_COLORS[i%TEAM_COLORS.length];
+              return(
+                <div key={team.id} style={{background:"var(--bg3)",border:`1px solid ${col}44`,borderRadius:"var(--radius-sm)",padding:".85rem"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:".5rem"}}>
+                    <span style={{fontSize:"1.2rem",lineHeight:1}}>{team.avatar||"🎯"}</span>
+                    <span style={{fontFamily:"var(--font-h)",fontSize:".9rem",color:col}}>{team.name}</span>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:0}}>
+                    {team.members.map((name,j)=>{
+                      const u=users.find(x=>(x.display_name||x.username)===name);
+                      return(
+                        <div key={j} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",borderTop:j>0?"1px solid var(--border)":"none"}}>
+                          {u?<Avatar name={u.username} size={18} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>:<div style={{width:18,height:18,borderRadius:"50%",background:"var(--bg4)",border:"1px solid var(--border)",flexShrink:0}}/>}
+                          <span style={{fontSize:".82rem",color:"var(--cream)"}}>{name}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+};
 
 const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
   const [tab,setTab]=useState("Overview");
@@ -1236,6 +1323,7 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
         {tab==="Overview"             &&<OverviewTab evt={evt} onUpdate={onUpdate} isPast={isPast} currentUser={currentUser} users={users}/>}
         {tab==="Polls"                &&<PollsTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users}/>}
         {tab==="Quiz"                 &&<QuizTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users} onOpenQuizDash={()=>setQuizDash(true)}/>}
+        {tab==="Teams"                &&<TeamsTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} users={users}/>}
         {tab==="Photos"               &&<PhotosTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast}/>}
         {tab==="FAQ"                  &&<FAQTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
@@ -1473,6 +1561,7 @@ const blankQuestion=(type="multiple")=>({
   openAnswer:"",
   // music
   songUrl:"",
+  songStartSeconds:0,
   songPlaySeconds:30,
   songArtist:"",
   songTitle:"",
@@ -1487,10 +1576,10 @@ const TEAM_AVATARS=["🦁","🐻","🦊","🐺","🦅","🐉","🦄","🐯","�
 // Backwards-compat: old quizzes had flat `questions`, new ones use `rounds`
 const normalizeQuiz=q=>{
   const normAnswer=a=>Array.isArray(a)?a:(a!=null?[a]:[0]);
-  const withType=qs=>(qs||[]).map(q=>({...q,type:q.type||"multiple",answer:normAnswer(q.answer),openAnswer:q.openAnswer||"",songUrl:q.songUrl||"",songPlaySeconds:q.songPlaySeconds||30,songArtist:q.songArtist||"",songTitle:q.songTitle||""}));
+  const withType=qs=>(qs||[]).map(q=>({...q,type:q.type||"multiple",answer:normAnswer(q.answer),openAnswer:q.openAnswer||"",songUrl:q.songUrl||"",songStartSeconds:q.songStartSeconds||0,songPlaySeconds:q.songPlaySeconds||30,songArtist:q.songArtist||"",songTitle:q.songTitle||""}));
   const normTeams=(ts=[])=>ts.map((t,i)=>({avatar:TEAM_AVATARS[i%TEAM_AVATARS.length],...t}));
-  if(q.rounds)return{...q,teams:normTeams(q.teams),rounds:q.rounds.map(r=>({icon:"🎯",description:"",...r,questions:withType(r.questions)}))};
-  return{...q,teams:normTeams(q.teams),defaultTime:30,rounds:[{id:"r0",title:"Round 1",theme:"",icon:"🎯",description:"",questions:withType(q.questions)}]};
+  if(q.rounds)return{...q,teams:normTeams(q.teams),rounds:q.rounds.map(r=>({icon:"🎯",description:"",bgImage:null,...r,questions:withType(r.questions)}))};
+  return{...q,teams:normTeams(q.teams),defaultTime:30,rounds:[{id:"r0",title:"Round 1",theme:"",icon:"🎯",description:"",bgImage:null,questions:withType(q.questions)}]};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1675,6 +1764,7 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[]})=>{
               <QuizBuilder
                 existing={panel==="edit"?editTarget:null}
                 attendees={evt.attendees||[]}
+                team_sets={evt.team_sets||[]}
                 onSave={quiz=>{
                   if(panel==="new"){
                     saveQuizzes([...quizzes,{...quiz,id:`qz${Date.now()}`,status:"ready",scores:{}}]);
@@ -1777,12 +1867,12 @@ const TYPE_META={
   music:   {label:"Music",         icon:"🎵",color:"var(--purple)",bg:"rgba(155,127,232,.12)",border:"rgba(155,127,232,.28)"},
 };
 
-const QuizBuilder=({onSave,onCancel,existing=null,attendees=[]})=>{
+const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
   const [title,setTitle]=useState(existing?.title||"");
   const [defaultTime,setDefaultTime]=useState(existing?.defaultTime||30);
   const [rounds,setRounds]=useState(()=>{
     if(existing?.rounds)return existing.rounds.map(r=>({icon:"🎯",description:"",...r,questions:r.questions.map(q=>({...blankQuestion(q.type||"multiple"),...q}))}));
-    return[{id:`r${Date.now()}`,title:"Round 1",theme:"",icon:"🎯",description:"",questions:[blankQuestion()]}];
+    return[{id:`r${Date.now()}`,title:"Round 1",theme:"",icon:"🎯",description:"",bgImage:null,questions:[blankQuestion()]}];
   });
   const [teams,setTeams]=useState(existing?.teams||[]);
   const [newTeamName,setNewTeamName]=useState("");
@@ -1792,11 +1882,15 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[]})=>{
   const [builderTab,setBuilderTab]=useState("rounds");
   const [showDesc,setShowDesc]=useState(false);
   const imgRefs=useRef({});
+  const [imgUploading,setImgUploading]=useState(null);
+  const [imgPickerKey,setImgPickerKey]=useState(null);
+  const [bucketFiles,setBucketFiles]=useState([]);
+  const [bucketLoading,setBucketLoading]=useState(false);
 
   // ── Round helpers ────────────────────────────────────────────────
   const addRound=()=>{
     const ni=rounds.length;
-    setRounds(r=>[...r,{id:`r${Date.now()}`,title:`Round ${r.length+1}`,theme:"",icon:"🎯",description:"",questions:[blankQuestion()]}]);
+    setRounds(r=>[...r,{id:`r${Date.now()}`,title:`Round ${r.length+1}`,theme:"",icon:"🎯",description:"",bgImage:null,questions:[blankQuestion()]}]);
     setActiveRi(ni);setExpandedQ(0);
   };
   const delRound=ri=>{
@@ -1836,10 +1930,35 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[]})=>{
 
   const handleImg=async(ri,qi,e)=>{
     const file=e.target.files[0];if(!file)return;
-    const path=`quiz-images/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
-    const{data,error}=await supabase.storage.from("event-photos").upload(path,file);
-    if(!error){const{data:{publicUrl}}=supabase.storage.from("event-photos").getPublicUrl(data.path);updQ(ri,qi,"image",publicUrl);}
+    const key=`${ri}-${qi}`;
+    setImgUploading(key);
+    const path=`${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
+    const{data,error}=await supabase.storage.from("Quiz images").upload(path,file);
+    if(!error){const{data:{publicUrl}}=supabase.storage.from("Quiz images").getPublicUrl(data.path);updQ(ri,qi,"image",publicUrl);}
+    setImgUploading(null);
     e.target.value="";
+  };
+  const handleRoundImg=async(ri,e)=>{
+    const file=e.target.files[0];if(!file)return;
+    const key=`round-${ri}`;
+    setImgUploading(key);
+    const path=`${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
+    const{data,error}=await supabase.storage.from("Quiz images").upload(path,file);
+    if(!error){const{data:{publicUrl}}=supabase.storage.from("Quiz images").getPublicUrl(data.path);updRound(ri,"bgImage",publicUrl);}
+    setImgUploading(null);
+    e.target.value="";
+  };
+  const loadBucketImages=async()=>{
+    setBucketLoading(true);
+    const{data,error}=await supabase.storage.from("Quiz images").list("",{limit:200,sortBy:{column:"created_at",order:"desc"}});
+    if(!error&&data)setBucketFiles(data.filter(f=>f.name!==".emptyFolderPlaceholder"&&!f.name.endsWith("/")));
+    setBucketLoading(false);
+  };
+  const openBucketPicker=(ri,qi)=>{
+    const key=`${ri}-${qi}`;
+    if(imgPickerKey===key){setImgPickerKey(null);return;}
+    setImgPickerKey(key);
+    loadBucketImages();
   };
 
   // ── Team helpers ─────────────────────────────────────────────────
@@ -1944,6 +2063,27 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[]})=>{
                 <Inp value={ar.description} onChange={e=>updRound(ri,"description",e.target.value)} placeholder="Shown on screen before this round starts…" style={{fontSize:".82rem"}}/>
               </div>
             )}
+            {/* Round background image */}
+            <div style={{marginTop:".7rem"}}>
+              {ar.bgImage?(
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <img src={ar.bgImage} alt="" style={{height:40,width:64,borderRadius:5,objectFit:"cover",flexShrink:0}} onError={e=>e.target.style.display="none"}/>
+                  <span style={{flex:1,fontSize:".74rem",color:"rgba(255,255,255,.35)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ar.bgImage.split("/").pop()}</span>
+                  <button onClick={()=>updRound(ri,"bgImage",null)} style={{...ICON_BTN,color:"var(--muted)",fontSize:".72rem"}}>✕ Clear BG</button>
+                </div>
+              ):(
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <input placeholder="🖼 Background image URL for round slide…"
+                    onBlur={e=>{const v=e.target.value.trim();if(v){updRound(ri,"bgImage",v);e.target.value="";}}}
+                    onKeyDown={e=>{if(e.key==="Enter"){const v=e.target.value.trim();if(v){updRound(ri,"bgImage",v);e.target.value="";}}} }
+                    style={{flex:1,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"6px 9px",color:"var(--cream)",fontSize:".78rem",outline:"none",fontFamily:"var(--font-b)"}}/>
+                  <label style={{...ICON_BTN,cursor:"pointer",color:"var(--muted)",whiteSpace:"nowrap"}}>
+                    {imgUploading===`round-${ri}`?"⏳":"⬆"}
+                    <input type="file" accept="image/*,image/gif" style={{display:"none"}} onChange={e=>handleRoundImg(ri,e)}/>
+                  </label>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Questions accordion */}
@@ -2008,15 +2148,10 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[]})=>{
                             <button onClick={()=>updQ(ri,qi,"image",null)} style={{position:"absolute",top:3,right:3,background:"rgba(0,0,0,.8)",border:"none",borderRadius:"50%",color:"#fff",width:20,height:20,cursor:"pointer",fontSize:"11px",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
                           </div>
                         ):(
-                          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                            <input ref={el=>imgRefs.current[`${ri}-${qi}`]=el} type="file" accept="image/*" onChange={e=>handleImg(ri,qi,e)} style={{display:"none"}}/>
-                            <Btn onClick={()=>imgRefs.current[`${ri}-${qi}`]?.click()} variant="ghost" size="sm" style={{fontSize:".75rem"}}>📷 Upload</Btn>
-                            <span style={{fontSize:".7rem",color:"var(--muted)"}}>or</span>
-                            <input placeholder="Paste image URL…"
-                              onBlur={e=>{const v=e.target.value.trim();if(v)updQ(ri,qi,"image",v);e.target.value="";}}
-                              onKeyDown={e=>{if(e.key==="Enter"){const v=e.target.value.trim();if(v)updQ(ri,qi,"image",v);e.target.value="";}}}
-                              style={{flex:1,minWidth:140,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"6px 9px",color:"var(--cream)",fontSize:".78rem",outline:"none",fontFamily:"var(--font-b)"}}/>
-                          </div>
+                          <input placeholder="🖼 Paste image URL…"
+                            onBlur={e=>{const v=e.target.value.trim();if(v)updQ(ri,qi,"image",v);e.target.value="";}}
+                            onKeyDown={e=>{if(e.key==="Enter"){const v=e.target.value.trim();if(v)updQ(ri,qi,"image",v);e.target.value="";}}}
+                            style={{width:"100%",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"6px 9px",color:"var(--cream)",fontSize:".78rem",outline:"none",fontFamily:"var(--font-b)",boxSizing:"border-box"}}/>
                         )}
                       </div>
 
@@ -2069,7 +2204,16 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[]})=>{
                             {q.songUrl&&!isYouTubeUrl(q.songUrl)&&!isSpotifyUrl(q.songUrl)&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:3}}>⚠ Use a YouTube or Spotify link</div>}
                             {q.songUrl&&isYouTubeUrl(q.songUrl)&&!getYouTubeId(q.songUrl)&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:3}}>⚠ Couldn't detect video ID</div>}
                           </div>
-                          <div style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr",gap:"1rem",alignItems:"end"}}>
+                          <div style={{display:"grid",gridTemplateColumns:"auto auto 1fr 1fr",gap:"1rem",alignItems:"end"}}>
+                            <div>
+                              <Lbl>Start at</Lbl>
+                              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                                <input type="number" min={0} step={1} value={q.songStartSeconds||0}
+                                  onChange={e=>updQ(ri,qi,"songStartSeconds",Math.max(0,+e.target.value||0))}
+                                  style={{...SEL_STYLE,padding:"9px 8px",color:"var(--cream)",width:64,textAlign:"center"}}/>
+                                <span style={{fontSize:".75rem",color:"var(--muted)"}}>s</span>
+                              </div>
+                            </div>
                             <div>
                               <Lbl>Play for</Lbl>
                               <select value={q.songPlaySeconds} onChange={e=>updQ(ri,qi,"songPlaySeconds",+e.target.value)} style={{...SEL_STYLE,padding:"9px 8px",color:"var(--cream)"}}>
@@ -2102,6 +2246,23 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[]})=>{
       {/* ════════════════════════════════════════════════════════ */}
       {builderTab==="teams"&&(
         <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
+          {/* Import saved teams */}
+          {team_sets.length>0&&(
+            <div style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:"var(--radius-sm)",padding:".85rem"}}>
+              <div style={{fontSize:".72rem",color:"var(--muted)",letterSpacing:".08em",textTransform:"uppercase",marginBottom:".5rem"}}>📥 Laad opgeslagen teams</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {team_sets.map(ts=>(
+                  <button key={ts.id}
+                    onClick={()=>setTeams(ts.teams.map(t=>({...t,captain:t.captain||null})))}
+                    style={{background:"rgba(232,148,58,.1)",border:"1px solid rgba(232,148,58,.3)",borderRadius:6,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .15s"}}
+                    onMouseEnter={e=>{e.target.style.background="rgba(232,148,58,.2)";}}
+                    onMouseLeave={e=>{e.target.style.background="rgba(232,148,58,.1)";}}>
+                    {ts.category&&<span style={{opacity:.7,marginRight:4}}>[{ts.category}]</span>}{ts.name} <span style={{opacity:.65}}>({ts.teams.length})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {/* Create team */}
           <div style={{display:"flex",gap:8}}>
             <Inp value={newTeamName} onChange={e=>setNewTeamName(e.target.value)} placeholder="Team name…"
@@ -2213,13 +2374,14 @@ const MusicPlayer=({q,onPlayStart,onPlayEnd,musicPhase,musicTimer})=>{
   const ytId=getYouTubeId(q.songUrl);
   const spId=getSpotifyTrackId(q.songUrl);
   const totalSecs=q.songPlaySeconds||30;
+  const startSecs=q.songStartSeconds||0;
   return(
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:"1.6rem"}}>
       {/* YouTube audio-only: mount hidden so audio keeps playing, video never shown */}
       {ytId&&musicPhase==="playing"&&(
         <div style={{position:"fixed",left:"-9999px",top:0,width:1,height:1,overflow:"hidden",pointerEvents:"none"}} aria-hidden>
           <iframe
-            src={`https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1&controls=0&modestbranding=1&rel=0`}
+            src={`https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1&controls=0&modestbranding=1&rel=0${startSecs>0?`&start=${startSecs}`:""}`}
             allow="autoplay; encrypted-media"
             style={{width:320,height:180,border:"none"}}
             title="audio"/>
@@ -2262,18 +2424,19 @@ const MusicPlayer=({q,onPlayStart,onPlayEnd,musicPhase,musicTimer})=>{
       )}
 
       {musicPhase==="ready"&&<div style={{fontSize:"3.5rem",filter:"drop-shadow(0 0 24px rgba(232,148,58,.45))"}}>🎵</div>}
-      {musicPhase==="done"&&<div style={{fontSize:"2.5rem",opacity:.5}}>⏹</div>}
 
       {/* Controls */}
       <div style={{display:"flex",gap:10}}>
-        {musicPhase==="ready"&&(
-          <button onClick={onPlayStart} style={{background:"rgba(232,148,58,.2)",border:"1px solid var(--amber)",borderRadius:12,color:"var(--amber2)",padding:"12px 32px",fontSize:"1rem",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:700,letterSpacing:".05em",backdropFilter:"blur(8px)"}}>
-            ▶ Play ({totalSecs}s)
+        {(musicPhase==="ready"||musicPhase==="done")&&(
+          <button onClick={onPlayStart} style={{background:"rgba(232,148,58,.2)",border:"1px solid var(--amber)",borderRadius:12,color:"var(--amber2)",padding:"12px 32px",fontSize:"1rem",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:700,letterSpacing:".05em",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",gap:8}}>
+            {musicPhase==="done"?"↺ Replay":"▶ Play"} ({startSecs>0?`${startSecs}s – ${startSecs+totalSecs}s`:`${totalSecs}s`})
+            <span style={{fontSize:".6rem",opacity:.35,fontWeight:400}}>[P]</span>
           </button>
         )}
         {musicPhase==="playing"&&(
-          <button onClick={onPlayEnd} style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.2)",borderRadius:12,color:"rgba(255,255,255,.6)",padding:"12px 26px",fontSize:".88rem",cursor:"pointer",fontFamily:"var(--font-b)",backdropFilter:"blur(8px)"}}>
+          <button onClick={onPlayEnd} style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.2)",borderRadius:12,color:"rgba(255,255,255,.6)",padding:"12px 26px",fontSize:".88rem",cursor:"pointer",fontFamily:"var(--font-b)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",gap:8}}>
             ⏹ Stop early
+            <span style={{fontSize:".6rem",opacity:.35,fontWeight:400}}>[P]</span>
           </button>
         )}
       </div>
@@ -2302,6 +2465,7 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
   const [timer,setTimer]=useState(0);
   const [fading,setFading]=useState(false);
   const timerRef=useRef(null);
+  const timerStartedAtRef=useRef(null);
 
   // Pause timer
   const [prevPhase,setPrevPhase]=useState(null);
@@ -2331,17 +2495,25 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
   // Publish current presenter state into quiz._liveState so participants can follow
   const publishLive=(overrides={})=>{
     const e=evtRef.current;
+    const newQIdx=overrides.qIdx!==undefined?overrides.qIdx:qIdx;
+    const newRoundIdx=overrides.roundIdx!==undefined?overrides.roundIdx:roundIdx;
+    const newPhase=overrides.phase!==undefined?overrides.phase:phase;
+    // Clear timer whenever we navigate to a different question or phase so
+    // participants never inherit a stale timerStartedAt from the previous question.
+    const navigating=newQIdx!==qIdx||newRoundIdx!==roundIdx||newPhase!==phase;
     const liveState={
-      phase:overrides.phase??phase,
-      roundIdx:overrides.roundIdx??roundIdx,
-      qIdx:overrides.qIdx??qIdx,
+      phase:newPhase,
+      roundIdx:newRoundIdx,
+      qIdx:newQIdx,
       slidePhase:overrides.slidePhase??slidePhase,
       scores:overrides.scores??scores,
-      answers:overrides.answers!==undefined?overrides.answers:(e.quizzes?.find(q=>q.id===quiz.id)?._liveState?.answers||{}),
+      answers:overrides.answers!==undefined?overrides.answers:answers,
       teams:quiz.teams||[],
       isTeamQuiz,
       summaryRevealed:overrides.summaryRevealed??summaryRevealed,
       pauseConfig,
+      timerStartedAt:overrides.timerStartedAt!==undefined?overrides.timerStartedAt:(navigating?null:timerStartedAtRef.current),
+      timerLimit:overrides.timerLimit!==undefined?overrides.timerLimit:timeLimit,
     };
     const updatedQuizzes=(e.quizzes||[]).map(q=>q.id===quiz.id?{...q,_liveState:liveState}:q);
     onUpdate({...e,quizzes:updatedQuizzes});
@@ -2357,6 +2529,7 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
   const currentQ=currentRound?.questions[qIdx];
   const totalQInRound=currentRound?.questions?.length||0;
   const timeLimit=currentQ?(currentQ.timeLimit||quiz.defaultTime||30):30;
+  const hostTimedOut=timer===0&&phase==="question"&&slidePhase==="question"&&currentQ?.type==="multiple";
 
   // ── Effects ─────────────────────────────────────────────────────────────────
   useEffect(()=>{
@@ -2373,7 +2546,15 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
       if((e.key==="r"||e.key==="R")&&k.phase==="question"&&k.slidePhase==="question"){
         k.doRevealAnswer();return;
       }
-      if(e.key==="ArrowRight"||e.key==="ArrowDown"){
+      if((e.key==="p"||e.key==="P")&&k.phase==="question"&&k.slidePhase==="question"&&k.currentQ?.type==="music"){
+        if(k.musicPhase==="ready"||k.musicPhase==="done"){k.doPlayMusic();}
+        else if(k.musicPhase==="playing"){k.doStopMusic();}
+        return;
+      }
+      if((e.key==="a"||e.key==="A")&&k.phase==="round-summary"){
+        k.revealAllSummary();return;
+      }
+      if(e.key==="ArrowRight"||e.key==="ArrowDown"||e.key===" "){
         e.preventDefault();
         if(k.fading)return;
         if(k.phase==="intro"){k.fade(()=>setPhase("round-intro"));return;}
@@ -2426,7 +2607,9 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
   },[]);
 
   useEffect(()=>{
+    timerStartedAtRef.current=null;
     if(phase==="question"&&slidePhase==="question"&&currentQ&&currentQ.type!=="music"&&currentQ.type!=="open"){
+      timerStartedAtRef.current=Date.now();
       setTimer(timeLimit);
       timerRef.current=setInterval(()=>{
         setTimer(t=>{if(t<=1){clearInterval(timerRef.current);return 0;}return t-1;});
@@ -2507,11 +2690,12 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
       if(!isLastQ){
         const nextQ=qIdx+1;
         setQIdx(nextQ);setSlidePhase("question");setAnswers({});setMusicPhase("ready");
-        publishLive({qIdx:nextQ,slidePhase:"question",answers:{},roundIdx});
+        // No explicit publishLive here — the publishLive useEffect fires after
+        // this render and writes the correct timerStartedAt in a single write.
+        // A second write here would race against it and could overwrite the timer.
       } else {
         setSummaryRevealed([]);
         setPhase("round-summary");
-        publishLive({phase:"round-summary",summaryRevealed:[]});
       }
     });
   };
@@ -2572,8 +2756,11 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
 
   // ── Keyboard ref (must be after all actions are defined) ────────────────────
   const kbRef=useRef({});
-  kbRef.current={phase,slidePhase,qIdx,roundIdx,fading,totalQInRound,totalRounds,currentRound,
-    doRevealAnswer,doNextStep,doAfterSummary,fade,publishLive,handleClose};
+  kbRef.current={phase,slidePhase,qIdx,roundIdx,fading,totalQInRound,totalRounds,currentRound,currentQ,
+    musicPhase,summaryRevealed,
+    doRevealAnswer,doNextStep,doAfterSummary,fade,publishLive,handleClose,revealAllSummary,
+    doPlayMusic:()=>setMusicPhase("playing"),
+    doStopMusic:()=>{clearInterval(musicRef.current);setMusicPhase("done");}};
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return(
@@ -2612,24 +2799,37 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
             <div style={{fontSize:".75rem",color:"var(--amber)",letterSpacing:".2em",textTransform:"uppercase",fontWeight:700,marginBottom:"1rem",opacity:.8}}>{evt.name}</div>
             <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(2.4rem,7vw,5rem)",color:"#fff",lineHeight:1.08,marginBottom:"1.2rem",textShadow:"0 0 60px rgba(232,148,58,.2)"}}>{quiz.title}</div>
             <div style={{color:"rgba(255,255,255,.4)",fontSize:"1rem",marginBottom:"3rem"}}>{totalRounds} round{totalRounds!==1?"s":""} · {quiz.rounds.reduce((s,r)=>s+r.questions.length,0)} questions</div>
-            <button onClick={()=>fade(()=>setPhase("round-intro"))} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"14px 40px",fontSize:"1.05rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)",letterSpacing:".04em"}}>
+            <button onClick={()=>fade(()=>setPhase("round-intro"))} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"14px 40px",fontSize:"1.05rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)",letterSpacing:".04em",display:"inline-flex",alignItems:"center",gap:10}}>
               Start Quiz →
+              <span style={{fontSize:".6rem",opacity:.35,fontWeight:400,letterSpacing:".03em"}}>[→]</span>
             </button>
           </div>
         )}
 
         {/* ── ROUND INTRO ───────────────────────────────────────────────── */}
-        {phase==="round-intro"&&currentRound&&(
-          <div style={{textAlign:"center",maxWidth:680}}>
+        {phase==="round-intro"&&currentRound&&(()=>{
+          const hasBg=!!currentRound.bgImage;
+          return(
+          <div style={{textAlign:"center",maxWidth:680,
+            ...(hasBg?{background:"rgba(0,0,0,.52)",backdropFilter:"blur(18px)",WebkitBackdropFilter:"blur(18px)",borderRadius:24,padding:"2.5rem 3.5rem",border:"1px solid rgba(255,255,255,.1)",boxShadow:"0 12px 80px rgba(0,0,0,.6)"}:{})}}>
             <div style={{fontSize:"4rem",marginBottom:"1.2rem",filter:"drop-shadow(0 0 30px rgba(232,148,58,.3))",animation:"float 3.5s ease-in-out infinite"}}>{currentRound.icon||"🎯"}</div>
-            <div style={{fontSize:".72rem",color:"var(--muted)",letterSpacing:".18em",textTransform:"uppercase",marginBottom:".8rem"}}>Round {roundIdx+1} of {totalRounds}</div>
-            <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(2rem,6vw,4rem)",color:"#fff",lineHeight:1.1,marginBottom:".6rem",textShadow:"0 2px 30px rgba(0,0,0,.5)"}}>{currentRound.title}</div>
-            {currentRound.theme&&<div style={{color:"var(--amber2)",fontSize:"1.05rem",marginBottom:".8rem",opacity:.8}}>{currentRound.theme}</div>}
-            {currentRound.description&&<div style={{color:"rgba(255,255,255,.42)",fontSize:".95rem",lineHeight:1.6,marginBottom:"1.2rem",maxWidth:480,margin:"0 auto 1.2rem"}}>{currentRound.description}</div>}
-            <div style={{color:"rgba(255,255,255,.3)",fontSize:".82rem",marginBottom:"2.5rem"}}>{currentRound.questions.length} question{currentRound.questions.length!==1?"s":""}</div>
-            <button onClick={()=>fade(()=>{setPhase("question");setSlidePhase("question");setMusicPhase("ready");setAnswers({});publishLive({phase:"question",slidePhase:"question",qIdx:0,answers:{},roundIdx});})} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"14px 40px",fontSize:"1.05rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)"}}>
+            <div style={{fontSize:".72rem",color:hasBg?"rgba(255,255,255,.7)":"var(--muted)",letterSpacing:".18em",textTransform:"uppercase",marginBottom:".8rem"}}>Round {roundIdx+1} of {totalRounds}</div>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(2rem,6vw,4rem)",color:"#fff",lineHeight:1.1,marginBottom:".6rem",textShadow:hasBg?"0 2px 12px rgba(0,0,0,.9),0 0 60px rgba(0,0,0,.6)":"0 2px 30px rgba(0,0,0,.5)"}}>{currentRound.title}</div>
+            {currentRound.theme&&<div style={{color:"var(--amber2)",fontSize:"1.05rem",marginBottom:".8rem",opacity:hasBg?1:.8,textShadow:hasBg?"0 1px 8px rgba(0,0,0,.8)":"none"}}>{currentRound.theme}</div>}
+            {currentRound.description&&<div style={{color:hasBg?"rgba(255,255,255,.85)":"rgba(255,255,255,.42)",fontSize:".95rem",lineHeight:1.6,marginBottom:"1.2rem",maxWidth:480,margin:"0 auto 1.2rem"}}>{currentRound.description}</div>}
+            <div style={{color:hasBg?"rgba(255,255,255,.6)":"rgba(255,255,255,.3)",fontSize:".82rem",marginBottom:"2.5rem"}}>{currentRound.questions.length} question{currentRound.questions.length!==1?"s":""}</div>
+            <button onClick={()=>fade(()=>{setPhase("question");setSlidePhase("question");setMusicPhase("ready");setAnswers({});publishLive({phase:"question",slidePhase:"question",qIdx:0,answers:{},roundIdx});})} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"14px 40px",fontSize:"1.05rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)",display:"inline-flex",alignItems:"center",gap:10}}>
               Start Round →
+              <span style={{fontSize:".6rem",opacity:.35,fontWeight:400,letterSpacing:".03em"}}>[→]</span>
             </button>
+          </div>
+          );
+        })()}
+        {/* Round intro full-screen background image */}
+        {phase==="round-intro"&&currentRound?.bgImage&&(
+          <div style={{position:"absolute",inset:0,zIndex:-1,pointerEvents:"none"}}>
+            <div style={{position:"absolute",inset:0,backgroundImage:`url(${currentRound.bgImage})`,backgroundSize:"cover",backgroundPosition:"center"}}/>
+            <div style={{position:"absolute",inset:0,background:"rgba(7,5,1,.55)"}}/>
           </div>
         )}
 
@@ -2643,48 +2843,53 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
               </span>
               {totalRounds>1&&<span style={{color:"rgba(255,255,255,.35)",fontSize:".85rem"}}>{currentRound.title}</span>}
               <span style={{marginLeft:"auto",color:"rgba(255,255,255,.3)",fontSize:".78rem"}}>{currentQ.points} pts</span>
-            </div>
-
-            {/* ── Big central timer — multiple choice questions only ── */}
-            {currentQ.type==="multiple"&&slidePhase==="question"&&(
-              <div style={{textAlign:"center",marginBottom:"2rem"}}>
-                <div style={{position:"relative",width:120,height:120,margin:"0 auto"}}>
-                  <svg width="120" height="120" style={{transform:"rotate(-90deg)"}}>
-                    <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,.07)" strokeWidth="6"/>
-                    <circle cx="60" cy="60" r="52" fill="none"
-                      stroke={timer/timeLimit>0.33?"var(--amber)":"var(--red)"} strokeWidth="6"
-                      strokeDasharray="327" strokeDashoffset={327*(1-timer/timeLimit)}
+              {/* Compact timer in header — multiple choice only */}
+              {currentQ.type==="multiple"&&slidePhase==="question"&&!hostTimedOut&&(
+                <div style={{position:"relative",width:64,height:64,flexShrink:0,
+                  ...(timer<=5?{animation:"timerPulse .6s ease-in-out infinite"}:{})}}>
+                  <svg width="64" height="64" style={{transform:"rotate(-90deg)"}}>
+                    <circle cx="32" cy="32" r="27" fill="none" stroke="rgba(255,255,255,.07)" strokeWidth="5"/>
+                    <circle cx="32" cy="32" r="27" fill="none"
+                      stroke={timer/timeLimit>0.33?"var(--amber)":"var(--red)"} strokeWidth="5"
+                      strokeDasharray="170" strokeDashoffset={170*(1-timer/timeLimit)}
                       style={{transition:"stroke-dashoffset 1s linear,stroke .5s"}}/>
                   </svg>
-                  <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:1,
-                    ...(timer<=5?{animation:"timerPulse .6s ease-in-out infinite"}:{})}}>
-                    <div style={{fontFamily:"var(--font-h)",fontSize:"2.8rem",fontWeight:900,lineHeight:1,
+                  <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:0}}>
+                    <div style={{fontFamily:"var(--font-h)",fontSize:"1.35rem",fontWeight:900,lineHeight:1,
                       color:timer/timeLimit>0.33?"var(--amber)":"var(--red)"}}>{timer}</div>
-                    <div style={{fontSize:".58rem",color:"rgba(255,255,255,.3)",letterSpacing:".12em",textTransform:"uppercase"}}>sec</div>
                   </div>
                 </div>
+              )}
+            </div>
+
+            {/* ── Time's up screen (host) ── */}
+            {hostTimedOut&&(
+              <div style={{textAlign:"center",padding:"2rem 1rem",marginBottom:"1.5rem"}}>
+                <div style={{fontSize:"3.5rem",marginBottom:"1rem",animation:"timerPulse .6s ease-in-out infinite"}}>⏰</div>
+                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(2rem,6vw,3.5rem)",color:"var(--red)",fontWeight:900,marginBottom:".5rem"}}>Time's up!</div>
+                <div style={{color:"rgba(255,255,255,.45)",fontSize:".95rem"}}>Reveal the answer or move to the next question</div>
               </div>
             )}
 
             {/* Question image */}
-            {currentQ.image&&slidePhase==="question"&&(
-              <div style={{textAlign:"center",marginBottom:"1.2rem"}}>
-                <img src={currentQ.image} alt="" style={{maxWidth:"100%",maxHeight:"28vh",objectFit:"contain",borderRadius:12,boxShadow:"0 8px 40px rgba(0,0,0,.5)"}}/>
+            {currentQ.image&&slidePhase==="question"&&!hostTimedOut&&(
+              <div style={{textAlign:"center",marginBottom:"1.4rem"}}>
+                <img src={currentQ.image} alt="" style={{maxWidth:"100%",maxHeight:"55vh",objectFit:"contain",borderRadius:12,boxShadow:"0 8px 40px rgba(0,0,0,.5)"}}/>
               </div>
             )}
-            <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.5rem,4vw,2.8rem)",color:"#fff",lineHeight:1.2,marginBottom:"1.8rem",textShadow:"0 2px 20px rgba(0,0,0,.4)"}}>
+            {!hostTimedOut&&<div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.5rem,4vw,2.8rem)",color:"#fff",lineHeight:1.2,marginBottom:"1.8rem",textShadow:"0 2px 20px rgba(0,0,0,.4)"}}>
               {currentQ.q}
-            </div>
+            </div>}
 
             {/* "meerdere antwoorden" hint */}
-            {currentQ.type==="multiple"&&slidePhase==="question"&&(Array.isArray(currentQ.answer)?currentQ.answer:[currentQ.answer]).length>1&&(
+            {currentQ.type==="multiple"&&slidePhase==="question"&&!hostTimedOut&&(Array.isArray(currentQ.answer)?currentQ.answer:[currentQ.answer]).length>1&&(
               <div style={{textAlign:"center",color:"rgba(255,255,255,.5)",fontSize:".82rem",fontStyle:"italic",marginBottom:"1rem",letterSpacing:".02em"}}>
                 meerdere antwoorden zijn mogelijk
               </div>
             )}
 
             {/* MULTIPLE CHOICE options */}
-            {currentQ.type==="multiple"&&(()=>{
+            {currentQ.type==="multiple"&&!hostTimedOut&&(()=>{
               const correctSet=Array.isArray(currentQ.answer)?currentQ.answer:[currentQ.answer??0];
               return(
                 <div style={{display:"grid",gridTemplateColumns:currentQ.options.length<=2?"1fr":"1fr 1fr",gap:"1rem"}}>
@@ -2802,12 +3007,14 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
             </div>
             <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
               {summaryRevealed.length<totalQInRound&&(
-                <button onClick={revealAllSummary} style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.14)",borderRadius:12,color:"rgba(255,255,255,.65)",padding:"10px 22px",fontSize:".85rem",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:500}}>
+                <button onClick={revealAllSummary} style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.14)",borderRadius:12,color:"rgba(255,255,255,.65)",padding:"10px 22px",fontSize:".85rem",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:500,display:"inline-flex",alignItems:"center",gap:8}}>
                   Reveal All
+                  <span style={{fontSize:".6rem",opacity:.35,fontWeight:400,letterSpacing:".03em"}}>[A]</span>
                 </button>
               )}
-              <button onClick={doAfterSummary} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"12px 36px",fontSize:"1rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)"}}>
+              <button onClick={doAfterSummary} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"12px 36px",fontSize:"1rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)",display:"inline-flex",alignItems:"center",gap:10}}>
                 {roundIdx>=totalRounds-1?"Final Results →":"View Scores →"}
+                <span style={{fontSize:".6rem",opacity:.35,fontWeight:400,letterSpacing:".03em"}}>[→]</span>
               </button>
             </div>
           </div>
@@ -2840,8 +3047,9 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
                 );
               })}
             </div>
-            <button onClick={()=>{const nr=roundIdx+1;fade(()=>{setRoundIdx(nr);setQIdx(0);setPhase("round-intro");setAnswers({});setMusicPhase("ready");publishLive({phase:"round-intro",roundIdx:nr,qIdx:0,answers:{},slidePhase:"question"});});}} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"14px 40px",fontSize:"1.05rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)"}}>
+            <button onClick={()=>{const nr=roundIdx+1;fade(()=>{setRoundIdx(nr);setQIdx(0);setPhase("round-intro");setAnswers({});setMusicPhase("ready");publishLive({phase:"round-intro",roundIdx:nr,qIdx:0,answers:{},slidePhase:"question"});});}} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"14px 40px",fontSize:"1.05rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)",display:"inline-flex",alignItems:"center",gap:10}}>
               Next Round →
+              <span style={{fontSize:".6rem",opacity:.35,fontWeight:400,letterSpacing:".03em"}}>[→]</span>
             </button>
           </div>
         )}
@@ -2873,8 +3081,9 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
                 );
               })}
             </div>
-            <button onClick={()=>{clearLive();onFinish(scores);}} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"14px 40px",fontSize:"1.05rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)"}}>
+            <button onClick={()=>{clearLive();onFinish(scores);}} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"14px 40px",fontSize:"1.05rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)",display:"inline-flex",alignItems:"center",gap:10}}>
               Close Presenter
+              <span style={{fontSize:".6rem",opacity:.35,fontWeight:400,letterSpacing:".03em"}}>[Esc]</span>
             </button>
           </div>
         )}
@@ -2983,10 +3192,10 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
 
           {/* Action buttons */}
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            {slidePhase==="question"&&presenterBtn("Reveal Answer",doRevealAnswer,true,"R")}
+            {slidePhase==="question"&&presenterBtn("Reveal Answer",doRevealAnswer,!hostTimedOut,"R")}
             {presenterBtn(
               qIdx<totalQInRound-1?"Next Question →":roundIdx<totalRounds-1?"End Round →":"Final Results →",
-              doNextStep,slidePhase==="answer","→"
+              doNextStep,slidePhase==="answer"||hostTimedOut,"→"
             )}
           </div>
 
@@ -3018,6 +3227,8 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[]})=>{
   const [myAnswer,setMyAnswer]=useState([]); // always an array
   const [submitted,setSubmitted]=useState(false);
   const [showAvatarPicker,setShowAvatarPicker]=useState(false);
+  const [localTimer,setLocalTimer]=useState(null);
+  const localTimerRef=useRef(null);
   const evtRef=useRef(evt);
   evtRef.current=evt;
 
@@ -3051,6 +3262,18 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[]})=>{
     return()=>clearInterval(poll);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[evt.id]);
+
+  useEffect(()=>{
+    clearInterval(localTimerRef.current);
+    setLocalTimer(null);
+    if(ls.phase!=="question"||ls.slidePhase!=="question"||!currentQ||currentQ.type==="open"||currentQ.type==="music"||!ls.timerStartedAt)return;
+    const limit=ls.timerLimit||30;
+    const tick=()=>setLocalTimer(Math.max(0,limit-Math.floor((Date.now()-ls.timerStartedAt)/1000)));
+    tick();
+    localTimerRef.current=setInterval(tick,500);
+    return()=>clearInterval(localTimerRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[ls.phase,ls.slidePhase,ls.qIdx,ls.roundIdx,ls.timerStartedAt,ls.timerLimit]);
 
   const writeAnswer=async(newAns)=>{
     const {data:fresh}=await supabase.from("events").select("*").eq("id",evtRef.current.id).single();
@@ -3095,6 +3318,7 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[]})=>{
   const sortedScores=Object.entries(scores).sort((a,b)=>b[1]-a[1]);
   const medal=["🥇","🥈","🥉"];
 
+  const timedOut=localTimer===0&&ls.slidePhase==="question"&&currentQ?.type==="multiple";
   const phaseBg={background:"#070501",color:"#fff",fontFamily:"var(--font-b)"};
   const Waiting=({icon,title,sub})=>(
     <div style={{textAlign:"center",padding:"3rem 2rem"}}>
@@ -3137,11 +3361,25 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[]})=>{
               </div>
             )}
           </div>
-          <div style={{fontSize:".7rem",color:"rgba(255,255,255,.3)",letterSpacing:".06em",textTransform:"uppercase"}}>
-            {ls.phase==="question"&&`Q${(ls.qIdx||0)+1} · Round ${(ls.roundIdx||0)+1}`}
-            {ls.phase==="round-intro"&&`Round ${(ls.roundIdx||0)+1}`}
-            {ls.phase==="round-summary"&&`Round ${(ls.roundIdx||0)+1} Summary`}
-            {ls.phase==="final"&&"Final Results"}
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{fontSize:".7rem",color:"rgba(255,255,255,.3)",letterSpacing:".06em",textTransform:"uppercase"}}>
+              {ls.phase==="question"&&`Q${(ls.qIdx||0)+1} · Round ${(ls.roundIdx||0)+1}`}
+              {ls.phase==="round-intro"&&`Round ${(ls.roundIdx||0)+1}`}
+              {ls.phase==="round-summary"&&`Round ${(ls.roundIdx||0)+1} Summary`}
+              {ls.phase==="final"&&"Final Results"}
+            </div>
+            {can.hostQuiz(currentUser)&&(
+              <button onClick={async()=>{
+                const {data:fresh}=await supabase.from("events").select("*").eq("id",evtRef.current.id).single();
+                if(!fresh)return;
+                const cleaned=(fresh.quizzes||[]).map(q=>q.id===liveQ.id?{...q,_liveState:null}:q);
+                const updated={...fresh,quizzes:cleaned};
+                await supabase.from("events").upsert([updated]);
+                onUpdate(updated);
+              }} style={{background:"rgba(224,85,85,.15)",border:"1px solid rgba(224,85,85,.35)",borderRadius:7,color:"rgba(224,85,85,.9)",padding:"4px 10px",cursor:"pointer",fontSize:".65rem",fontFamily:"var(--font-b)",fontWeight:700,letterSpacing:".04em",whiteSpace:"nowrap"}}>
+                ✕ End Session
+              </button>
+            )}
           </div>
         </div>
         {/* Avatar picker dropdown */}
@@ -3169,9 +3407,21 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[]})=>{
         )}
 
         {/* ── Round intro ── */}
-        {ls.phase==="round-intro"&&(
-          <Waiting icon={currentRound?.icon||"🎯"} title={currentRound?.title||"Next Round"} sub={currentRound?.theme||`${(currentRound?.questions||[]).length} questions`}/>
-        )}
+        {ls.phase==="round-intro"&&(()=>{
+          const hasBg=!!currentRound?.bgImage;
+          return(
+          <>
+            {hasBg&&<div style={{position:"fixed",inset:0,backgroundImage:`url(${currentRound.bgImage})`,backgroundSize:"cover",backgroundPosition:"center",zIndex:2,pointerEvents:"none"}}/>}
+            {hasBg&&<div style={{position:"fixed",inset:0,background:"rgba(7,5,1,.55)",zIndex:2,pointerEvents:"none"}}/>}
+            <div style={{position:"relative",zIndex:3,textAlign:"center",padding:"3rem 2rem",
+              ...(hasBg?{background:"rgba(0,0,0,.5)",backdropFilter:"blur(18px)",WebkitBackdropFilter:"blur(18px)",borderRadius:20,border:"1px solid rgba(255,255,255,.1)",boxShadow:"0 8px 60px rgba(0,0,0,.6)"}:{})}}>
+              <div style={{fontSize:"3rem",marginBottom:"1rem"}}>{currentRound?.icon||"🎯"}</div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.4rem,5vw,2.2rem)",color:"var(--amber2)",marginBottom:".6rem",textShadow:hasBg?"0 2px 12px rgba(0,0,0,.9)":"none"}}>{currentRound?.title||"Next Round"}</div>
+              <div style={{color:hasBg?"rgba(255,255,255,.75)":"rgba(255,255,255,.4)",fontSize:".9rem"}}>{currentRound?.theme||`${(currentRound?.questions||[]).length} questions`}</div>
+            </div>
+          </>
+          );
+        })()}
 
         {/* ── Pause ── */}
         {ls.phase==="pause"&&(
@@ -3302,8 +3552,37 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[]})=>{
               <span style={{marginLeft:"auto",color:"rgba(255,255,255,.3)",fontSize:".75rem"}}>{currentQ.points||100} pts</span>
             </div>
 
+            {/* Timer ring */}
+            {ls.slidePhase==="question"&&currentQ.type==="multiple"&&localTimer!==null&&!timedOut&&(
+              <div style={{textAlign:"center",marginBottom:"1.4rem"}}>
+                <div style={{position:"relative",width:80,height:80,margin:"0 auto"}}>
+                  <svg width="80" height="80" style={{transform:"rotate(-90deg)"}}>
+                    <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,.07)" strokeWidth="5"/>
+                    <circle cx="40" cy="40" r="34" fill="none"
+                      stroke={localTimer/(ls.timerLimit||30)>0.33?"var(--amber)":"var(--red)"} strokeWidth="5"
+                      strokeDasharray="214" strokeDashoffset={214*(1-localTimer/(ls.timerLimit||30))}
+                      style={{transition:"stroke-dashoffset .5s linear,stroke .5s"}}/>
+                  </svg>
+                  <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",
+                    ...(localTimer<=5?{animation:"timerPulse .6s ease-in-out infinite"}:{})}}>
+                    <div style={{fontFamily:"var(--font-h)",fontSize:"1.6rem",fontWeight:900,lineHeight:1,
+                      color:localTimer/(ls.timerLimit||30)>0.33?"var(--amber)":"var(--red)"}}>{localTimer}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Question text */}
-            <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.2rem,4vw,1.9rem)",color:"#fff",lineHeight:1.25,marginBottom:"1.5rem",textShadow:"0 2px 15px rgba(0,0,0,.4)"}}>{currentQ.q}</div>
+            {!timedOut&&<div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.2rem,4vw,1.9rem)",color:"#fff",lineHeight:1.25,marginBottom:"1.5rem",textShadow:"0 2px 15px rgba(0,0,0,.4)"}}>{currentQ.q}</div>}
+
+            {/* Time's up screen */}
+            {timedOut&&(
+              <div style={{textAlign:"center",padding:"2.5rem 1rem"}}>
+                <div style={{fontSize:"2.5rem",marginBottom:".8rem",animation:"timerPulse .6s ease-in-out infinite"}}>⏰</div>
+                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.4rem,5vw,2rem)",color:"var(--red)",marginBottom:".5rem",fontWeight:900}}>Time's up!</div>
+                <div style={{color:"rgba(255,255,255,.4)",fontSize:".85rem"}}>Waiting for the host…</div>
+              </div>
+            )}
 
             {/* ── Answer phase: show correct answer ── */}
             {ls.slidePhase==="answer"&&currentQ.type==="multiple"&&(()=>{
@@ -3345,7 +3624,7 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[]})=>{
             )}
 
             {/* ── Question phase: multiple choice ── */}
-            {ls.slidePhase==="question"&&currentQ.type==="multiple"&&(()=>{
+            {ls.slidePhase==="question"&&currentQ.type==="multiple"&&!timedOut&&(()=>{
               const correctSet=Array.isArray(currentQ.answer)?currentQ.answer:[currentQ.answer??0];
               const isMulti=correctSet.length>1;
               return(
@@ -4322,30 +4601,269 @@ const UpdatesPage=({notifications,notifLastRead,onMarkAllRead,onOpenEvent})=>{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SARA JAY OR JAI — MINI GAME
+// ─────────────────────────────────────────────────────────────────────────────
+const SARA_JAY_IMAGES = [
+  // Replace each url with a real image URL. isReal=true → real Sara Jay photo.
+  { id:"sj1",  url:"https://tinyurl.com/23sk3frt",  isReal:true,  difficulty:"easy"   },
+  { id:"sj2",  url:"https://tinyurl.com/23sk3frt",  isReal:false, difficulty:"hard"   },
+  { id:"sj3",  url:"https://tinyurl.com/23sk3frt",  isReal:true,  difficulty:"medium" },
+];
+const SJ_CORRECT = [
+  "Goed zo lad! 🔥","Je hebt een scherp oog 👁","Boom! Raak! 💥","Ken je haar al? 👀","Too easy 😎","Je bent een pro","Niemand fokt met jou 🎯",
+];
+const SJ_WRONG = [
+  "AI had je te pakken 💀","Nope, helemaal fout 😂","JAI got you 🤖","Game over, lad 👋","Zonde van de streak 🍿","Volgende keer beter joh","Ouch 😬",
+];
+
+const SaraJayOrJAI = () => {
+  const [phase, setPhase] = useState("idle");
+  const [queue, setQueue] = useState([]);
+  const [idx, setIdx] = useState(0);
+  const [imgKey, setImgKey] = useState(0);
+  const [score, setScore] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [lastCorrect, setLastCorrect] = useState(null);
+  const [feedbackMsg, setFeedbackMsg] = useState("");
+  const [newRecord, setNewRecord] = useState(false);
+  const timerRef = useRef(null);
+
+  const [bestStreak, setBestStreak] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("md-sarajay") || "{}").bestStreak ?? 0; } catch { return 0; }
+  });
+  const [totalScore, setTotalScore] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("md-sarajay") || "{}").totalScore ?? 0; } catch { return 0; }
+  });
+
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  const shuffle = arr => {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+
+  const startGame = () => {
+    clearTimeout(timerRef.current);
+    setQueue(shuffle(SARA_JAY_IMAGES));
+    setIdx(0);
+    setImgKey(k => k + 1);
+    setScore(0);
+    setStreak(0);
+    setLastCorrect(null);
+    setNewRecord(false);
+    setPhase("playing");
+  };
+
+  const saveStats = (finalStreak, finalScore) => {
+    const nb = Math.max(bestStreak, finalStreak);
+    const nt = totalScore + finalScore;
+    setBestStreak(nb);
+    setTotalScore(nt);
+    localStorage.setItem("md-sarajay", JSON.stringify({ bestStreak: nb, totalScore: nt }));
+    return nb > bestStreak;
+  };
+
+  const handleGuess = guessedReal => {
+    if (phase !== "playing") return;
+    const img = queue[idx];
+    const correct = guessedReal === img.isReal;
+    const msg = correct
+      ? SJ_CORRECT[Math.floor(Math.random() * SJ_CORRECT.length)]
+      : SJ_WRONG[Math.floor(Math.random() * SJ_WRONG.length)];
+    setLastCorrect(correct);
+    setFeedbackMsg(msg);
+    setPhase("feedback");
+
+    timerRef.current = setTimeout(() => {
+      if (correct) {
+        const ns = score + 1;
+        const nk = streak + 1;
+        setScore(ns);
+        setStreak(nk);
+        const nextIdx = (idx + 1) % queue.length;
+        if (nextIdx === 0) setQueue(q => shuffle(q));
+        setIdx(nextIdx);
+        setImgKey(k => k + 1);
+        setPhase("playing");
+      } else {
+        const isNew = saveStats(streak, score);
+        setNewRecord(isNew);
+        setPhase("dead");
+      }
+    }, 1500);
+  };
+
+  const img = queue[idx];
+  const diffColor = { easy: "var(--green)", medium: "var(--amber)", hard: "var(--red)" };
+
+  if (phase === "idle") {
+    return (
+      <div className="fu" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1.5rem", paddingTop: "1.5rem" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "3.5rem", marginBottom: ".4rem" }}>🤖</div>
+          <H style={{ fontStyle: "italic", fontSize: "clamp(1.6rem,6vw,2.4rem)", lineHeight: 1.1 }}>Sara Jay or Sara JAI?</H>
+          <p style={{ color: "var(--muted)", marginTop: ".6rem", fontSize: ".9rem" }}>Echt persoon of AI? Één fout = game over.</p>
+        </div>
+        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", justifyContent: "center" }}>
+          <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: ".5rem 1.2rem", textAlign: "center" }}>
+            <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "var(--amber)", fontFamily: "var(--font-h)" }}>{bestStreak}</div>
+            <div style={{ fontSize: ".7rem", color: "var(--muted)", letterSpacing: ".08em", textTransform: "uppercase" }}>Best streak</div>
+          </div>
+          <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: ".5rem 1.2rem", textAlign: "center" }}>
+            <div style={{ fontSize: "1.4rem", fontWeight: 700, color: "var(--amber)", fontFamily: "var(--font-h)" }}>{totalScore}</div>
+            <div style={{ fontSize: ".7rem", color: "var(--muted)", letterSpacing: ".08em", textTransform: "uppercase" }}>Total score</div>
+          </div>
+        </div>
+        <Btn variant="gold" size="lg" onClick={startGame} style={{ fontSize: "1.1rem", padding: "14px 40px" }}>Spelen 🎮</Btn>
+        <div style={{ color: "var(--muted2)", fontSize: ".75rem", textAlign: "center", maxWidth: 280 }}>
+          Raad of elke foto echt of AI is. Streak = opeenvolgende goede antwoorden. Één fout en je bent klaar.
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "dead") {
+    return (
+      <div className="fu" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1.5rem", paddingTop: "1.5rem" }}>
+        <div className="sj-wrong" style={{ fontSize: "4rem" }}>💀</div>
+        <div style={{ textAlign: "center" }}>
+          <H style={{ fontSize: "2rem" }}>Game Over</H>
+          <p style={{ color: "var(--muted)", marginTop: ".3rem" }}>{feedbackMsg}</p>
+        </div>
+        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", justifyContent: "center" }}>
+          <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: ".6rem 1.4rem", textAlign: "center" }}>
+            <div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--amber)", fontFamily: "var(--font-h)" }}>{score}</div>
+            <div style={{ fontSize: ".7rem", color: "var(--muted)", letterSpacing: ".08em", textTransform: "uppercase" }}>Score</div>
+          </div>
+          <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: ".6rem 1.4rem", textAlign: "center" }}>
+            <div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--amber)", fontFamily: "var(--font-h)" }}>{streak}</div>
+            <div style={{ fontSize: ".7rem", color: "var(--muted)", letterSpacing: ".08em", textTransform: "uppercase" }}>Streak</div>
+          </div>
+          <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: ".6rem 1.4rem", textAlign: "center" }}>
+            <div style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--gold)", fontFamily: "var(--font-h)" }}>{bestStreak}</div>
+            <div style={{ fontSize: ".7rem", color: "var(--muted)", letterSpacing: ".08em", textTransform: "uppercase" }}>Best</div>
+          </div>
+        </div>
+        {newRecord && (
+          <div className="pop" style={{ background: "linear-gradient(135deg,var(--gold),var(--amber))", color: "var(--bg)", borderRadius: 50, padding: ".4rem 1.4rem", fontSize: ".9rem", fontWeight: 700 }}>
+            🏆 Nieuw record!
+          </div>
+        )}
+        <Btn variant="gold" size="lg" onClick={startGame}>🔄 Opnieuw</Btn>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem", paddingTop: ".5rem" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", maxWidth: 420, padding: "0 .2rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: "1.3rem" }}>🔥</span>
+          <span style={{ fontFamily: "var(--font-h)", fontSize: "1.8rem", color: "var(--amber)", lineHeight: 1 }}>{streak}</span>
+          <span style={{ fontSize: ".7rem", color: "var(--muted)", letterSpacing: ".06em", textTransform: "uppercase" }}>streak</span>
+        </div>
+        <div style={{ fontSize: ".75rem", color: "var(--muted)", display: "flex", alignItems: "center", gap: 4 }}>
+          <span>🏆 Best:</span>
+          <span style={{ color: "var(--gold)", fontWeight: 700 }}>{bestStreak}</span>
+        </div>
+        <div style={{ fontSize: ".75rem", color: "var(--muted)" }}>Score: <span style={{ color: "var(--cream)", fontWeight: 600 }}>{score}</span></div>
+      </div>
+
+      <div style={{ position: "relative", width: "100%", maxWidth: 420, aspectRatio: "3/4", borderRadius: "var(--radius)", overflow: "hidden", background: "var(--bg2)", border: "1px solid var(--border)" }}>
+        {img && (
+          <img
+            key={imgKey}
+            src={img.url}
+            alt="Guess this"
+            className="sj-img"
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          />
+        )}
+        {img && (
+          <div style={{ position: "absolute", bottom: 10, left: 10, background: diffColor[img.difficulty] || "var(--muted)", color: "var(--bg)", borderRadius: 50, padding: "2px 10px", fontSize: ".68rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em" }}>
+            {img.difficulty}
+          </div>
+        )}
+        {phase === "feedback" && (
+          <div className="pop" style={{ position: "absolute", inset: 0, background: lastCorrect ? "rgba(34,197,94,.88)" : "rgba(239,68,68,.88)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: ".6rem", padding: "1rem" }}>
+            <div style={{ fontSize: "4rem", lineHeight: 1 }}>{lastCorrect ? "✓" : "✗"}</div>
+            <div style={{ color: "#fff", fontWeight: 700, fontSize: "1.1rem", textAlign: "center" }}>{feedbackMsg}</div>
+            <div style={{ color: "rgba(255,255,255,.8)", fontSize: ".8rem" }}>
+              Correct: <strong>{img?.isReal ? "Echt 👤" : "AI 🤖"}</strong>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: ".8rem", width: "100%", maxWidth: 420 }}>
+        <button
+          className="sj-btn"
+          disabled={phase === "feedback"}
+          onClick={() => handleGuess(true)}
+          style={{ flex: 1, padding: "16px 0", fontSize: "1.05rem", fontWeight: 700, fontFamily: "var(--font-b)", borderRadius: "var(--radius-sm)", border: "2px solid rgba(76,175,125,.5)", background: "rgba(76,175,125,.12)", color: "var(--green)", cursor: "pointer", opacity: phase === "feedback" ? .5 : 1 }}
+        >
+          👤 Echt
+        </button>
+        <button
+          className="sj-btn"
+          disabled={phase === "feedback"}
+          onClick={() => handleGuess(false)}
+          style={{ flex: 1, padding: "16px 0", fontSize: "1.05rem", fontWeight: 700, fontFamily: "var(--font-b)", borderRadius: "var(--radius-sm)", border: "2px solid rgba(224,85,85,.5)", background: "rgba(224,85,85,.12)", color: "var(--red)", cursor: "pointer", opacity: phase === "feedback" ? .5 : 1 }}
+        >
+          🤖 JAI
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TEAM CREATOR PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 const TEAM_COLORS=["var(--amber)","var(--blue)","var(--green)","var(--purple)","var(--orange)","var(--red)","#56b4a0","#e08050","#9b7fe8","#5b9bd5"];
-const TeamCreatorPage=({users})=>{
+const TeamCreatorPage=({users,events=[],onUpdateEvent})=>{
   const [teamSize,setTeamSize]=useState(3);
   const [participants,setParticipants]=useState([]);
   const [input,setInput]=useState("");
   const [teams,setTeams]=useState(null);
   const [generating,setGenerating]=useState(false);
   const [showPicker,setShowPicker]=useState(false);
+  const [avatarPicker,setAvatarPicker]=useState(null);
+  const [setName,setSetName]=useState("");
+  const [setCategory,setSetCategory]=useState("");
+  const [selectedEvtId,setSelectedEvtId]=useState("");
+  const [saved,setSaved]=useState(false);
   const appUsers=users.filter(u=>ACTIVE_ROLES.includes(u.role));
+  const activeEvents=events.filter(e=>!e.archived).sort((a,b)=>new Date(a.date)-new Date(b.date));
 
   const add=name=>{const t=name.trim();if(!t||participants.includes(t))return;setParticipants(p=>[...p,t]);setTeams(null);};
   const addInput=()=>{input.split(",").map(s=>s.trim()).filter(Boolean).forEach(add);setInput("");};
   const remove=name=>{setParticipants(p=>p.filter(x=>x!==name));setTeams(null);};
   const generate=()=>{
     if(participants.length<2)return;
-    setGenerating(true);setTeams(null);
+    setGenerating(true);setTeams(null);setSaved(false);
     setTimeout(()=>{
       const shuffled=[...participants].sort(()=>Math.random()-.5);
       const result=[];
-      for(let i=0;i<shuffled.length;i+=teamSize)result.push(shuffled.slice(i,i+teamSize));
+      for(let i=0;i<shuffled.length;i+=teamSize){
+        const members=shuffled.slice(i,i+teamSize);
+        result.push({id:`tm_${Date.now()}_${i}`,name:`Team ${result.length+1}`,members,avatar:TEAM_AVATARS[result.length%TEAM_AVATARS.length]});
+      }
       setTeams(result);setGenerating(false);
     },1800);
+  };
+  const renameTeam=(idx,name)=>setTeams(ts=>ts.map((t,i)=>i===idx?{...t,name}:t));
+  const setAvatar=(idx,av)=>{setTeams(ts=>ts.map((t,i)=>i===idx?{...t,avatar:av}:t));setAvatarPicker(null);};
+  const saveToEvent=async()=>{
+    if(!selectedEvtId||!setName.trim())return;
+    const evt=events.find(e=>e.id===selectedEvtId);if(!evt)return;
+    const newSet={id:`ts_${Date.now()}`,name:setName.trim(),category:setCategory.trim(),createdAt:new Date().toISOString(),teams};
+    await onUpdateEvent({...evt,team_sets:[...(evt.team_sets||[]),newSet]});
+    setSaved(true);
   };
   const pickedNames=new Set(participants);
   const teamCount=participants.length>0?Math.ceil(participants.length/teamSize):0;
@@ -4433,21 +4951,35 @@ const TeamCreatorPage=({users})=>{
             <H size="1.1rem" style={{marginBottom:0}}>🏁 Teams ({teams.length})</H>
             <Btn onClick={generate} variant="ghost" size="sm">🔀 Opnieuw loten</Btn>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))",gap:"1rem"}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))",gap:"1rem",marginBottom:"1.5rem"}}>
             {teams.map((team,i)=>{
               const col=TEAM_COLORS[i%TEAM_COLORS.length];
               return(
-                <div key={i} style={{background:"var(--bg2)",border:`1px solid ${col}44`,borderRadius:"var(--radius)",padding:"1.1rem",animation:"teamReveal .4s ease both",animationDelay:`${i*70}ms`}}>
-                  <div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:col,marginBottom:".75rem",display:"flex",alignItems:"center",gap:7}}>
-                    <div style={{width:10,height:10,borderRadius:"50%",background:col,flexShrink:0}}/>
-                    Team {i+1}
+                <div key={team.id} style={{background:"var(--bg2)",border:`1px solid ${col}44`,borderRadius:"var(--radius)",padding:"1.1rem",animation:"teamReveal .4s ease both",animationDelay:`${i*70}ms`}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:".75rem"}}>
+                    <div onClick={()=>setAvatarPicker(avatarPicker===i?null:i)}
+                      style={{fontSize:"1.4rem",cursor:"pointer",lineHeight:1,padding:"2px 4px",borderRadius:6,border:"1px solid var(--border)",background:"var(--bg3)",userSelect:"none",flexShrink:0}}>
+                      {team.avatar}
+                    </div>
+                    <input value={team.name} onChange={e=>renameTeam(i,e.target.value)}
+                      style={{flex:1,background:"transparent",border:"none",borderBottom:`1px solid ${col}66`,color:col,fontFamily:"var(--font-h)",fontSize:".95rem",outline:"none",padding:"2px 0",minWidth:0}}/>
                   </div>
+                  {avatarPicker===i&&(
+                    <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:".6rem",padding:".4rem",background:"var(--bg)",borderRadius:8,border:"1px solid var(--border)"}}>
+                      {TEAM_AVATARS.map(av=>(
+                        <div key={av} onClick={()=>setAvatar(i,av)}
+                          style={{fontSize:"1.2rem",cursor:"pointer",padding:"3px 4px",borderRadius:5,border:team.avatar===av?"2px solid var(--amber)":"1px solid transparent",userSelect:"none"}}>
+                          {av}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div style={{display:"flex",flexDirection:"column",gap:0}}>
-                    {team.map((name,j)=>{
+                    {team.members.map((name,j)=>{
                       const u=users.find(x=>(x.display_name||x.username)===name);
                       return(
                         <div key={j} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderTop:j>0?"1px solid var(--border)":"none"}}>
-                          {u?<Avatar name={u.username} size={22} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>:<div style={{width:22,height:22,borderRadius:"50%",background:"var(--bg4)",border:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:".6rem",color:"var(--muted)",flexShrink:0}}>?</div>}
+                          {u?<Avatar name={u.username} size={22} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>:<div style={{width:22,height:22,borderRadius:"50%",background:"var(--bg4)",border:"1px solid var(--border)",flexShrink:0}}/>}
                           <span style={{fontSize:".88rem",color:"var(--cream)"}}>{name}</span>
                         </div>
                       );
@@ -4457,6 +4989,68 @@ const TeamCreatorPage=({users})=>{
               );
             })}
           </div>
+
+          {/* ── Save to event ── */}
+          <Card style={{border:"1px solid var(--border2)"}}>
+            <H size=".95rem" style={{marginBottom:".8rem"}}>💾 Opslaan bij event</H>
+            <div style={{display:"grid",gap:".75rem"}}>
+              <Inp value={setName} onChange={e=>{setSetName(e.target.value);setSaved(false);}} placeholder="Naam voor deze teaminvulling… (bv. Groep A)"/>
+              <Inp value={setCategory} onChange={e=>{setSetCategory(e.target.value);setSaved(false);}} placeholder="Categorie / doel… (bv. Quiz ronde 1, Go-kart, Bowlen)"/>
+              <select value={selectedEvtId} onChange={e=>{setSelectedEvtId(e.target.value);setSaved(false);}}
+                style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"9px 10px",color:selectedEvtId?"var(--cream)":"var(--muted)",fontFamily:"var(--font-b)",fontSize:".88rem",outline:"none",width:"100%"}}>
+                <option value="">— Kies een event —</option>
+                {activeEvents.map(e=>(
+                  <option key={e.id} value={e.id}>{e.name} · {new Date(e.date).toLocaleDateString("nl-NL",{day:"numeric",month:"short",year:"numeric"})}</option>
+                ))}
+              </select>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <Btn onClick={saveToEvent} variant="gold" disabled={!setName.trim()||!selectedEvtId}>
+                  💾 Opslaan
+                </Btn>
+                {saved&&<span className="pop" style={{color:"var(--green)",fontSize:".85rem",fontWeight:600}}>✓ Opgeslagen!</span>}
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Saved team sets across events ── */}
+      {events.some(e=>(e.team_sets||[]).length>0)&&(
+        <div style={{marginTop:"2rem"}}>
+          <H size="1.1rem" style={{marginBottom:"1rem"}}>📂 Opgeslagen teams</H>
+          {events.filter(e=>(e.team_sets||[]).length>0).map(evt=>(
+            <div key={evt.id} style={{marginBottom:"1.2rem"}}>
+              <div style={{fontSize:".8rem",fontFamily:"var(--font-b)",fontWeight:700,color:"var(--amber2)",textTransform:"uppercase",letterSpacing:".05em",marginBottom:".5rem",opacity:.8}}>
+                {evt.name}
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:".5rem"}}>
+                {(evt.team_sets||[]).map(ts=>(
+                  <div key={ts.id} style={{display:"flex",alignItems:"center",gap:10,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".65rem 1rem"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginBottom:2}}>
+                        <span style={{fontFamily:"var(--font-b)",fontWeight:600,color:"var(--cream)",fontSize:".9rem"}}>{ts.name}</span>
+                        {ts.category&&<span style={{background:"rgba(232,148,58,.15)",border:"1px solid rgba(232,148,58,.3)",borderRadius:20,padding:"1px 8px",fontSize:".68rem",fontFamily:"var(--font-b)",fontWeight:600,color:"var(--amber2)",letterSpacing:".04em"}}>{ts.category}</span>}
+                      </div>
+                      <div style={{color:"var(--muted)",fontSize:".78rem"}}>
+                        {ts.teams.length} teams · {ts.teams.reduce((s,t)=>s+t.members.length,0)} personen
+                        <span style={{marginLeft:8,opacity:.7}}>{new Date(ts.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short"})}</span>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                      {ts.teams.slice(0,4).map(t=>(
+                        <span key={t.id} style={{fontSize:".95rem"}} title={t.name}>{t.avatar}</span>
+                      ))}
+                      {ts.teams.length>4&&<span style={{fontSize:".75rem",color:"var(--muted)"}}>+{ts.teams.length-4}</span>}
+                    </div>
+                    <Btn onClick={()=>onUpdateEvent({...evt,team_sets:(evt.team_sets||[]).filter(x=>x.id!==ts.id)})}
+                      variant="ghost" size="sm" style={{color:"var(--red)",borderColor:"transparent",flexShrink:0,padding:"4px 8px"}}>
+                      🗑
+                    </Btn>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -4594,6 +5188,7 @@ export default function App(){
     try{const s=JSON.parse(localStorage.getItem(`md-notifs-${currentUser.id}`)||"[]");setNotifications(s);}catch{}
   },[currentUser?.id]);
   const [announcements,setAnnouncements]=useState(()=>{try{return JSON.parse(localStorage.getItem("md-announcements")||"[]");}catch{return[];}});
+  const [saraJayUnlocked,setSaraJayUnlocked]=useState(()=>{try{return JSON.parse(localStorage.getItem("md-sj-unlocked")||"false");}catch{return false;}});
   const [showAnnounce,setShowAnnounce]=useState(false);
   const [editingAnn,setEditingAnn]=useState(null);
   const eventsRef=useRef([]);
@@ -4608,7 +5203,12 @@ export default function App(){
       supabase.from("announcements").select("*").order("created_at",{ascending:false}),
     ]).then(async([{data:evts},{data:usrs},{data:anns}])=>{
       const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});
-      if(anns&&anns.length){const mapped=anns.map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}
+      if(anns&&anns.length){
+        const sjRow=anns.find(r=>r.id==="__sara_jay__");
+        if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}
+        const mapped=anns.filter(r=>r.id!=="__sara_jay__").map(fromDbAnn);
+        setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));
+      }
       // Seed DB on first run if empty
       let allEvents=evts?.length?evts:SEED_EVENTS;
       let allUsers=usrs?.length?usrs:[];
@@ -4628,7 +5228,7 @@ export default function App(){
     });
 
     const poll=setInterval(()=>{
-      supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data&&data.length){const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});const mapped=data.map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}});
+      supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data&&data.length){const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});const sjRow=data.find(r=>r.id==="__sara_jay__");if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}const mapped=data.filter(r=>r.id!=="__sara_jay__").map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}});
       supabase.from("users").select("*").then(({data})=>{
         if(data){
           setUsers(data);
@@ -4747,6 +5347,13 @@ export default function App(){
   const openMember=id=>{setActiveMemberId(id);setPageView("member");};
   const openTeams=()=>setPageView("teams");
   const openTimer=()=>setPageView("timer");
+  const openSaraJay=()=>setPageView("sarajay");
+  const toggleSaraJay=async()=>{
+    const newVal=!saraJayUnlocked;
+    setSaraJayUnlocked(newVal);
+    localStorage.setItem("md-sj-unlocked",JSON.stringify(newVal));
+    await supabase.from("announcements").upsert({id:"__sara_jay__",title:"__sara_jay__",body:"",created_by:"system",created_at:new Date().toISOString(),active:newVal});
+  };
   const saveProfile=async updates=>{
     const{error}=await supabase.from("users").update(updates).eq("id",currentUser.id);
     if(!error){
@@ -4768,20 +5375,21 @@ export default function App(){
   return(
     <div style={{minHeight:"100vh",background:"var(--bg)"}}>
       <GS/>
-      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onUpdates={()=>setPageView("updates")} onProfile={()=>openMember(currentUser.id)} onTeams={openTeams} onTimer={openTimer}/>
+      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onUpdates={()=>setPageView("updates")} onProfile={()=>openMember(currentUser.id)} onTeams={openTeams} onTimer={openTimer} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
         <AnnouncementBanner announcements={announcements} currentUser={currentUser} onArchive={archiveAnnouncement} onHardDelete={hardDeleteAnnouncement} onReactivate={reactivateAnnouncement} onEdit={ann=>{setEditingAnn(ann);setShowAnnounce(true);}} onNew={()=>{setEditingAnn(null);setShowAnnounce(true);}}/>
-        {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users} onTeams={openTeams} onTimer={openTimer}/>}
+        {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users} onTeams={openTeams} onTimer={openTimer} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>}
         {pageView==="hof"&&<HallOfFame events={events} users={users}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
         {pageView==="event"&&activeEvent&&<EventPage evt={activeEvent} onUpdate={updateEvent} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users}/>}
         {pageView==="updates"&&<UpdatesPage notifications={notifications} notifLastRead={notifLastRead} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={id=>{openEvent(id);}}/>}
-        {pageView==="teams"&&<TeamCreatorPage users={users}/>}
+        {pageView==="teams"&&<TeamCreatorPage users={users} events={events} onUpdateEvent={updateEvent}/>}
         {pageView==="timer"&&<TimerPage/>}
+        {pageView==="sarajay"&&<SaraJayOrJAI/>}
       </main>
       <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted2)",fontSize:".72rem",borderTop:"1px solid var(--border)",letterSpacing:".1em"}}>🍺 MensApp · Built for the lads</div>
-      {showAdmin&&<AdminPanel users={users} onUpdateUsers={updateUsers} onDeleteUser={deleteUser} onClose={()=>setShowAdmin(false)}/>}
+      {showAdmin&&<AdminPanel users={users} onUpdateUsers={updateUsers} onDeleteUser={deleteUser} onClose={()=>setShowAdmin(false)} saraJayUnlocked={saraJayUnlocked} onToggleSaraJay={toggleSaraJay}/>}
       {showAnnounce&&can.announce(currentUser)&&<AnnouncementModal onSave={saveAnnouncement} onClose={()=>{setShowAnnounce(false);setEditingAnn(null);}} existing={editingAnn} currentUser={currentUser}/>}
       {newEvent&&can.editEvent(currentUser)&&<NewEventModal users={users} onSave={async evt=>{await saveEvents([...events,evt]);setNewEvent(false);openEvent(evt.id)}} onClose={()=>setNewEvent(false)}/>}
       {editingProfile&&<EditProfileModal user={currentUser} onSave={async u=>{await saveProfile(u);setEditingProfile(false);}} onClose={()=>setEditingProfile(false)}/>}
