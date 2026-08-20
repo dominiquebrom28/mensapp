@@ -1,5 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { supabase, hashPin } from "./supabase.js";
+import { isSafeImageUrl } from "./features/trailer/safeUrl.js";
+
+// The app's first code split (technical spec `docs/trailer-technical-spec.md`
+// §3): keeps the trailer's weight out of the main chunk, loaded only when an
+// event page's "🎬 Watch the trailer" button is actually clicked.
+const EventTrailer = lazy(() => import("./features/trailer/EventTrailer.jsx"));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GLOBAL STYLES
@@ -327,6 +333,99 @@ const dayHeadingLabel=(dateStr,dayIndex)=>{
 // (ties keep their existing relative order) so manual reordering via the
 // editor's ↑/↓ still shows through whenever times are equal or blank.
 const scheduleDayTimeOrder=(a,b)=>((a.day??0)-(b.day??0))||(a.time||"").localeCompare(b.time||"");
+// "Reigning champion" continuity nod for the trailer's LEGACY beat (creative
+// spec §3 Beat 5). Derived the same way `HallOfFame`/`WinnersTab` already
+// compute their own leaderboards -- not a new source of truth: (1) the most
+// recent ARCHIVED edition other than the current one, scanned for a winner
+// whose category reads as an "Overall Champion" award (case-insensitive
+// match on the word "champion", since award categories are free-text
+// admins type themselves -- there's no fixed schema field for this); (2) if
+// no archived edition ever recorded one, fall back to the all-time top quiz
+// scorer across every event, computed identically to `HallOfFame`'s own
+// `quizBoard` reducer. No prior edition and no quiz history at all -> `null`
+// -- the trailer's `buildBeats.js` simply never emits the LEGACY beat, per
+// its own conditional-emission contract (never a placeholder).
+const findChampion=(evt,events=[],users=[])=>{
+  // `schedule`/`winners`/`quizzes` are hand-editable JSONB -- assume nothing
+  // about their shape. `winners`/`quizzes` are only ever expected to be
+  // arrays of plain objects, but malformed data (an object instead of an
+  // array, a stray `null` entry) must degrade to "skip it", never throw:
+  // this runs unconditionally inside `toTrailerInput`, and with no error
+  // boundary anywhere in the app, a throw here takes down the whole
+  // EventPage for every visitor, not just trailer viewers.
+  const past=events.filter(e=>e&&e.archived&&e.id!==evt.id).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  for(const p of past){
+    const winners=Array.isArray(p.winners)?p.winners:[];
+    const champ=winners.find(w=>w&&typeof w==="object"&&/champion/i.test(w.category||""));
+    if(champ){
+      const ua=getUA(champ.winner,users);
+      return{
+        name:getDisplayName(champ.winner,users),
+        photoUrl:isSafeImageUrl(ua.photoUrl)?ua.photoUrl:"",
+        avatarIndex:ua.index??0,
+        title:champ.category||"Reigning Champion",
+        detail:(typeof champ.detail==="string"&&champ.detail.trim())?champ.detail.trim():p.name,
+      };
+    }
+  }
+  const quizTotals={};
+  events.forEach(e=>{
+    if(!e)return;
+    const quizzes=Array.isArray(e.quizzes)?e.quizzes:[];
+    quizzes.filter(q=>q&&typeof q==="object"&&q.status==="finished").forEach(quiz=>{
+      const scores=(quiz.scores&&typeof quiz.scores==="object"&&!Array.isArray(quiz.scores))?quiz.scores:{};
+      Object.entries(scores).forEach(([name,score])=>{
+        const pts=Number.isFinite(score)?score:0;
+        if(!quizTotals[name])quizTotals[name]={name,total:0};
+        quizTotals[name].total+=pts;
+      });
+    });
+  });
+  const topScorer=Object.values(quizTotals).sort((a,b)=>b.total-a.total)[0];
+  if(topScorer&&topScorer.total>0){
+    const ua=getUA(topScorer.name,users);
+    return{
+      name:getDisplayName(topScorer.name,users),
+      photoUrl:isSafeImageUrl(ua.photoUrl)?ua.photoUrl:"",
+      avatarIndex:ua.index??0,
+      title:"Quiz Legend",
+      detail:`${topScorer.total} pts all-time`,
+    };
+  }
+  return null;
+};
+// Boundary adapter for the trailer feature (src/features/trailer/). Produces a
+// plain, serialisable view model with every `secret` stop's content REMOVED --
+// not flagged, removed -- so the trailer subsystem cannot leak it even by
+// accident. Keep the `const NAME=(...)=>{ ... };` shape: the source-extraction
+// test helpers in src/test/ match on it.
+//
+// Signature extended with `events` (the full events list, not just `evt`,
+// per docs/trailer-technical-spec.md §2.3's original shape) -- required so
+// `findChampion` above can look at *other* editions, not just this one.
+const toTrailerInput=(evt,users=[],events=[])=>{
+  const stops=(evt.schedule||[]).map((s,i)=>({s,i}))
+    .sort((a,b)=>scheduleDayTimeOrder(a.s,b.s))
+    .map(({s,i})=>{
+      const base={key:`stop-${i}`,secret:!!s.secret,day:s.day??0,dayLabel:dayHeadingLabel(evt.date,s.day??0),time:s.time||""};
+      if(s.secret)return base;
+      return{...base,icon:s.icon||"",activity:s.activity||"",location:s.location||"",note:s.note||"",image:isSafeImageUrl(s.image)?s.image:""};
+    });
+  const going=(evt.attendees||[]).filter(a=>a.status==="going")
+    .slice(0,12).map(a=>({name:getDisplayName(a.name,users),...getUA(a.name,users)}));
+  const champion=findChampion(evt,events,users);
+  return{
+    eventId:evt.id,name:evt.name||"",type:evt.type||"day",theme:evt.theme||"",
+    location:(evt.location&&evt.location!=="TBD")?evt.location:"",
+    dateLabel:formatEventDateRange(evt.date,evt.end_date),
+    startsAtIso:`${evt.date}T${evt.start_time||"12:00"}:00`,
+    dayCount:eventDayCount(evt.date,evt.end_date),
+    stops,secretCount:stops.filter(s=>s.secret).length,
+    goingCount:(evt.attendees||[]).filter(a=>a.status==="going").length,
+    going:going.map(g=>({name:g.name,photoUrl:g.photoUrl||"",avatarIndex:g.index??0})),
+    ...(champion?{champion}:{}),
+  };
+};
 const ICONS=["📍","🍺","🏎️","🎯","🧠","🍽️","🍝","🍹","🎳","🔐","🎤","🎲","🏆","🚗","🎉","🍻","🎸","🏄","⚽","🎾","🎨","🎭"];
 const TROPHY_ICONS=["🏆","🥇","🥈","🥉","🎯","🧠","🍺","😴","😅","📸","🎤","🏎️","🔐","🎳","🎲","👑","💀","🤡","🎖️","⚡","🦆","🐐"];
 const REACTIONS=["🍺","😂","❤️","🔥","👑"];
@@ -1334,7 +1433,7 @@ const TeamsTab=({evt,onUpdate,currentUser,users=[]})=>{
   );
 };
 
-const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],initialTab,scrollToId,onSendNotif})=>{
+const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif})=>{
   const [tab,setTab]=useState(initialTab||"Overview");
   useEffect(()=>{
     if(!scrollToId)return;
@@ -1354,6 +1453,20 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],initialTa
   const isPast=evt.archived;
   const isAdmin=can.editEvent(currentUser);
   const isMobile=useIsMobile();
+  const [trailerOpen,setTrailerOpen]=useState(false);
+  const canTrailer=!isPast&&(evt.schedule?.length||0)>0;
+  // Gated on `trailerOpen`, not just memoized on identity: `toTrailerInput`
+  // (and `findChampion` inside it) does real work -- scanning every archived
+  // event's winners/quizzes -- on the hottest page in the app. Computing it
+  // on every EventPage render regardless of whether anyone ever opens the
+  // trailer is wasted work, and it's what turns a trailer-only bug into an
+  // every-visitor bug (there is no error boundary anywhere in this app).
+  // `null` while closed; the `<EventTrailer>` mount below is gated on the
+  // same flag, so it never sees the `null`. Still memoized on evt/users/
+  // events identity so an unrelated realtime sync elsewhere doesn't rebuild
+  // the view model (and, downstream, EventTrailer's beat timeline) while
+  // the trailer IS open.
+  const trailerInput=useMemo(()=>(trailerOpen?toTrailerInput(evt,users,events):null),[trailerOpen,evt,users,events]);
 
   const resetPresenter=useCallback(()=>{setPresenterDetected(false);setViewerDismissed(false);setSchedLive(null);},[]);
 
@@ -1471,6 +1584,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],initialTa
               <span style={{fontSize:".74rem",color:"var(--muted)"}}>Viewing as <strong style={{color:"var(--cream)"}}>{currentUser.username}</strong></span>
             </div>
           )}
+          {canTrailer&&<Btn onClick={()=>setTrailerOpen(true)} variant="gold" size="sm">🎬 Watch the trailer</Btn>}
           {evt.schedule&&evt.schedule.length>0&&<span style={{fontSize:".71rem",color:"var(--muted)",letterSpacing:".05em"}}>{evt.schedule.length} activities on the menu 👀</span>}
         </div>
       </div>
@@ -1512,6 +1626,9 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],initialTa
       {editing&&<EditEventModal evt={evt} users={users} onSave={u=>{onUpdate(u);setEditing(false)}} onClose={()=>setEditing(false)}/>}
       {presenting&&<PresentationMode evt={evt} onUpdate={onUpdate} isPresenter={true} onClose={()=>setPresenting(false)}/>}
       {!presenting&&presenterDetected&&!viewerDismissed&&<PresentationMode evt={evt} onUpdate={onUpdate} isPresenter={false} currentLive={schedLive} onHide={()=>setViewerDismissed(true)} onPresenterLeft={resetPresenter} onClose={()=>{}}/>}
+      {trailerOpen&&<Suspense fallback={null}>
+        <EventTrailer input={trailerInput} onClose={()=>setTrailerOpen(false)}/>
+      </Suspense>}
       {quizDash&&<QuizDashboard evt={evt} onUpdate={onUpdate} users={users} onClose={()=>setQuizDash(false)}/>}
       {/* Live quiz participant view — shown to everyone when a quiz is being presented */}
       {(()=>{const liveQ=(evt.quizzes||[]).find(q=>q._liveState);return liveQ&&!quizDash&&<QuizParticipantView evt={evt} liveQ={liveQ} currentUser={currentUser} onUpdate={onUpdate} users={users}/>;})()}
@@ -6332,7 +6449,7 @@ export default function App(){
         {pageView==="hof"&&<HallOfFame events={events} users={users}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
-        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll}/>}
+        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll}/>}
         {pageView==="updates"&&<UpdatesPage notifications={notifications.filter(n=>!deletedNotifIds.has(n.id)&&(!clearedBefore||n.timestamp>clearedBefore))} notifLastRead={notifLastRead} currentUser={currentUser} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={openEvent} onClearSelf={()=>{setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);}} onDeleteSelf={id=>{setNotifications(prev=>{const next=prev.filter(n=>n.id!==id);if(currentUser)localStorage.setItem(`md-notifs-${currentUser.id}`,JSON.stringify(next));return next;});}} onClearUpdates={async()=>{const cb=new Date().toISOString();const allIds=[...new Set([...deletedNotifIds,...notifications.map(n=>n.id)])];const newSet=new Set(allIds);setDeletedNotifIds(newSet);setClearedBefore(cb);setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);const body=JSON.stringify({ids:allIds,cleared_before:cb});await supabase.from("announcements").upsert({id:"__deleted_notifs__",title:"__deleted_notifs__",body,created_by:"system",created_at:new Date().toISOString(),active:false});supabase.channel("notif-ctrl").send({type:"broadcast",event:"clear-notifs",payload:{ids:allIds,cleared_before:cb}});}} onDeleteNotif={deleteNotifForAll}/>}
         {pageView==="teams"&&<TeamCreatorPage users={users} events={events} onUpdateEvent={updateEvent}/>}
         {pageView==="timer"&&<TimerPage/>}

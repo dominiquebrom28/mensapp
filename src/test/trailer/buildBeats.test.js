@@ -52,28 +52,57 @@ describe('buildBeats -- floor and empty-data behaviour', () => {
     expect(meta.data.location).toBe('')
   })
 
-  it('a past startsAtIso drops COUNTDOWN', () => {
+  // COUNTDOWN was originally its own beat kind; a visual-QA pass (see
+  // buildBeats.js's own comment on the META beat) folded it onto META's
+  // `data` instead -- creative spec §3 Beat 2 always described the date
+  // reveal and the "X DAGEN TE GAAN" chip as ONE beat, and emitting them as
+  // two consecutive beats added an uncalled-for hard wipe-cut in the first
+  // ten seconds. `BEAT_KINDS.COUNTDOWN`/`DURATIONS.COUNTDOWN` stay defined
+  // in constants.js for an easy revert, but `buildBeats` itself never emits
+  // a standalone `id:'countdown'` beat any more -- re-proving the gate
+  // here rather than assuming it moved over intact, since the gate itself
+  // (not just where the data lands) changed files.
+  it('a past startsAtIso: no standalone countdown beat, and META (still emitted) carries no daysToGo field', () => {
     const beats = buildBeats(baseInput(), { nowMs: Date.parse('2026-09-13T00:00:00') })
     expect(ids(beats)).not.toContain('countdown')
+    expect(kinds(beats)).not.toContain(BEAT_KINDS.COUNTDOWN)
+    const meta = beats.find((b) => b.id === 'meta')
+    expect(meta).toBeTruthy()
+    expect(meta.data).not.toHaveProperty('daysToGo')
+    expect(meta.data).not.toHaveProperty('startsAtIso')
   })
 
-  it('an unparseable startsAtIso drops COUNTDOWN without throwing', () => {
+  it('an unparseable startsAtIso: no countdown data on META, without throwing', () => {
+    expect(() => buildBeats(baseInput({ startsAtIso: 'not-a-date' }), { nowMs: 0 })).not.toThrow()
     const beats = buildBeats(baseInput({ startsAtIso: 'not-a-date' }), { nowMs: 0 })
     expect(ids(beats)).not.toContain('countdown')
+    const meta = beats.find((b) => b.id === 'meta')
+    expect(meta.data).not.toHaveProperty('daysToGo')
   })
 
-  it('COUNTDOWN is dropped by default when no nowMs is supplied at all (buildBeats never reaches for a real clock)', () => {
+  it('no countdown data by default when no nowMs is supplied at all (buildBeats never reaches for a real clock)', () => {
     const beats = buildBeats(baseInput({ startsAtIso: '2999-01-01T12:00:00' }))
     expect(ids(beats)).not.toContain('countdown')
+    const meta = beats.find((b) => b.id === 'meta')
+    expect(meta.data).not.toHaveProperty('daysToGo')
   })
 
-  it('a future startsAtIso emits COUNTDOWN with a correct daysToGo, when nowMs is supplied', () => {
+  it('a future startsAtIso: no standalone countdown beat, but META carries a correct daysToGo/startsAtIso, when nowMs is supplied', () => {
     const nowMs = Date.parse('2026-09-10T12:00:00')
     const beats = buildBeats(baseInput({ startsAtIso: '2026-09-12T12:00:00' }), { nowMs })
-    const countdown = beats.find((b) => b.id === 'countdown')
-    expect(countdown).toBeTruthy()
-    expect(countdown.kind).toBe(BEAT_KINDS.COUNTDOWN)
-    expect(countdown.data.daysToGo).toBe(2)
+    // The gate moved, not just the data: re-prove there's genuinely no
+    // separate beat any more, not merely that a `countdown` id happens to
+    // be absent by coincidence.
+    expect(ids(beats)).not.toContain('countdown')
+    expect(kinds(beats)).not.toContain(BEAT_KINDS.COUNTDOWN)
+    const meta = beats.find((b) => b.id === 'meta')
+    expect(meta).toBeTruthy()
+    expect(meta.data.daysToGo).toBe(2)
+    expect(meta.data.startsAtIso).toBe('2026-09-12T12:00:00')
+    // META's own duration is unchanged by carrying the extra field --
+    // buildBeats.js's own comment is explicit this beat doesn't get more
+    // time on screen just because it now also shows a countdown.
+    expect(meta.durationMs).toBe(6000)
   })
 })
 
@@ -331,10 +360,18 @@ describe('buildBeats -- total duration invariant', () => {
       expect(b.data).not.toHaveProperty('moreCount')
     }
 
-    // Every non-STOP kind survives the trim untouched.
-    for (const kind of [BEAT_KINDS.TITLE, BEAT_KINDS.META, BEAT_KINDS.COUNTDOWN, BEAT_KINDS.SECRET, BEAT_KINDS.LEGACY, BEAT_KINDS.ROSTER, BEAT_KINDS.OUTRO]) {
+    // Every non-STOP kind survives the trim untouched. COUNTDOWN is
+    // intentionally excluded from this list: it's no longer a standalone
+    // beat kind (folded onto META's `data`, see buildBeats.js) so it would
+    // never appear here regardless of trimming -- asserting its absence
+    // would be a tautology, not a real invariant check. The countdown data
+    // itself surviving on META is asserted separately below.
+    for (const kind of [BEAT_KINDS.TITLE, BEAT_KINDS.META, BEAT_KINDS.SECRET, BEAT_KINDS.LEGACY, BEAT_KINDS.ROSTER, BEAT_KINDS.OUTRO]) {
       expect(beats.some((b) => b.kind === kind)).toBe(true)
     }
+    expect(kinds(beats)).not.toContain(BEAT_KINDS.COUNTDOWN)
+    const meta = beats.find((b) => b.kind === BEAT_KINDS.META)
+    expect(meta.data).toHaveProperty('daysToGo')
   })
 
   it('trimming never throws or infinite-loops even in a pathological case, and returns whatever survives', () => {

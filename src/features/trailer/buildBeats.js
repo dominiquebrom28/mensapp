@@ -8,10 +8,13 @@
 // `if (!data) return null` branches in beat *components* (package C) --
 // a mounted beat is guaranteed to have what it needs, by construction here.
 //
-// Beat ordering (title -> meta -> countdown -> stop* -> secret -> legacy ->
-// roster -> outro) is this file's own synthesis of the creative shot list
-// (§3) onto the technical spec's BEAT_KINDS enum (§5.1), extended with
-// `LEGACY` -- see the typedef below for the `champion` shape it reads.
+// Beat ordering (title -> meta -> stop* -> secret -> legacy -> roster ->
+// outro) is this file's own synthesis of the creative shot list (§3) onto
+// the technical spec's BEAT_KINDS enum (§5.1), extended with `LEGACY` --
+// see the typedef below for the `champion` shape it reads. `COUNTDOWN` is
+// not a standalone stage in this ordering (visual-QA amendment, see the
+// comment on the META beat below) -- `BEAT_KINDS.COUNTDOWN` stays defined
+// in constants.js but this file never emits it as its own beat.
 import { isSafeImageUrl } from './safeUrl.js';
 import {
   BEAT_KINDS,
@@ -108,30 +111,37 @@ export function buildBeats(input, opts = {}) {
   // META -- only when there's a date line to show (§5.5). When dropped,
   // TITLE's own `dateLabel` field (above) is what a beat component absorbs
   // it into -- no separate handling needed here.
+  //
+  // COUNTDOWN is folded onto THIS beat's `data` rather than emitted as its
+  // own beat (visual-QA amendment, 2026-08-20): creative spec §3 Beat 2
+  // describes the date reveal and the "X DAGEN TE GAAN" chip as one beat,
+  // but the original implementation emitted them as two consecutive beats
+  // with a full hard gold wipe-cut between -- an extra, uncalled-for cut in
+  // the first ten seconds of the open. `BEAT_KINDS.COUNTDOWN` and
+  // `DURATIONS.COUNTDOWN` (constants.js) are deliberately left defined and
+  // unused rather than removed, in case the standalone beat comes back --
+  // this is a surgical behaviour change, not a deletion of the concept.
+  // META's own duration is unchanged (`DURATIONS.META`) even when it now
+  // also carries the countdown -- the extra content fits the same beat,
+  // it doesn't need more time on screen.
+  const startsAtMs = parseIsoMs(input?.startsAtIso);
+  const hasCountdown = startsAtMs !== null && startsAtMs > nowMs;
+  const daysToGo = hasCountdown ? Math.max(0, Math.ceil((startsAtMs - nowMs) / 86400000)) : null;
   if (dateLabel) {
     const metaBeat = {
       id: 'meta',
       kind: BEAT_KINDS.META,
       durationMs: DURATIONS.META,
-      data: { dateLabel, location, theme, type },
+      data: {
+        dateLabel,
+        location,
+        theme,
+        type,
+        ...(hasCountdown ? { daysToGo, startsAtIso: input.startsAtIso } : {}),
+      },
     };
     if (heroImage) metaBeat.media = heroImage;
     beats.push(metaBeat);
-  }
-
-  // COUNTDOWN -- startsAtIso must parse AND be strictly in the future
-  // relative to `nowMs` (§5.5).
-  const startsAtMs = parseIsoMs(input?.startsAtIso);
-  if (startsAtMs !== null && startsAtMs > nowMs) {
-    beats.push({
-      id: 'countdown',
-      kind: BEAT_KINDS.COUNTDOWN,
-      durationMs: DURATIONS.COUNTDOWN,
-      data: {
-        startsAtIso: input.startsAtIso,
-        daysToGo: Math.max(0, Math.ceil((startsAtMs - nowMs) / 86400000)),
-      },
-    });
   }
 
   // STOP -- eligible: `!secret && activity` non-empty (§5.5). This filter,

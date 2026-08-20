@@ -36,10 +36,18 @@ describe('buildBeats -- duration-cap invariant, adversarial', () => {
   })
 
   it('the floor (no stop beats at all) is analytically far below MAX_TOTAL_MS, so at least one STOP beat always survives trimming when any are eligible', () => {
-    // TITLE + META + COUNTDOWN + SECRET + LEGACY + ROSTER(max) + OUTRO, all
-    // maxed simultaneously -- the true ceiling of every *non-stop* beat kind
-    // combined, fixed by the DURATIONS constants regardless of input content.
-    const floorMax = DURATIONS.TITLE + DURATIONS.META + DURATIONS.COUNTDOWN + DURATIONS.SECRET
+    // TITLE + META + SECRET + LEGACY + ROSTER(max) + OUTRO, all maxed
+    // simultaneously -- the true ceiling of every *non-stop* beat kind
+    // combined, fixed by the DURATIONS constants regardless of input
+    // content. COUNTDOWN is deliberately NOT added here any more: it was
+    // folded onto META's `data` by a visual-QA amendment (see
+    // buildBeats.js's comment on the META beat) without changing META's
+    // own `durationMs` -- so counting `DURATIONS.COUNTDOWN` again here
+    // would overstate the real floor by 3s and understate the true
+    // available headroom for stop beats. Re-derived, not just patched, per
+    // the instruction to independently re-verify this rather than assume
+    // the reasoning still holds.
+    const floorMax = DURATIONS.TITLE + DURATIONS.META + DURATIONS.SECRET
       + DURATIONS.LEGACY + ROSTER_MAX_MS + DURATIONS.OUTRO
     expect(floorMax).toBeLessThan(MAX_TOTAL_MS)
     const headroomMs = MAX_TOTAL_MS - floorMax
@@ -58,9 +66,16 @@ describe('buildBeats -- duration-cap invariant, adversarial', () => {
     expect(totalMs).toBeLessThanOrEqual(MAX_TOTAL_MS)
     expect(beats.some((b) => b.kind === BEAT_KINDS.STOP)).toBe(true) // never trimmed to zero
     // Every other kind survives too -- the trim loop must never touch them.
-    for (const kind of [BEAT_KINDS.TITLE, BEAT_KINDS.META, BEAT_KINDS.COUNTDOWN, BEAT_KINDS.SECRET, BEAT_KINDS.LEGACY, BEAT_KINDS.ROSTER, BEAT_KINDS.OUTRO]) {
+    for (const kind of [BEAT_KINDS.TITLE, BEAT_KINDS.META, BEAT_KINDS.SECRET, BEAT_KINDS.LEGACY, BEAT_KINDS.ROSTER, BEAT_KINDS.OUTRO]) {
       expect(beats.some((b) => b.kind === kind)).toBe(true)
     }
+    // The countdown data itself (this input has a future startsAtIso and a
+    // real nowMs) still rides along on META, unaffected by any of the
+    // above -- re-proving the gate moved intact, not just that META exists.
+    const meta = beats.find((b) => b.kind === BEAT_KINDS.META)
+    expect(meta.data).toHaveProperty('daysToGo')
+    expect(meta.durationMs).toBe(DURATIONS.META) // carrying countdown data costs zero extra screen time
+    expect(beats.map((b) => b.kind)).not.toContain(BEAT_KINDS.COUNTDOWN)
   })
 
   it('moreCount stays exactly accurate across a range of maxStopBeats values that force different amounts of trimming', () => {
@@ -119,8 +134,52 @@ describe('buildBeats -- duration-cap invariant, adversarial', () => {
     const beats = buildBeats(input, { maxStopBeats: 500, nowMs: Date.parse('2026-01-01T00:00:00') })
     const { totalMs } = buildTimeline(beats)
     expect(totalMs).toBeLessThanOrEqual(MAX_TOTAL_MS)
-    for (const kind of [BEAT_KINDS.TITLE, BEAT_KINDS.META, BEAT_KINDS.COUNTDOWN, BEAT_KINDS.SECRET, BEAT_KINDS.LEGACY, BEAT_KINDS.ROSTER, BEAT_KINDS.OUTRO]) {
+    // COUNTDOWN excluded from this list on purpose (see the "floor" test
+    // above for the full reasoning) -- it is no longer a standalone beat
+    // kind at all, so asserting `toHaveLength(1)` for it would always fail
+    // now, and asserting its absence here would be a tautology rather than
+    // a real regression check on the trim loop specifically.
+    for (const kind of [BEAT_KINDS.TITLE, BEAT_KINDS.META, BEAT_KINDS.SECRET, BEAT_KINDS.LEGACY, BEAT_KINDS.ROSTER, BEAT_KINDS.OUTRO]) {
       expect(beats.filter((b) => b.kind === kind)).toHaveLength(1)
     }
+    expect(beats.filter((b) => b.kind === BEAT_KINDS.COUNTDOWN)).toHaveLength(0)
+  })
+
+  // Independent re-verification (per instruction, not just trusting the
+  // implementer's reasoning) that folding COUNTDOWN onto META can only ever
+  // shrink or hold steady the total duration relative to the old two-beat
+  // shape, at the two most adversarial scales this suite already exercises
+  // -- 2000 stops, and maxStopBeats:500 -- both WITH a real future
+  // startsAtIso/nowMs so the countdown data path is actually exercised
+  // (the pre-existing 2000-stop stress case above doesn't pass a
+  // startsAtIso at all, so it never touched this code path).
+  it('the duration cap still holds with the countdown-on-META shape, at the 2000-stop and maxStopBeats:500 extremes, with a genuinely future startsAtIso', () => {
+    const nowMs = Date.parse('2026-01-01T00:00:00')
+    const futureIso = '2026-06-01T12:00:00'
+
+    const hugeStops = buildBeats(
+      baseInput({ stops: manyStops(2000, 3), startsAtIso: futureIso, goingCount: 50, going: Array.from({ length: 50 }, (_, i) => ({ name: `L${i}`, photoUrl: '', avatarIndex: i % 8 })) }),
+      { maxStopBeats: 2000, nowMs },
+    )
+    expect(buildTimeline(hugeStops).totalMs).toBeLessThanOrEqual(MAX_TOTAL_MS)
+    let meta = hugeStops.find((b) => b.kind === BEAT_KINDS.META)
+    expect(meta.data.daysToGo).toBeGreaterThan(0)
+    expect(hugeStops.filter((b) => b.kind === BEAT_KINDS.COUNTDOWN)).toHaveLength(0)
+
+    const hugeCap = buildBeats(
+      baseInput({
+        stops: [...manyStops(500, 3), { key: 'secret-0', secret: true, day: 0, dayLabel: 'Dag 1', time: '23:00' }],
+        secretCount: 1,
+        startsAtIso: futureIso,
+        goingCount: 12,
+        going: Array.from({ length: 12 }, (_, i) => ({ name: `L${i}`, photoUrl: '', avatarIndex: i % 8 })),
+        champion: { name: 'K', photoUrl: '', avatarIndex: 0, title: 'T', detail: 'D' },
+      }),
+      { maxStopBeats: 500, nowMs },
+    )
+    expect(buildTimeline(hugeCap).totalMs).toBeLessThanOrEqual(MAX_TOTAL_MS)
+    meta = hugeCap.find((b) => b.kind === BEAT_KINDS.META)
+    expect(meta.data.daysToGo).toBeGreaterThan(0)
+    expect(hugeCap.filter((b) => b.kind === BEAT_KINDS.COUNTDOWN)).toHaveLength(0)
   })
 })

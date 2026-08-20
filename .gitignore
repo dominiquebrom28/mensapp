@@ -4,3 +4,11 @@ dist
 .env*.local
 
 .vercel
+
+# Throwaway trailer preview/capture harness -- never ship (see media-capture report)
+/trailer-preview.html
+/src/trailer-preview.jsx
+/src/trailer-preview-data.js
+/public/trailer-preview-mock/
+/docs/trailer-shots/
+/trailer-capture.mjs

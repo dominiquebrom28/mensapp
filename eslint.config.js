@@ -51,4 +51,13 @@ export default defineConfig([
       globals: { ...globals.node, ...globals.browser },
     },
   },
+  {
+    // Event trailer (docs/trailer-technical-spec.md §11): all text renders as
+    // plain React children, never `dangerouslySetInnerHTML`/`renderMd` --
+    // enforced here so it's not just a convention to remember.
+    files: ['src/features/trailer/**/*.{js,jsx}'],
+    rules: {
+      'react/no-danger': 'error',
+    },
+  },
 ])
