@@ -379,7 +379,9 @@ When `lite`, `buildBeats` emits every beat without `media`. The trailer becomes 
 
 ### 6.3 Audio
 
-- **One asset:** `public/trailer/theme-v1.mp3`, referenced as `/trailer/theme-v1.mp3`. Create `public/`. Budget **≤ 1.5 MB**, ~45 s, 96–128 kbps. Versioned filename so immutable caching is safe — bump to `theme-v2.mp3`, never replace bytes.
+> **Amended 2026-08-20 (Dom):** two layers, not one — a background music bed **plus an optional voiceover track**. See §6.3a.
+
+- **Music asset:** `public/trailer/theme-v1.mp3`, referenced as `/trailer/theme-v1.mp3`. Create `public/`. Budget **≤ 1.5 MB**, ~45 s, 96–128 kbps. Versioned filename so immutable caching is safe — bump to `theme-v2.mp3`, never replace bytes.
 - **Gesture gate.** `audio.play()` is called *synchronously* inside the tap handler — anything async before it loses the gesture. `<audio preload="auto">` created on mount so bytes arrive before the tap.
 - **Audio is NOT the clock.** The rAF clock is. Audio must be droppable and the trailer must run anyway.
 - **One-way soft correction.** On each `onBeatChange`, if audio is playing and `|audio.currentTime*1000 - tRef.current| > 250`, call `nudgeTo(...)`, clamped to **±400 ms per correction**. Never set `audio.currentTime` from the clock — that causes audible seeking artefacts.
@@ -388,6 +390,21 @@ When `lite`, `buildBeats` emits every beat without `media`. The trailer becomes 
 - **Mute preference** persists to `localStorage["md-trailer-muted"]`.
 - **Volume ramp:** 400 ms fade in, 600 ms fade out on outro and close, via a small rAF `audio.volume` ramp. **No Web Audio API.**
 - **Visibility:** on `visibilitychange → hidden`, pause clock and audio. On return, **do not auto-resume** — show the paused overlay with a ▶ affordance.
+
+### 6.3a Voiceover layer (amendment, 2026-08-20)
+
+Dom wants a music bed **and** a voiceover — likely a mate doing a movie-trailer voice. The VO may not exist at first ship and may arrive later, so it is modelled as strictly optional.
+
+- **Two `<audio>` elements:** `music` (bed) and `vo`. Constants `MUSIC_SRC` and `VO_SRC` in `constants.js`. Both first-party under `/trailer/`.
+- **The VO layer is optional by default.** Absent `VO_SRC`, a 404, or a load failure is a **no-op** — music plays, trailer plays, nothing user-visible. "No voiceover" is the default state, not an error path.
+- **Ducking:** while the VO is audible the music bed drops to ~25–30% volume over ~300 ms, and ramps back ~500 ms after the VO ends. Reuse the existing rAF volume-ramp helper — do not add a second mechanism.
+- **Still no Web Audio API.** Two `<audio>` elements plus volume ramps cover this. §12's rejection of WebAudio stands; ducking does not justify it.
+- **Both layers stay slaved to the rAF clock.** Audio is never the clock. Drift correction (§6.3) keys off the **music** element only; the VO is fire-and-forget from its own start offset.
+- **`VO_START_MS`** is a constant, not a hardcoded value — the timing isn't known until the VO is recorded.
+- The mute toggle mutes **both** layers together. One control.
+- Tests must cover: VO absent, VO fails to load, and the ducking ramp — via the injectable clock, not real timers.
+
+**Licensing:** the music bed must be royalty-free and cleared (Pixabay Music, Uppbeat, Free Music Archive). A voiceover recorded by the group carries no licensing risk. Risk 2 in §13 stands for the music bed only.
 
 ### 6.4 Crossfade
 
