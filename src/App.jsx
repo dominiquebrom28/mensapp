@@ -294,6 +294,39 @@ const formatEventDateRange=(dateStr,endDateStr,opts={})=>{
     :`${wd(from)}${from.getDate()} ${from.toLocaleDateString("nl-NL",{month})}${!sameYear?` ${from.getFullYear()}`:""}`;
   return`${startStr} – ${endStr}`;
 };
+// Number of calendar days an event spans (inclusive), `date` as day 0 and
+// `end_date` (if any) as the last day. No end_date, blank, or equal-to-date
+// all mean a single-day event (returns 1). Defensive against a reversed
+// range the same way formatEventDateRange is.
+const eventDayCount=(dateStr,endDateStr)=>{
+  if(!dateStr||!endDateStr||endDateStr===dateStr)return 1;
+  const start=new Date(dateStr+"T12:00:00");
+  const end=new Date(endDateStr+"T12:00:00");
+  const days=Math.round(Math.abs(end-start)/86400000);
+  return days+1;
+};
+// Maps a schedule stop's 0-based `day` index to its actual calendar date,
+// offset from the event's start `date` (day:0 = the start date itself).
+// Deliberately date-derived rather than stored, so moving the whole event
+// (editing `date`) keeps every stop correctly attached instead of orphaning
+// them -- see the `day` field on schedule stops.
+const dateForEventDay=(dateStr,dayIndex)=>{
+  if(!dateStr)return"";
+  const d=new Date(dateStr+"T12:00:00");
+  d.setDate(d.getDate()+(dayIndex||0));
+  return d.toISOString().slice(0,10);
+};
+// Human label for a schedule day group/heading, e.g. "Dag 1 · vrijdag 12 september".
+const dayHeadingLabel=(dateStr,dayIndex)=>{
+  const iso=dateForEventDay(dateStr,dayIndex);
+  const suffix=iso?` · ${new Date(iso+"T12:00:00").toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long"})}`:"";
+  return`Dag ${(dayIndex||0)+1}${suffix}`;
+};
+// Sort comparator for schedule stops: day first (missing/undefined treated
+// as 0, i.e. pre-multi-day stops), then time-of-day within the day. Stable
+// (ties keep their existing relative order) so manual reordering via the
+// editor's ↑/↓ still shows through whenever times are equal or blank.
+const scheduleDayTimeOrder=(a,b)=>((a.day??0)-(b.day??0))||(a.time||"").localeCompare(b.time||"");
 const ICONS=["📍","🍺","🏎️","🎯","🧠","🍽️","🍝","🍹","🎳","🔐","🎤","🎲","🏆","🚗","🎉","🍻","🎸","🏄","⚽","🎾","🎨","🎭"];
 const TROPHY_ICONS=["🏆","🥇","🥈","🥉","🎯","🧠","🍺","😴","😅","📸","🎤","🏎️","🔐","🎳","🎲","👑","💀","🤡","🎖️","⚡","🦆","🐐"];
 const REACTIONS=["🍺","😂","❤️","🔥","👑"];
@@ -1213,7 +1246,8 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
       {/* Activity sneak-peek strip */}
       {evt.schedule&&evt.schedule.length>0&&(()=>{
         const isEditor=can.editSchedule(currentUser);
-        const visible=isEditor?evt.schedule:evt.schedule.filter(s=>!s.secret);
+        const sortedSchedule=[...evt.schedule].sort(scheduleDayTimeOrder);
+        const visible=isEditor?sortedSchedule:sortedSchedule.filter(s=>!s.secret);
         const hiddenCount=evt.schedule.filter(s=>s.secret).length;
         if(!isEditor&&visible.length===0)return null;
         return(
@@ -1617,15 +1651,25 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
         )}
 
         {(()=>{
-          const visibleStops=isScheduleEditor?evt.schedule:evt.schedule.filter(s=>!s.secret);
+          const sortedSchedule=[...evt.schedule].sort(scheduleDayTimeOrder);
+          const visibleStops=isScheduleEditor?sortedSchedule:sortedSchedule.filter(s=>!s.secret);
           const hiddenCount=evt.schedule.filter(s=>s.secret).length;
-          return(
-            <>
-              <div style={{display:"grid",gap:".55rem"}}>
-                {visibleStops.map((s,i)=>{
+          // Day separators only appear when the visible stops actually span
+          // more than one distinct day -- a true single-day event (or one
+          // where every visible stop still sits on day 0) renders identically
+          // to before, no separators at all.
+          const showDaySeparators=new Set(visibleStops.map(s=>s.day??0)).size>1;
+          const stopEls=[];
+          visibleStops.forEach((s,i)=>{
                   const globalIdx=evt.schedule.indexOf(s);
                   const isSecret=!!s.secret;
-                  return(
+                  const stopDay=s.day??0;
+                  if(showDaySeparators&&(i===0||stopDay!==(visibleStops[i-1].day??0))){
+                    stopEls.push(
+                      <div key={`day-${stopDay}-${i}`} style={{fontSize:".68rem",color:"var(--amber)",letterSpacing:".08em",fontWeight:700,marginTop:i===0?0:".2rem",paddingBottom:5,borderBottom:"1px solid var(--border)"}}>{dayHeadingLabel(evt.date,stopDay)}</div>
+                    );
+                  }
+                  stopEls.push(
                     <div key={i} className="schedule-card" style={{
                       background:isSecret?"rgba(30,10,10,.9)":isPast?"var(--bg3)":"linear-gradient(90deg,rgba(29,20,8,.9),rgba(21,14,4,.7))",
                       border:`1px solid ${isSecret?"rgba(224,85,85,.28)":isPast?"var(--border)":"rgba(232,148,58,.18)"}`,
@@ -1665,8 +1709,10 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
                       )}
                     </div>
                   );
-                })}
-              </div>
+          });
+          return(
+            <>
+              <div style={{display:"grid",gap:".55rem"}}>{stopEls}</div>
               {!isScheduleEditor&&hiddenCount>0&&(
                 <div style={{textAlign:"center",padding:".7rem",marginTop:".3rem",background:"var(--bg3)",borderRadius:"var(--radius-sm)",border:"1px solid var(--border)"}}>
                   <span style={{fontSize:".78rem",color:"var(--muted)"}}>🔒 {hiddenCount} stop{hiddenCount!==1?"s":""} nog geheim — wordt later onthuld</span>
@@ -4825,6 +4871,13 @@ const AnnouncementBanner=({announcements,currentUser,onArchive,onHardDelete,onRe
 const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,onPresenterLeft,onHide})=>{
   const allStops=evt.schedule||[];
   const total=allStops.length+1;
+  // Display order only, by (day,time) -- everything below that addresses a
+  // stop by index (revealedSecrets, toggleReveal's mutation, the broadcast
+  // payload) still uses its real index in `allStops`/evt.schedule via
+  // `order[n]`, so sync/secret-reveal/keyboard/fullscreen behaviour is
+  // unchanged; only which index is shown at slide position n+1 changes.
+  const order=allStops.map((_,i)=>i).sort((a,b)=>scheduleDayTimeOrder(allStops[a],allStops[b]));
+  const isMultiDay=eventDayCount(evt.date,evt.end_date)>1;
   const isMobile=useIsMobile();
   const [idx,setIdx]=useState(isPresenter?0:(currentLive?.idx||0));
   const [revealedSecrets,setRevealedSecrets]=useState(()=>currentLive?.revealedSecrets||[]);
@@ -4936,7 +4989,7 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   if(locallyDismissed)return null;
 
   const isIntro=idx===0;
-  const stopIdx=idx-1;
+  const stopIdx=isIntro?-1:order[idx-1];
   const stop=isIntro?null:allStops[stopIdx];
   const isSecret=!!stop?.secret;
   const isRevealed=revealedSecrets.includes(stopIdx);
@@ -5005,6 +5058,7 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
             <div style={{width:"100%",maxWidth:900}}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"1.1rem",flexWrap:"wrap"}}>
                 <span style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.4)",borderRadius:20,padding:"4px 14px",fontSize:".7rem",color:"var(--amber)",fontWeight:700,letterSpacing:".12em",textTransform:"uppercase"}}>Stop {idx} / {allStops.length}</span>
+                {isMultiDay&&<span style={{background:"rgba(255,255,255,.1)",border:"1px solid rgba(255,255,255,.22)",borderRadius:20,padding:"4px 14px",fontSize:".7rem",color:"rgba(255,255,255,.85)",fontWeight:700,letterSpacing:".08em",textTransform:"uppercase"}}>{dayHeadingLabel(evt.date,stop.day??0)}</span>}
                 {stop.time&&<span style={{fontSize:".95rem",color:"rgba(255,255,255,.8)",fontWeight:600,letterSpacing:".04em"}}>{stop.time}</span>}
                 {/* Reveal/hide toggle — presenter only, for secret stops */}
                 {isPresenter&&isSecret&&(
@@ -5044,7 +5098,7 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
       {/* Dot navigation — clickable for presenter; secret=red dot, revealed=green dot */}
       <div style={{position:"absolute",bottom:"1.2rem",left:0,right:0,display:"flex",justifyContent:"center",gap:7,zIndex:15}}>
         {Array.from({length:total}).map((_,i)=>{
-          const si=i-1;
+          const si=i>0?order[i-1]:null;
           const dotStop=i>0?allStops[si]:null;
           const dotSecret=dotStop?.secret;
           const dotRevealed=dotSecret&&revealedSecrets.includes(si);
@@ -5062,13 +5116,39 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
 // ─────────────────────────────────────────────────────────────────────────────
 // EDIT MODALS
 // ─────────────────────────────────────────────────────────────────────────────
-const blankStop={time:"",activity:"",location:"",locationUrl:"",icon:"📍",note:"",image:"",secret:false};
+const blankStop={time:"",activity:"",location:"",locationUrl:"",icon:"📍",note:"",image:"",secret:false,day:0};
 const EditScheduleModal=({evt,onSave,onClose})=>{
   const [sched,setSched]=useState(evt.schedule.map(s=>({...blankStop,...s})));
   const [iconPicker,setIconPicker]=useState(null);
   const upd=(i,f,v)=>setSched(s=>s.map((r,j)=>j===i?{...r,[f]:v}:r));
-  const move=(i,d)=>{const s=[...sched];const j=i+d;if(j<0||j>=s.length)return;[s[i],s[j]]=[s[j],s[i]];setSched(s);};
-  return(<Modal onClose={onClose} onBackdropClose={()=>onSave(sched)} maxWidth={640}><H>Edit Schedule</H><div style={{display:"grid",gap:".9rem"}}>{sched.map((s,i)=>(
+  const stopDay=s=>s.day??0;
+  const dayCount=Math.max(1,eventDayCount(evt.date,evt.end_date));
+  const inRange=d=>d>=0&&d<dayCount;
+  // Move a stop up/down *within its own day group* -- find its same-day
+  // neighbour in `sched` (stops from other days may be interleaved in the
+  // flat array) and swap with that, rather than with the flat neighbour.
+  const moveInDay=(i,d)=>{
+    const day=stopDay(sched[i]);
+    const groupIdxs=sched.reduce((acc,r,j)=>{if(stopDay(r)===day)acc.push(j);return acc;},[]);
+    const pos=groupIdxs.indexOf(i);
+    const j=groupIdxs[pos+d];
+    if(j===undefined)return;
+    setSched(s=>{const next=[...s];[next[i],next[j]]=[next[j],next[i]];return next;});
+  };
+  const addStopOnDay=day=>setSched(s=>[...s,{...blankStop,day}]);
+  // Group stops by day for headings; anything outside the event's current
+  // [0,dayCount) range (e.g. the event's date range shrank after stops were
+  // scheduled further out) is surfaced in its own group instead of being
+  // silently dropped -- see `overflowIdxs` below.
+  const groups=Array.from({length:dayCount},(_,day)=>({day,idxs:sched.reduce((acc,r,j)=>{if(stopDay(r)===day)acc.push(j);return acc;},[])}));
+  const overflowIdxs=sched.reduce((acc,r,j)=>{if(!inRange(stopDay(r)))acc.push(j);return acc;},[]);
+  const isMultiDay=dayCount>1;
+  const showDayPicker=isMultiDay||overflowIdxs.length>0;
+  const renderStop=i=>{
+    const s=sched[i];
+    const group=inRange(stopDay(s))?groups[stopDay(s)].idxs:overflowIdxs;
+    const pos=group.indexOf(i);
+    return(
     <div key={i} style={{background:"var(--bg3)",borderRadius:"var(--radius-sm)",padding:"1rem",border:`1px solid ${s.secret?"rgba(224,85,85,.35)":"var(--border)"}`,position:"relative",overflow:"hidden"}}>
       {s.secret&&<div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,var(--red),rgba(224,85,85,.4))"}}/>}
       <div style={{display:"flex",gap:7,marginBottom:".7rem",alignItems:"center"}}>
@@ -5077,8 +5157,8 @@ const EditScheduleModal=({evt,onSave,onClose})=>{
         <Inp value={s.activity} onChange={e=>upd(i,"activity",e.target.value)} placeholder="Activity"/>
         <div style={{display:"flex",gap:4,flexShrink:0}}>
           <button onClick={()=>upd(i,"secret",!s.secret)} title={s.secret?"Secret — klik om te openbaren":"Publiek — klik om te verbergen"} style={{width:32,height:32,background:s.secret?"rgba(224,85,85,.12)":"rgba(76,175,125,.1)",border:`1px solid ${s.secret?"rgba(224,85,85,.4)":"rgba(76,175,125,.3)"}`,borderRadius:7,cursor:"pointer",fontSize:"15px",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>{s.secret?"🔒":"👁"}</button>
-          <Btn onClick={()=>move(i,-1)} variant="ghost" size="sm" disabled={i===0} style={{padding:"6px 9px"}}>↑</Btn>
-          <Btn onClick={()=>move(i,1)} variant="ghost" size="sm" disabled={i===sched.length-1} style={{padding:"6px 9px"}}>↓</Btn>
+          <Btn onClick={()=>moveInDay(i,-1)} variant="ghost" size="sm" disabled={pos===0} style={{padding:"6px 9px"}}>↑</Btn>
+          <Btn onClick={()=>moveInDay(i,1)} variant="ghost" size="sm" disabled={pos===group.length-1} style={{padding:"6px 9px"}}>↓</Btn>
           <Btn onClick={()=>setSched(s=>s.filter((_,j)=>j!==i))} variant="danger" size="sm" style={{padding:"6px 9px"}}>✕</Btn>
         </div>
       </div>
@@ -5086,8 +5166,35 @@ const EditScheduleModal=({evt,onSave,onClose})=>{
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:7}}><div><Lbl>Location</Lbl><Inp value={s.location} onChange={e=>upd(i,"location",e.target.value)} placeholder="Café de Kroeg"/></div><div><Lbl>Maps URL</Lbl><Inp value={s.locationUrl} onChange={e=>upd(i,"locationUrl",e.target.value)} placeholder="https://maps.google.com/…"/></div></div>
       <Lbl>Note</Lbl><Inp value={s.note} onChange={e=>upd(i,"note",e.target.value)} placeholder="e.g. reservation under Joris"/>
       <div style={{marginTop:7}}><Lbl>Slide Image / Video URL</Lbl><Inp value={s.image||""} onChange={e=>upd(i,"image",e.target.value)} placeholder="https://… (background in presentation mode)"/></div>
+      {showDayPicker&&<div style={{marginTop:7}}><Lbl>Dag</Lbl><select value={stopDay(s)} onChange={e=>upd(i,"day",Number(e.target.value))} style={{width:"100%",background:"var(--bg2)",color:"var(--cream)",border:"1px solid var(--border)",borderRadius:7,padding:"7px 9px",fontSize:".8rem",cursor:"pointer",fontFamily:"var(--font-b)"}}>
+        {groups.map(g=><option key={g.day} value={g.day}>{dayHeadingLabel(evt.date,g.day)}</option>)}
+        {!inRange(stopDay(s))&&<option value={stopDay(s)}>Dag {stopDay(s)+1} (buiten bereik)</option>}
+      </select></div>}
     </div>
-  ))}<Btn onClick={()=>setSched(s=>[...s,{...blankStop}])} variant="subtle" size="sm">+ Add Stop</Btn><div style={{display:"flex",gap:8,alignItems:"center"}}><Btn onClick={()=>onSave(sched)}>Save</Btn><Btn onClick={onClose} variant="ghost">Discard changes</Btn><span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span></div></div></Modal>);
+    );
+  };
+  return(<Modal onClose={onClose} onBackdropClose={()=>onSave(sched)} maxWidth={640}><H>Edit Schedule</H><div style={{display:"grid",gap:".9rem"}}>
+    {!isMultiDay&&overflowIdxs.length===0
+      ? <>{sched.map((s,i)=>renderStop(i))}<Btn onClick={()=>setSched(s=>[...s,{...blankStop}])} variant="subtle" size="sm">+ Add Stop</Btn></>
+      : <>
+        {groups.map(g=>(
+          <div key={g.day} style={{display:"grid",gap:".9rem",paddingBottom:6,borderBottom:"1px solid var(--border)"}}>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--amber2)",fontWeight:700}}>{dayHeadingLabel(evt.date,g.day)}</div>
+            {g.idxs.map(i=>renderStop(i))}
+            <Btn onClick={()=>addStopOnDay(g.day)} variant="subtle" size="sm">+ Add Stop — Dag {g.day+1}</Btn>
+          </div>
+        ))}
+        {overflowIdxs.length>0&&(
+          <div style={{display:"grid",gap:".9rem"}}>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--red)",fontWeight:700}}>⚠️ Overige / niet ingepland</div>
+            <div style={{fontSize:".76rem",color:"var(--muted)",marginTop:-6}}>Deze stops vallen buiten de huidige datums van dit event. Kies bij een stop een dag om ‘m weer in te plannen — ze worden nooit automatisch verwijderd.</div>
+            {overflowIdxs.map(i=>renderStop(i))}
+          </div>
+        )}
+      </>
+    }
+    <div style={{display:"flex",gap:8,alignItems:"center"}}><Btn onClick={()=>onSave(sched)}>Save</Btn><Btn onClick={onClose} variant="ghost">Discard changes</Btn><span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span></div>
+  </div></Modal>);
 };
 
 const AttendeeInput=({attendees,setAttendees,users=[]})=>{
