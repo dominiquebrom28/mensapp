@@ -264,6 +264,36 @@ const computeMemberStats=(username,events)=>{
   events.forEach(e=>{(e.winners||[]).forEach(w=>{if(w.winner.toLowerCase()===n)mentions.push({...w,eventName:e.name});});});
   return{mensdays,weekends,quizWins,mentions,total:mensdays+weekends};
 };
+// Formats a single date, or a start–end range when endDateStr is a different
+// day, in nl-NL. Falls back to the plain single-day format (unchanged from
+// pre-multi-day behaviour) whenever there's no end date or it equals the
+// start date. opts.weekday/opts.year toggle those parts (both default true),
+// opts.month picks "long"|"short" (default "long"). Defensive against a
+// reversed range (endDateStr before dateStr, e.g. bad/legacy data) -- the
+// earlier date always renders first rather than producing garbled output.
+const formatEventDateRange=(dateStr,endDateStr,opts={})=>{
+  if(!dateStr)return"";
+  const{weekday=true,year=true,month="long"}=opts;
+  const start=new Date(dateStr+"T12:00:00");
+  const hasRange=!!endDateStr&&endDateStr!==dateStr;
+  if(!hasRange){
+    const o={day:"numeric",month};
+    if(weekday)o.weekday="long";
+    if(year)o.year="numeric";
+    return start.toLocaleDateString("nl-NL",o);
+  }
+  const endRaw=new Date(endDateStr+"T12:00:00");
+  const[from,to]=endRaw<start?[endRaw,start]:[start,endRaw];
+  const sameYear=from.getFullYear()===to.getFullYear();
+  const sameMonth=sameYear&&from.getMonth()===to.getMonth();
+  const wd=dt=>weekday?`${dt.toLocaleDateString("nl-NL",{weekday:"short"})} `:"";
+  const showYear=year||!sameYear;
+  const endStr=`${wd(to)}${to.getDate()} ${to.toLocaleDateString("nl-NL",{month})}${showYear?` ${to.getFullYear()}`:""}`;
+  const startStr=sameMonth
+    ?`${wd(from)}${from.getDate()}`
+    :`${wd(from)}${from.getDate()} ${from.toLocaleDateString("nl-NL",{month})}${!sameYear?` ${from.getFullYear()}`:""}`;
+  return`${startStr} – ${endStr}`;
+};
 const ICONS=["📍","🍺","🏎️","🎯","🧠","🍽️","🍝","🍹","🎳","🔐","🎤","🎲","🏆","🚗","🎉","🍻","🎸","🏄","⚽","🎾","🎨","🎭"];
 const TROPHY_ICONS=["🏆","🥇","🥈","🥉","🎯","🧠","🍺","😴","😅","📸","🎤","🏎️","🔐","🎳","🎲","👑","💀","🤡","🎖️","⚡","🦆","🐐"];
 const REACTIONS=["🍺","😂","❤️","🔥","👑"];
@@ -963,7 +993,7 @@ const EditProfileModal=({user,onSave,onClose})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onSaraJay,saraJayUnlocked}) => {
   const isMobile=useIsMobile();
-  const isOver=e=>e.archived||new Date(`${e.date}T${e.end_time||"23:59"}:00`)<new Date();
+  const isOver=e=>e.archived||new Date(`${e.end_date||e.date}T${e.end_time||"23:59"}:00`)<new Date();
   const upcoming=events.filter(e=>!isOver(e)).sort((a,b)=>new Date(a.date)-new Date(b.date));
   const past=events.filter(e=>isOver(e)).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const nextEvt=upcoming[0];
@@ -1075,7 +1105,7 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
   const myStatusColor=myStatus?colorOf(myStatus):"var(--muted)";
   const _now=new Date();
   const _start=new Date(`${evt.date}T${evt.start_time||"00:00"}:00`);
-  const _end=new Date(`${evt.date}T${evt.end_time||"23:59"}:00`);
+  const _end=new Date(`${evt.end_date||evt.date}T${evt.end_time||"23:59"}:00`);
   const isLive=!evt.archived&&_now>=_start&&_now<=_end;
   const isUpcoming=!evt.archived&&!countdown.past&&!isLive;
 
@@ -1088,7 +1118,7 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
       <div style={{flex:1,minWidth:0}}>
         <div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:"var(--amber2)"}}>{evt.name}</div>
         <div style={{color:"var(--muted)",fontSize:".73rem",marginTop:2}}>
-          {new Date(evt.date).toLocaleDateString("nl-NL",{day:"numeric",month:"long"})}
+          {formatEventDateRange(evt.date,evt.end_date,{weekday:false,year:false})}
           {evt.location&&evt.location!=="TBD"&&` · ${evt.location}`}
         </div>
       </div>
@@ -1134,7 +1164,7 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
 
             {/* Date / location */}
             <div style={{color:"var(--muted)",fontSize:".82rem",marginBottom:4}}>
-              {new Date(evt.date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+              {formatEventDateRange(evt.date,evt.end_date)}
               {evt.start_time&&<span style={{color:"var(--amber)",marginLeft:6}}>⏰ {evt.start_time}{evt.end_time&&`–${evt.end_time}`}</span>}
               {evt.location&&evt.location!=="TBD"&&<span style={{marginLeft:6}}>· 📍 {evt.location}</span>}
             </div>
@@ -1357,7 +1387,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],initialTa
 
               {/* Date + time row */}
               <div style={{display:"flex",flexWrap:"wrap",gap:".5rem",marginBottom:".4rem",alignItems:"center"}}>
-                <span style={{color:"var(--cream)",opacity:.75,fontSize:".88rem"}}>📅 {new Date(evt.date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</span>
+                <span style={{color:"var(--cream)",opacity:.75,fontSize:".88rem"}}>📅 {formatEventDateRange(evt.date,evt.end_date)}</span>
                 {evt.start_time&&<span style={{color:"var(--amber)",fontSize:".88rem",fontWeight:700}}>⏰ {evt.start_time}{evt.end_time&&` – ${evt.end_time}`}</span>}
               </div>
               {evt.location&&evt.location!=="TBD"&&<div style={{color:"var(--cream)",opacity:.65,fontSize:".86rem",marginBottom:".5rem"}}>📍 {evt.location}</div>}
@@ -4954,7 +4984,7 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
               {evt.type==="weekend"?"🏕️ Weekend":"📅 Mensday"}{evt.theme&&` · ${evt.theme}`}
             </div>}
             <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(2.8rem,8vw,6rem)",color:"#fff",lineHeight:1.05,marginBottom:"1.4rem",textShadow:"0 0 60px rgba(232,148,58,.22)"}}>{evt.name}</div>
-            {evt.date&&<div style={{fontSize:"1.05rem",color:"rgba(255,255,255,.8)",marginBottom:"1.1rem",letterSpacing:".02em"}}>{new Date(evt.date+"T12:00:00").toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>}
+            {evt.date&&<div style={{fontSize:"1.05rem",color:"rgba(255,255,255,.8)",marginBottom:"1.1rem",letterSpacing:".02em"}}>{formatEventDateRange(evt.date,evt.end_date)}</div>}
             {evt.location&&<div style={{fontSize:"1rem",color:"var(--amber2)",opacity:.8,marginBottom:"2.8rem"}}>📍 {evt.location}</div>}
             {allStops.length>0&&<div style={{display:"flex",alignItems:"center",gap:"1rem",justifyContent:"center",color:"rgba(255,255,255,.26)",fontSize:".78rem",letterSpacing:".09em"}}>
               <div style={{height:1,width:36,background:"rgba(255,255,255,.14)"}}/>
@@ -5095,37 +5125,68 @@ const AttendeeInput=({attendees,setAttendees,users=[]})=>{
 
 const EditEventModal=({evt,onSave,onClose,users=[]})=>{
   const [d,setD]=useState({...evt});
+  // If this event already arrives with an end_date, its saved `type` is by
+  // definition a deliberate decision (possibly correcting an earlier
+  // auto-suggestion) -- start "touched" so re-editing end_date this session
+  // never silently overwrites it. A fresh event (no end_date yet) still
+  // gets the auto-suggest on its first range.
+  const typeTouched=useRef(!!evt.end_date);
+  const dateErr=d.end_date&&d.date&&d.end_date<d.date?"Einddatum ligt vóór de startdatum":"";
+  const setEndDate=v=>{
+    const next={...d,end_date:v};
+    if(v&&v!==d.date&&!typeTouched.current)next.type="weekend";
+    setD(next);
+  };
   return(
     <Modal onClose={onClose} maxWidth={500}><H>Edit Event</H>
     <div style={{display:"grid",gap:".9rem"}}>
-      {[["name","Event Name"],["date","Datum (JJJJ-MM-DD)"],["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
+      <div><Lbl>Event Name</Lbl><Inp value={d.name||""} onChange={e=>setD({...d,name:e.target.value})} placeholder="Event Name"/></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <div><Lbl>Starttijd (HH:MM)</Lbl><Inp value={d.start_time||""} onChange={e=>setD({...d,start_time:e.target.value})} placeholder="12:00"/></div>
-        <div><Lbl>Eindtijd (HH:MM)</Lbl><Inp value={d.end_time||""} onChange={e=>setD({...d,end_time:e.target.value})} placeholder="23:00"/></div>
+        <div><Lbl>Startdatum</Lbl><Inp type="date" value={d.date||""} onChange={e=>setD({...d,date:e.target.value})}/></div>
+        <div><Lbl>Starttijd</Lbl><Inp type="time" value={d.start_time||""} onChange={e=>setD({...d,start_time:e.target.value})}/></div>
       </div>
-      <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>setD({...d,type:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><Lbl>Einddatum (optioneel)</Lbl><Inp type="date" value={d.end_date||""} onChange={e=>setEndDate(e.target.value)}/></div>
+        <div><Lbl>Eindtijd</Lbl><Inp type="time" value={d.end_time||""} onChange={e=>setD({...d,end_time:e.target.value})}/></div>
+      </div>
+      {dateErr&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:-6}}>⚠ {dateErr}</div>}
+      {[["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
+      <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>{typeTouched.current=true;setD({...d,type:e.target.value});}} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
       <div><Lbl>Description</Lbl><RichTextInput value={d.description||""} onChange={v=>setD({...d,description:v})} placeholder="Beschrijving… **bold**, *italic*, - lijstje" rows={3}/></div>
       <div><Lbl>Attendees</Lbl><AttendeeInput attendees={d.attendees} setAttendees={v=>setD({...d,attendees:v})} users={users}/></div>
-      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave(d)}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
+      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave(d)} disabled={!!dateErr}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
     </div></Modal>
   );
 };
 
 const NewEventModal=({onSave,onClose,users=[]})=>{
   const yr=new Date().getFullYear();
-  const [d,setD]=useState({name:`Mensday ${yr}`,type:"day",date:`${yr}-09-13`,start_time:"12:00",end_time:"",location:"TBD",description:"",theme:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false,kretjes:0});
+  const [d,setD]=useState({name:`Mensday ${yr}`,type:"day",date:`${yr}-09-13`,end_date:"",start_time:"12:00",end_time:"",location:"TBD",description:"",theme:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false,kretjes:0});
+  const typeTouched=useRef(false);
+  const dateErr=d.end_date&&d.date&&d.end_date<d.date?"Einddatum ligt vóór de startdatum":"";
+  const setEndDate=v=>{
+    const next={...d,end_date:v};
+    if(v&&v!==d.date&&!typeTouched.current)next.type="weekend";
+    setD(next);
+  };
   return(
     <Modal onClose={onClose} maxWidth={500}><H>New Event</H>
     <div style={{display:"grid",gap:".85rem"}}>
-      {[["name","Event Name"],["date","Datum (JJJJ-MM-DD)"],["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
+      <div><Lbl>Event Name</Lbl><Inp value={d.name||""} onChange={e=>setD({...d,name:e.target.value})} placeholder="Event Name"/></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <div><Lbl>Starttijd (HH:MM)</Lbl><Inp value={d.start_time||""} onChange={e=>setD({...d,start_time:e.target.value})} placeholder="12:00"/></div>
-        <div><Lbl>Eindtijd (HH:MM)</Lbl><Inp value={d.end_time||""} onChange={e=>setD({...d,end_time:e.target.value})} placeholder="23:00"/></div>
+        <div><Lbl>Startdatum</Lbl><Inp type="date" value={d.date||""} onChange={e=>setD({...d,date:e.target.value})}/></div>
+        <div><Lbl>Starttijd</Lbl><Inp type="time" value={d.start_time||""} onChange={e=>setD({...d,start_time:e.target.value})}/></div>
       </div>
-      <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>setD({...d,type:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><Lbl>Einddatum (optioneel)</Lbl><Inp type="date" value={d.end_date||""} onChange={e=>setEndDate(e.target.value)}/></div>
+        <div><Lbl>Eindtijd</Lbl><Inp type="time" value={d.end_time||""} onChange={e=>setD({...d,end_time:e.target.value})}/></div>
+      </div>
+      {dateErr&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:-6}}>⚠ {dateErr}</div>}
+      {[["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
+      <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>{typeTouched.current=true;setD({...d,type:e.target.value});}} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
       <div><Lbl>Description</Lbl><RichTextInput value={d.description||""} onChange={v=>setD({...d,description:v})} placeholder="Beschrijving… **bold**, *italic*, - lijstje" rows={3}/></div>
       <div><Lbl>Attendees</Lbl><AttendeeInput attendees={d.attendees} setAttendees={v=>setD({...d,attendees:v})} users={users}/></div>
-      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave({...d,id:`evt-${Date.now()}`})}>Create</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
+      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave({...d,id:`evt-${Date.now()}`})} disabled={!!dateErr}>Create</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
     </div></Modal>
   );
 };
@@ -5682,7 +5743,7 @@ const TeamCreatorPage=({users,events=[],onUpdateEvent})=>{
                 style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"9px 10px",color:selectedEvtId?"var(--cream)":"var(--muted)",fontFamily:"var(--font-b)",fontSize:".88rem",outline:"none",width:"100%"}}>
                 <option value="">— Kies een event —</option>
                 {activeEvents.map(e=>(
-                  <option key={e.id} value={e.id}>{e.name} · {new Date(e.date).toLocaleDateString("nl-NL",{day:"numeric",month:"short",year:"numeric"})}</option>
+                  <option key={e.id} value={e.id}>{e.name} · {formatEventDateRange(e.date,e.end_date,{weekday:false,month:"short"})}</option>
                 ))}
               </select>
               <div style={{display:"flex",alignItems:"center",gap:10}}>

@@ -258,6 +258,63 @@ describe('computeMemberStats', () => {
   })
 })
 
+describe('formatEventDateRange', () => {
+  const formatEventDateRange = extractFromApp('formatEventDateRange')
+
+  it('formats a single day (no end_date) exactly like the pre-range format', () => {
+    expect(formatEventDateRange('2026-09-12', undefined)).toBe(
+      new Date('2026-09-12T12:00:00').toLocaleDateString('nl-NL', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      }),
+    )
+  })
+
+  it('treats an end_date equal to the start date as a single day', () => {
+    expect(formatEventDateRange('2026-09-12', '2026-09-12')).toBe(
+      formatEventDateRange('2026-09-12', undefined),
+    )
+  })
+
+  it('collapses a same-month range to "wd d – wd d month year"', () => {
+    expect(formatEventDateRange('2026-09-12', '2026-09-14')).toBe('za 12 – ma 14 september 2026')
+  })
+
+  it('spells out both months for a cross-month range within the same year', () => {
+    expect(formatEventDateRange('2026-08-28', '2026-09-01')).toBe(
+      'vr 28 augustus – di 1 september 2026',
+    )
+  })
+
+  it('spells out both years for a cross-year range', () => {
+    expect(formatEventDateRange('2026-12-30', '2027-01-01')).toBe(
+      'wo 30 december 2026 – vr 1 januari 2027',
+    )
+  })
+
+  it('omits weekday and year when opts request it (compact card style)', () => {
+    expect(formatEventDateRange('2026-09-12', undefined, { weekday: false, year: false })).toBe(
+      '12 september',
+    )
+    expect(
+      formatEventDateRange('2026-09-12', '2026-09-14', { weekday: false, year: false }),
+    ).toBe('12 – 14 september')
+  })
+
+  it('still shows the year in a compact cross-year range even with year:false', () => {
+    expect(
+      formatEventDateRange('2026-12-30', '2027-01-01', { weekday: false, year: false }),
+    ).toBe('30 december 2026 – 1 januari 2027')
+  })
+
+  it('returns an empty string for a missing start date', () => {
+    expect(formatEventDateRange('', '2026-09-14')).toBe('')
+    expect(formatEventDateRange(undefined, undefined)).toBe('')
+  })
+})
+
 describe('normalizeQuiz', () => {
   // normalizeQuiz references the module-scope TEAM_AVATARS const, so it
   // must be extracted alongside it (see extractFromAppSource.js docs).
