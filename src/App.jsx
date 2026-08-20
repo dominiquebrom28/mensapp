@@ -150,11 +150,11 @@ const Tooltip=({label,children})=>{
     </div>
   );
 };
-const Modal = ({children,onClose,maxWidth=500}) => {
+const Modal = ({children,onClose,maxWidth=500,onBackdropClose}) => {
   const ready=useRef(false);
   useEffect(()=>{const t=setTimeout(()=>{ready.current=true;},350);return()=>clearTimeout(t);},[]);
   return (
-  <div className="ov" onClick={()=>{if(ready.current)onClose();}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
+  <div className="ov" onClick={()=>{if(ready.current)(onBackdropClose||onClose)();}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
     <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth,maxHeight:"92vh",overflowY:"auto"}}>
       <Card style={{padding:"1.8rem"}}>{children}</Card>
     </div>
@@ -5038,7 +5038,7 @@ const EditScheduleModal=({evt,onSave,onClose})=>{
   const [iconPicker,setIconPicker]=useState(null);
   const upd=(i,f,v)=>setSched(s=>s.map((r,j)=>j===i?{...r,[f]:v}:r));
   const move=(i,d)=>{const s=[...sched];const j=i+d;if(j<0||j>=s.length)return;[s[i],s[j]]=[s[j],s[i]];setSched(s);};
-  return(<Modal onClose={onClose} maxWidth={640}><H>Edit Schedule</H><div style={{display:"grid",gap:".9rem"}}>{sched.map((s,i)=>(
+  return(<Modal onClose={onClose} onBackdropClose={()=>onSave(sched)} maxWidth={640}><H>Edit Schedule</H><div style={{display:"grid",gap:".9rem"}}>{sched.map((s,i)=>(
     <div key={i} style={{background:"var(--bg3)",borderRadius:"var(--radius-sm)",padding:"1rem",border:`1px solid ${s.secret?"rgba(224,85,85,.35)":"var(--border)"}`,position:"relative",overflow:"hidden"}}>
       {s.secret&&<div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,var(--red),rgba(224,85,85,.4))"}}/>}
       <div style={{display:"flex",gap:7,marginBottom:".7rem",alignItems:"center"}}>
@@ -5057,7 +5057,7 @@ const EditScheduleModal=({evt,onSave,onClose})=>{
       <Lbl>Note</Lbl><Inp value={s.note} onChange={e=>upd(i,"note",e.target.value)} placeholder="e.g. reservation under Joris"/>
       <div style={{marginTop:7}}><Lbl>Slide Image / Video URL</Lbl><Inp value={s.image||""} onChange={e=>upd(i,"image",e.target.value)} placeholder="https://… (background in presentation mode)"/></div>
     </div>
-  ))}<Btn onClick={()=>setSched(s=>[...s,{...blankStop}])} variant="subtle" size="sm">+ Add Stop</Btn><div style={{display:"flex",gap:8}}><Btn onClick={()=>onSave(sched)}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div></div></Modal>);
+  ))}<Btn onClick={()=>setSched(s=>[...s,{...blankStop}])} variant="subtle" size="sm">+ Add Stop</Btn><div style={{display:"flex",gap:8,alignItems:"center"}}><Btn onClick={()=>onSave(sched)}>Save</Btn><Btn onClick={onClose} variant="ghost">Discard changes</Btn><span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span></div></div></Modal>);
 };
 
 const AttendeeInput=({attendees,setAttendees,users=[]})=>{
