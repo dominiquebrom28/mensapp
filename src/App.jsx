@@ -253,7 +253,7 @@ const useCountdown = (dateStr,startTime="12:00") => {
       setT({d:Math.floor(diff/86400000),h:Math.floor((diff%86400000)/3600000),m:Math.floor((diff%3600000)/60000),s:Math.floor((diff%60000)/1000)});
     };
     tick();const id=setInterval(tick,1000);return()=>clearInterval(id);
-  },[dateStr]);
+  },[dateStr,startTime]);
   return t;
 };
 const CU = ({v,l}) => (
@@ -923,7 +923,7 @@ const HallOfFame = ({events,users=[],teamSets=[]}) => {
           <div style={{fontSize:"2rem",marginBottom:".5rem"}}>🐐</div>
           <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber2)",marginBottom:".8rem"}}>Perfect Attendance</div>
           <div style={{display:"flex",justifyContent:"center",gap:"1rem",flexWrap:"wrap"}}>
-            {perfect.map((p,i)=>(
+            {perfect.map((p)=>(
               <div key={p.name} style={{display:"flex",alignItems:"center",gap:8}}>
                 <Avatar name={p.name} size={38} {...getUA(p.name,users)}/>
                 <div>
@@ -1535,7 +1535,7 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
         if(!isEditor&&visible.length===0)return null;
         return(
           <div style={{padding:"0 1.4rem 1.2rem",borderTop:"1px solid var(--border)"}}>
-            <div style={{fontSize:".63rem",color:"var(--muted)",letterSpacing:".15em",textTransform:"uppercase",marginBottom:8,marginTop:10}}>What's on the menu</div>
+            <div style={{fontSize:".63rem",color:"var(--muted)",letterSpacing:".15em",textTransform:"uppercase",marginBottom:8,marginTop:10}}>What&apos;s on the menu</div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
               {visible.slice(0,6).map((s,i)=>(
                 <div key={i} style={{display:"flex",alignItems:"center",gap:5,background:s.secret?"rgba(224,85,85,.08)":"var(--bg3)",border:`1px solid ${s.secret?"rgba(224,85,85,.2)":"var(--border)"}`,borderRadius:8,padding:"5px 10px",fontSize:".76rem",color:s.secret?"rgba(224,85,85,.6)":"var(--cream)",opacity:.85}}>
@@ -1878,7 +1878,6 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
 const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
   const [editSched,setEditSched]=useState(false);
   const [notifyPending,setNotifyPending]=useState(null);
-  const isMobile=useIsMobile();
   const statusOpts=isPast?["went","absent"]:["going","maybe","not coming"];
   const colorOf=s=>statusMap[s]?.color??"var(--muted)";
   const isAdmin=can.editEvent(currentUser);
@@ -1989,7 +1988,7 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"1.2rem"}}>
           <div>
             <H style={{marginBottom:3}}>{isPast?"📋 What Went Down":"👀 What's on the Menu"}</H>
-            {!isPast&&evt.schedule.length>0&&<div style={{fontSize:".75rem",color:"var(--muted)"}}>The agenda is locked. Here's a taste of what's coming.</div>}
+            {!isPast&&evt.schedule.length>0&&<div style={{fontSize:".75rem",color:"var(--muted)"}}>The agenda is locked. Here&apos;s a taste of what&apos;s coming.</div>}
           </div>
           {isAdmin&&<Btn onClick={()=>setEditSched(true)} variant="ghost" size="sm">✎ Edit</Btn>}
         </div>
@@ -1998,7 +1997,7 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
           <div style={{textAlign:"center",padding:"2.5rem 1rem",color:"var(--muted)"}}>
             <div style={{fontSize:"2.5rem",marginBottom:".6rem"}}>🔒</div>
             <div style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--amber2)",marginBottom:".3rem"}}>Schedule under wraps</div>
-            <div style={{fontSize:".8rem"}}>The lads don't need to know yet.</div>
+            <div style={{fontSize:".8rem"}}>The lads don&apos;t need to know yet.</div>
             {isAdmin&&<div style={{marginTop:".6rem",fontSize:".75rem",color:"var(--amber)"}}>Add activities with Edit ↑</div>}
           </div>
         )}
@@ -2079,7 +2078,7 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
 
       {/* Attendees full list */}
       <Card>
-        <H>Who's {isPast?"Attended":"Coming"}</H>
+        <H>Who&apos;s {isPast?"Attended":"Coming"}</H>
         <div style={{display:"flex",gap:6,marginBottom:"1rem",flexWrap:"wrap"}}>
           {statusOpts.map(s=><div key={s} style={{background:colorOf(s)+"22",border:`1px solid ${colorOf(s)}44`,borderRadius:7,padding:"3px 10px",fontSize:".72rem",color:colorOf(s),fontWeight:600}}>{totals[s]||0} {statusMap[s]?.label}</div>)}
         </div>
@@ -2359,7 +2358,7 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[]})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // QUIZ TAB  (entry point — opens QuizDashboard for admins, read-only for others)
 // ─────────────────────────────────────────────────────────────────────────────
-const QuizTab=({evt,onUpdate,currentUser,isPast,users=[],onOpenQuizDash})=>{
+const QuizTab=({evt,currentUser,users=[],onOpenQuizDash})=>{
   const isAdmin=can.hostQuiz(currentUser);
   const quizzes=evt.quizzes||[];
 
@@ -2457,11 +2456,7 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
   const [expandedQ,setExpandedQ]=useState(0);
   const [builderTab,setBuilderTab]=useState("rounds");
   const [showDesc,setShowDesc]=useState(false);
-  const imgRefs=useRef({});
   const [imgUploading,setImgUploading]=useState(null);
-  const [imgPickerKey,setImgPickerKey]=useState(null);
-  const [bucketFiles,setBucketFiles]=useState([]);
-  const [bucketLoading,setBucketLoading]=useState(false);
 
   // ── Round helpers ────────────────────────────────────────────────
   const addRound=()=>{
@@ -2510,16 +2505,6 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
     return{...q,options:opts,answer:ans.length>0?ans:[0]};
   })}:round));
 
-  const handleImg=async(ri,qi,e)=>{
-    const file=e.target.files[0];if(!file)return;
-    const key=`${ri}-${qi}`;
-    setImgUploading(key);
-    const path=`${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
-    const{data,error}=await supabase.storage.from("Quiz images").upload(path,file);
-    if(!error){const{data:{publicUrl}}=supabase.storage.from("Quiz images").getPublicUrl(data.path);updQ(ri,qi,"image",publicUrl);}
-    setImgUploading(null);
-    e.target.value="";
-  };
   const handleRoundImg=async(ri,e)=>{
     const file=e.target.files[0];if(!file)return;
     const key=`round-${ri}`;
@@ -2529,18 +2514,6 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
     if(!error){const{data:{publicUrl}}=supabase.storage.from("Quiz images").getPublicUrl(data.path);updRound(ri,"bgImage",publicUrl);}
     setImgUploading(null);
     e.target.value="";
-  };
-  const loadBucketImages=async()=>{
-    setBucketLoading(true);
-    const{data,error}=await supabase.storage.from("Quiz images").list("",{limit:200,sortBy:{column:"created_at",order:"desc"}});
-    if(!error&&data)setBucketFiles(data.filter(f=>f.name!==".emptyFolderPlaceholder"&&!f.name.endsWith("/")));
-    setBucketLoading(false);
-  };
-  const openBucketPicker=(ri,qi)=>{
-    const key=`${ri}-${qi}`;
-    if(imgPickerKey===key){setImgPickerKey(null);return;}
-    setImgPickerKey(key);
-    loadBucketImages();
   };
 
   // ── Team helpers ─────────────────────────────────────────────────
@@ -2798,7 +2771,7 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
                             <Lbl>Song link (YouTube or Spotify)</Lbl>
                             <Inp value={q.songUrl} onChange={e=>updQ(ri,qi,"songUrl",e.target.value)} placeholder="https://youtu.be/… or https://open.spotify.com/track/…"/>
                             {q.songUrl&&!isYouTubeUrl(q.songUrl)&&!isSpotifyUrl(q.songUrl)&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:3}}>⚠ Use a YouTube or Spotify link</div>}
-                            {q.songUrl&&isYouTubeUrl(q.songUrl)&&!getYouTubeId(q.songUrl)&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:3}}>⚠ Couldn't detect video ID</div>}
+                            {q.songUrl&&isYouTubeUrl(q.songUrl)&&!getYouTubeId(q.songUrl)&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:3}}>⚠ Couldn&apos;t detect video ID</div>}
                           </div>
                           <div style={{display:"grid",gridTemplateColumns:"auto auto 1fr 1fr",gap:"1rem",alignItems:"end"}}>
                             <div>
@@ -3230,7 +3203,6 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
     };
     window.addEventListener("keydown",h);
     return()=>window.removeEventListener("keydown",h);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
   useEffect(()=>{
@@ -3243,6 +3215,12 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
       },1000);
     }
     return()=>clearInterval(timerRef.current);
+    // currentQ/timeLimit intentionally excluded: `quiz` comes from normalizeQuiz(rawQuiz),
+    // which returns a fresh object graph on every render, so currentQ/timeLimit change
+    // identity on renders unrelated to navigation (e.g. scores/pauseConfig updates).
+    // Keying off phase/slidePhase/roundIdx/qIdx is what makes the timer restart only
+    // when we actually move to a different question/phase.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   },[phase,slidePhase,roundIdx,qIdx]);
 
   useEffect(()=>{
@@ -3254,6 +3232,9 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
       },1000);
     }
     return()=>clearInterval(musicRef.current);
+    // currentQ intentionally excluded: same non-memoized `quiz` identity issue as the
+    // timer effect above -- only musicPhase transitions should (re)start the music timer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   },[musicPhase]);
 
   useEffect(()=>{
@@ -3286,7 +3267,6 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
       if(ls?.qIdx===qIdx&&ls?.roundIdx===roundIdx)setAnswers(ls.answers||{});
     },2000);
     return()=>clearInterval(poll);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[quiz.id,qIdx,roundIdx]);
 
   // ── Actions ──────────────────────────────────────────────────────────────────
@@ -3521,7 +3501,7 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
             {hostTimedOut&&(
               <div style={{textAlign:"center",padding:"2rem 1rem",marginBottom:"1.5rem"}}>
                 <div style={{fontSize:"3.5rem",marginBottom:"1rem",animation:"timerPulse .6s ease-in-out infinite"}}>⏰</div>
-                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(2rem,6vw,3.5rem)",color:"var(--red)",fontWeight:900,marginBottom:".5rem"}}>Time's up!</div>
+                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(2rem,6vw,3.5rem)",color:"var(--red)",fontWeight:900,marginBottom:".5rem"}}>Time&apos;s up!</div>
                 <div style={{color:"rgba(255,255,255,.45)",fontSize:".95rem"}}>Reveal the answer or move to the next question</div>
               </div>
             )}
@@ -3837,7 +3817,7 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
                       style={{width:"100%",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 12px",color:"var(--cream)",fontFamily:"var(--font-b)",fontSize:".9rem",outline:"none"}}/>
                   </div>
                   <div>
-                    <div style={{fontSize:".68rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:4}}>Image / GIF URL <span style={{textTransform:"none",fontStyle:"italic",opacity:.6}}>(shown on participants' screens)</span></div>
+                    <div style={{fontSize:".68rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".08em",marginBottom:4}}>Image / GIF URL <span style={{textTransform:"none",fontStyle:"italic",opacity:.6}}>(shown on participants&apos; screens)</span></div>
                     <input value={pauseConfig.image||""} onChange={e=>setPauseConfig(p=>({...p,image:e.target.value||null}))} placeholder="https://media.giphy.com/…"
                       style={{width:"100%",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 12px",color:"var(--cream)",fontFamily:"var(--font-b)",fontSize:".9rem",outline:"none"}}/>
                   </div>
@@ -4301,7 +4281,7 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[]})=>{
             {timedOut&&(
               <div style={{textAlign:"center",padding:"2.5rem 1rem"}}>
                 <div style={{fontSize:"2.5rem",marginBottom:".8rem",animation:"timerPulse .6s ease-in-out infinite"}}>⏰</div>
-                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.4rem,5vw,2rem)",color:"var(--red)",marginBottom:".5rem",fontWeight:900}}>Time's up!</div>
+                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.4rem,5vw,2rem)",color:"var(--red)",marginBottom:".5rem",fontWeight:900}}>Time&apos;s up!</div>
                 <div style={{color:"rgba(255,255,255,.4)",fontSize:".85rem"}}>Waiting for the host…</div>
               </div>
             )}
@@ -4794,7 +4774,7 @@ const PhotosTab=({evt,onUpdate,currentUser})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // WINNERS TAB
 // ─────────────────────────────────────────────────────────────────────────────
-const WinnersTab=({evt,onUpdate,currentUser,isPast})=>{
+const WinnersTab=({evt,onUpdate,currentUser})=>{
   const [addingW,setAddingW]=useState(false);const [addingH,setAddingH]=useState(false);
   const [editW,setEditW]=useState(null);const [editH,setEditH]=useState(null);
   const winners=evt.winners||[];const highlights=evt.highlights||[];
@@ -5016,7 +4996,7 @@ const FAQTab=({evt,onUpdate,currentUser})=>{
               <Lbl>Your question</Lbl>
               <Inp value={question} onChange={e=>setQuestion(e.target.value)} placeholder="e.g. Do we need to bring cash?" multiline rows={3} autoFocus onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&submitQuestion()}/>
             </div>
-            <div style={{fontSize:".78rem",color:"var(--muted)"}}>The admin/host will answer your question and it'll show up here for everyone to see.</div>
+            <div style={{fontSize:".78rem",color:"var(--muted)"}}>The admin/host will answer your question and it&apos;ll show up here for everyone to see.</div>
             <div style={{display:"flex",gap:8}}>
               <Btn onClick={submitQuestion} disabled={!question.trim()}>Submit</Btn>
               <Btn onClick={()=>{setAsking(false);setQuestion("")}} variant="ghost">Cancel</Btn>
@@ -6790,7 +6770,12 @@ export default function App(){
   const [writeError,setWriteError]=useState(null);
   useEffect(()=>{
     if(!currentUser)return;
-    try{const s=JSON.parse(localStorage.getItem(`md-notifs-${currentUser.id}`)||"[]");setNotifications(s);}catch{}
+    try{const s=JSON.parse(localStorage.getItem(`md-notifs-${currentUser.id}`)||"[]");setNotifications(s);}catch{/* ignore malformed localStorage JSON */}
+    // Deliberately keyed on currentUser?.id, not the whole object: this should only
+    // reload stored notifications when a *different* user logs in, not on every
+    // profile-field refresh (bio/photo/role poll updates) which would otherwise
+    // stomp on notification state that's since moved on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   },[currentUser?.id]);
   const [announcements,setAnnouncements]=useState(()=>{try{return JSON.parse(localStorage.getItem("md-announcements")||"[]");}catch{return[];}});
   const [saraJayUnlocked,setSaraJayUnlocked]=useState(()=>{try{return JSON.parse(localStorage.getItem("md-sj-unlocked")||"false");}catch{return false;}});
@@ -6830,7 +6815,7 @@ export default function App(){
         const sjRow=anns.find(r=>r.id==="__sara_jay__");
         if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}
         const delRow=anns.find(r=>r.id==="__deleted_notifs__");
-        if(delRow){try{const raw=JSON.parse(delRow.body||"null");if(raw){const ids=Array.isArray(raw)?raw:(raw.ids||[]);const cb=Array.isArray(raw)?"":( raw.cleared_before||"");setDeletedNotifIds(new Set(ids));if(cb)setClearedBefore(cb);}}catch{}}
+        if(delRow){try{const raw=JSON.parse(delRow.body||"null");if(raw){const ids=Array.isArray(raw)?raw:(raw.ids||[]);const cb=Array.isArray(raw)?"":( raw.cleared_before||"");setDeletedNotifIds(new Set(ids));if(cb)setClearedBefore(cb);}}catch{/* ignore malformed announcement JSON from Supabase */}}
         const SYSTEM_IDS=new Set(["__sara_jay__","__deleted_notifs__"]);
         const mapped=anns.filter(r=>!SYSTEM_IDS.has(r.id)).map(fromDbAnn);
         setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));
@@ -6856,7 +6841,7 @@ export default function App(){
 
     const poll=setInterval(()=>{
       fetchTeamSets().then(setTeamSets);
-      supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data&&data.length){const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});const sjRow=data.find(r=>r.id==="__sara_jay__");if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}const delRow=data.find(r=>r.id==="__deleted_notifs__");if(delRow){try{const raw=JSON.parse(delRow.body||"null");if(raw){const ids=new Set(Array.isArray(raw)?raw:(raw.ids||[]));const cb=Array.isArray(raw)?"": (raw.cleared_before||"");setDeletedNotifIds(ids);if(cb)setClearedBefore(cb);setNotifications(prev=>{const next=prev.filter(n=>!ids.has(n.id)&&(!cb||n.timestamp>cb));const cu=currentUserRef.current;if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));return next;});}}catch{}}const SYSTEM_IDS=new Set(["__sara_jay__","__deleted_notifs__"]);const mapped=data.filter(r=>!SYSTEM_IDS.has(r.id)).map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}});
+      supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data&&data.length){const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});const sjRow=data.find(r=>r.id==="__sara_jay__");if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}const delRow=data.find(r=>r.id==="__deleted_notifs__");if(delRow){try{const raw=JSON.parse(delRow.body||"null");if(raw){const ids=new Set(Array.isArray(raw)?raw:(raw.ids||[]));const cb=Array.isArray(raw)?"": (raw.cleared_before||"");setDeletedNotifIds(ids);if(cb)setClearedBefore(cb);setNotifications(prev=>{const next=prev.filter(n=>!ids.has(n.id)&&(!cb||n.timestamp>cb));const cu=currentUserRef.current;if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));return next;});}}catch{/* ignore malformed announcement JSON from Supabase */}}const SYSTEM_IDS=new Set(["__sara_jay__","__deleted_notifs__"]);const mapped=data.filter(r=>!SYSTEM_IDS.has(r.id)).map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}});
       supabase.from("users").select("*").then(({data})=>{
         if(data){
           setUsers(data);
@@ -7062,10 +7047,6 @@ export default function App(){
       }
       setWriteError(null);
     }
-  };
-  const saveEvents=async e=>{
-    setEvents(e);
-    await supabase.from("events").upsert(e);
   };
   const deleteEvent=async id=>{
     setEvents(prev=>prev.filter(e=>e.id!==id));

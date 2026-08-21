@@ -1,25 +1,25 @@
 #!/usr/bin/env node
 // Lint ratchet for CI (ticket #27).
 //
-// App.jsx currently carries 13 pre-existing ESLint errors and 17 warnings
-// (30 total) that have never been fixed. Making lint a hard "zero findings"
-// gate would make CI red from its very first run and train everyone to
-// ignore it -- worse than no CI. Dropping lint from CI entirely would let
-// that debt grow silently.
+// Ticket #28 (2026-08-21) cleaned up the 30 pre-existing findings (13 errors,
+// 17 warnings) that used to live here, all in App.jsx: unescaped JSX
+// apostrophes, dead/never-wired code (an unfinished quiz-image bucket
+// picker, an unused legacy `saveEvents` write path, unused params/vars),
+// two stale `eslint-disable` directives, three silently-swallowed
+// `catch{}` blocks (now documented instead of empty), one genuine
+// stale-closure fix (`useCountdown` wasn't re-arming its interval when
+// `startTime` changed), and a handful of `react-hooks/exhaustive-deps`
+// findings that were legitimately dependency-free (the "missing" deps are
+// derived every render from a non-memoized `normalizeQuiz(rawQuiz)` call,
+// so including them would restart in-progress quiz timers on unrelated
+// re-renders) -- those got scoped, reasoned `eslint-disable-next-line`s.
 //
-// Instead this is a ratchet: CI fails only if the *current* total findings
-// exceed this recorded baseline, i.e. only on *new* problems anywhere in the
-// repo (not just changed files -- a stray new violation in an untouched
-// file would also be caught). Existing debt is tolerated and tracked
-// separately in ticket #28.
-//
-// When #28 (or any other cleanup) reduces the real count, lower these
-// numbers to match -- deliberately, in the same PR as the fix -- so the
-// ratchet keeps tightening instead of just sitting at 30 forever. If a
-// dependency/rule bump legitimately raises the count, raise these numbers
-// with a comment explaining why.
-const BASELINE_ERRORS = 13
-const BASELINE_WARNINGS = 17
+// The repo is lint-clean now, so the ratchet is tightened to zero: CI fails
+// on *any* new finding anywhere in the repo. If a dependency/rule bump
+// legitimately raises the count, raise these numbers with a comment
+// explaining why -- don't silently let debt back in.
+const BASELINE_ERRORS = 0
+const BASELINE_WARNINGS = 0
 const BASELINE_TOTAL = BASELINE_ERRORS + BASELINE_WARNINGS
 
 import { readFileSync } from 'node:fs'
@@ -59,4 +59,4 @@ if (total > BASELINE_TOTAL) {
 }
 
 console.log('')
-console.log('OK -- within baseline. (Pre-existing debt is tracked in ticket #28, not blocked here.)')
+console.log('OK -- within baseline. (Baseline is 0 since ticket #28; any finding here is new.)')
