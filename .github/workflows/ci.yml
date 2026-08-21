@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'team/**'
+  pull_request:
+    branches:
+      - main
+      - 'team/**'
+
+# Least privilege: this workflow only reads the repo and runs checks -- it
+# never writes anything back (no auto-commits, no PR comments), so the
+# default GITHUB_TOKEN is scoped down to read-only.
+#
+# No repo secrets are used anywhere below. `npm run build` succeeds with zero
+# env vars set (this is a plain client-side Vite/React SPA -- build only
+# transforms/bundles the code, it never executes it, so a missing
+# VITE_SUPABASE_URL/ANON_KEY at build time is a non-issue), and
+# vitest.config.js already supplies dummy Supabase values for the test env.
+# That means this workflow is safe to run as-is on pull_request events from
+# forks (public repo) with no extra configuration -- there is nothing secret
+# for a fork PR to exfiltrate.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same branch/PR so pushing again doesn't queue
+# up stale runs behind it.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  test-and-build:
+    name: Test & build
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies (npm ci, respects package-lock.json)
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:run
+
+      - name: Build
+        run: npm run build
+
+  lint:
+    name: Lint (ratchet against baseline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies (npm ci, respects package-lock.json)
+        run: npm ci
+
+      # ESLint exits non-zero on its own the moment there is a single error,
+      # which is exactly the all-or-nothing behavior we don't want here (see
+      # lint-ratchet.mjs for why). Capture the JSON report instead and let
+      # the ratchet script decide pass/fail based on the baseline count.
+      - name: Run ESLint (capture report, don't fail the step on findings)
+        run: npx eslint . --format json --output-file eslint-report.json || true
+
+      - name: Enforce lint baseline (ticket #27 / #28)
+        run: node .github/scripts/lint-ratchet.mjs eslint-report.json
+
+  audit:
+    name: Dependency audit (production deps, high/critical)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies (npm ci, respects package-lock.json)
+        run: npm ci
+
+      # Scoped to production dependencies only, so a dev-only tool
+      # vulnerability (e.g. a dev-server-only issue in a build tool) doesn't
+      # block merges the way the App.jsx lint debt would have -- see the
+      # lint job for that same reasoning applied differently. Anything that
+      # actually ships to users still blocks on high/critical.
+      - name: npm audit (production dependencies)
+        run: npm audit --omit=dev --audit-level=high
