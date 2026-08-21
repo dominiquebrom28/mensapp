@@ -42,7 +42,16 @@ export function installMediaEnv({ reducedMotion = false, connection = null } = {
     window.HTMLMediaElement?.prototype || {},
     'paused',
   );
-  let playResultMode = 'resolve'; // 'resolve' | 'reject'
+  let playResultMode = 'resolve'; // 'resolve' | 'reject' | 'defer'
+  // `defer`-mode play() calls, in call order -- each entry's `resolve`/
+  // `reject` is exposed to the test so it can settle a *specific* call
+  // whenever it chooses, independent of any later call. This exists to
+  // reproduce the real-world "unlock play() is still buffering when the
+  // countdown finishes and a second, real play() call also fires" race
+  // (see EventTrailer.jsx's own docblock on the "keeps starting over" bug)
+  // -- a mock that always resolves instantly cannot exercise that ordering
+  // at all, no matter how the test is written around it.
+  const pendingPlays = [];
   if (window.HTMLMediaElement) {
     // jsdom's real `paused` is a getter-only accessor -- redefine it as a
     // plain read/write mock property so `play()`/`pause()` can flip it.
@@ -52,7 +61,17 @@ export function installMediaEnv({ reducedMotion = false, connection = null } = {
       set(v) { this._mockPaused = v; },
     });
     window.HTMLMediaElement.prototype.play = function mockPlay() {
+      // Per spec, `paused` flips to false synchronously the instant play()
+      // is *called* -- independent of when/whether its returned promise
+      // settles. True for all three modes below, deferred included.
       this.paused = false;
+      if (playResultMode === 'defer') {
+        let resolveFn;
+        let rejectFn;
+        const promise = new Promise((resolve, reject) => { resolveFn = resolve; rejectFn = reject; });
+        pendingPlays.push({ resolve: resolveFn, reject: rejectFn });
+        return promise;
+      }
       return playResultMode === 'resolve'
         ? Promise.resolve()
         : Promise.reject(new Error('play() rejected (mediaEnv mock)'));
@@ -126,12 +145,25 @@ export function installMediaEnv({ reducedMotion = false, connection = null } = {
       else delete window.navigator.connection;
     }
     registry.clear();
+    pendingPlays.length = 0;
   }
 
   return {
     restore,
     setReducedMotion(v) { currentReducedMotion = v; },
-    setPlayResult(mode) { playResultMode = mode; }, // 'resolve' | 'reject'
+    setPlayResult(mode) { playResultMode = mode; }, // 'resolve' | 'reject' | 'defer'
+    /**
+     * Settle a specific `defer`-mode play() call by its call order (0 =
+     * first play() invoked while in `defer` mode, independent of any
+     * `resolve`/`reject` calls made in between on other modes). Lets a test
+     * assert real-world orderings like "call #1 is still pending when call
+     * #2 resolves" -- see EventTrailer.render.test.jsx's "keeps starting
+     * over" regression test.
+     */
+    resolveNextDeferredPlay(index = 0) { pendingPlays[index]?.resolve(); },
+    rejectNextDeferredPlay(index = 0) { pendingPlays[index]?.reject(new Error('play() rejected (mediaEnv mock, deferred)')); },
+    /** How many `defer`-mode play() calls are outstanding right now. */
+    pendingPlayCount() { return pendingPlays.length; },
     /** Simulate a successful network load + decode for `url`. */
     resolveImage(url) {
       const img = registry.get(url);

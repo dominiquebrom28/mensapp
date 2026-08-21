@@ -54,7 +54,7 @@ export function EmptyRoster() {
     <div style={{ textAlign: 'center' }}>
       <div className="tr-kicker" style={{ marginBottom: '.4rem' }}>🍺 The lads showing up</div>
       <div className="tr-title tr-slam" style={{ fontSize: 'clamp(1.3rem,5vw,2rem)' }}>Nobody&apos;s locked in yet</div>
-      <div className="tr-note" style={{ marginTop: '.5rem' }}>Be the first name on the list.</div>
+      <div className="tr-note" style={{ marginTop: '.5rem' }}>We need YOU to RSVP. Now. Be the first name on this list — not the last lad wondering what he missed.</div>
     </div>
   );
 }

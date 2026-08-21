@@ -34,6 +34,24 @@ export default function TrailerStyles() {
       .tr-video-wrap{position:absolute;inset:0;background:#000;display:flex;align-items:center;justify-content:center}
       .tr-video-wrap video{width:100%;height:100%;object-fit:contain;display:block;background:#000}
 
+      /* ── Manual-play fallback (autoplay refused post-countdown): a big,
+         obvious, centred button -- never a muted-autoplay workaround. Sits
+         over the video but doesn't cover it edge-to-edge, so native
+         controls stay reachable around it. ───────────────────────────────  */
+      .tr-playfallback-wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:45}
+      .tr-playfallback{pointer-events:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:128px;height:128px;border-radius:50%;border:3px solid var(--amber);background:rgba(20,14,4,.78);color:var(--amber2);font-family:var(--font-b);font-weight:700;font-size:.78rem;letter-spacing:.04em;cursor:pointer;box-shadow:0 0 44px rgba(232,148,58,.4)}
+      .tr-playfallback-icon{font-size:2.2rem;line-height:1}
+      .tr-playfallback:hover{filter:brightness(1.1)}
+
+      /* ── Countdown (2026-08-21b: 3-2-1 then autoplay, replacing
+         tap-to-start) -- full-bleed, skippable overlay over the (already
+         unlocking) video underneath. ───────────────────────────────────── */
+      .tr-countdown{position:absolute;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:transparent;border:none;padding:0;margin:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+      .tr-countdown-bg{position:absolute;inset:0;background:radial-gradient(ellipse 70% 60% at 50% 40%,rgba(232,148,58,.28),transparent 62%),linear-gradient(160deg,var(--bg4),var(--bg2) 55%,var(--bg))}
+      .tr-countdown-inner{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:1rem;padding:1.4rem;text-align:center}
+      .tr-countdown-num{font-family:var(--font-h);font-style:italic;font-weight:900;line-height:.9;font-size:clamp(6rem,32vw,11rem);background:linear-gradient(135deg,var(--gold),var(--amber2));-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 2px 60px rgba(232,148,58,.45)}
+      .tr-countdown-hint{font-family:var(--font-b);font-weight:600;font-size:.74rem;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.55)}
+
       /* ── End card: background texture (no photography here -- a plain
          gradient, so it gets the "cinema, not app-screen" texture layer to
          still feel like part of the trailer, not a bare settings screen) ── */
@@ -62,6 +80,15 @@ export default function TrailerStyles() {
 
       /* ── Kretjes callout ──────────────────────────────────────────────── */
       .tr-kretjes{display:flex;flex-direction:column;align-items:center;gap:.5rem;max-width:440px}
+      /* A real headline (2026-08-21c, Dom: "too small... it's a headline,
+         not a caption") -- same italic Playfair/amber language as the
+         wordmark, deliberately close to .tr-wordmark-settled's scale so
+         it reads as this screen's second hero moment, not a label sitting
+         above the number. NOTE: no backticks in this comment block -- this
+         whole style sheet is itself one JS template literal (see the
+         module docblock's SECURITY note); a literal backtick here would
+         close it early and start interpreting the rest as JS. */
+      .tr-kretjes-title{font-family:var(--font-h);font-weight:900;font-style:italic;text-transform:uppercase;line-height:.98;letter-spacing:-.01em;color:var(--amber2);text-shadow:0 2px 40px rgba(232,148,58,.4),0 2px 30px rgba(0,0,0,.6);font-size:clamp(2.2rem,9vw,4rem)}
       .tr-kretjes-count{font-family:var(--font-h);font-weight:900;font-size:clamp(3.4rem,13vw,5.6rem);line-height:1;color:var(--amber2);text-shadow:0 2px 30px rgba(232,148,58,.35)}
       .tr-kretjes-copy{font-size:.92rem;line-height:1.65;color:rgba(255,255,255,.82)}
 
@@ -92,9 +119,11 @@ export default function TrailerStyles() {
 
       /* ── Reduced motion (technical spec §7, verbatim rule): the video
          itself is the user's own content -- never suppressed here, it isn't
-         targeted by this selector at all. Only the end card's own motion
-         (avatar stamp-in, slam) is affected. ───────────────────────────── */
-      [data-tr-rm="1"] .tr-endcard *,[data-tr-rm="1"] .tr-endcard *::before,[data-tr-rm="1"] .tr-endcard *::after{
+         targeted by this selector at all. Only the end card's motion
+         (avatar stamp-in, slam) and the countdown's per-digit slam are
+         affected -- content/timing unchanged, just the punch removed. ──── */
+      [data-tr-rm="1"] .tr-endcard *,[data-tr-rm="1"] .tr-endcard *::before,[data-tr-rm="1"] .tr-endcard *::after,
+      [data-tr-rm="1"] .tr-countdown *,[data-tr-rm="1"] .tr-countdown *::before,[data-tr-rm="1"] .tr-countdown *::after{
         animation:none!important;
         transition-property:opacity!important;
         transition-duration:200ms!important;

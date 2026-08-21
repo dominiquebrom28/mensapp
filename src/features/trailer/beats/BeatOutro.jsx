@@ -20,17 +20,24 @@
 // navigating anywhere -- there's no navigation callback in the trailer's
 // prop surface. It returns the viewer to the event page, whose Overview tab
 // (the default landing tab) already has the real RSVP control.
+//
+// Branding note (2026-08-21c, Dom): the wordmark reads MENSAPP, not
+// MENSDAY -- the group runs Mensweekends too now, so the *app's* name is
+// MensApp. Branding only: event names ("Mensday 2025") and the Dutch
+// "Mensdagen" stat live elsewhere (App.jsx) and are unaffected -- they
+// describe actual day-events, not the product.
 export default function BeatOutro({ data, onReplay, onRsvp }) {
   const { name, kretjes } = data;
   return (
     <div style={{ textAlign: 'center' }}>
-      <h1 className="tr-wordmark tr-wordmark-settled fu">MENSDAY</h1>
+      <h1 className="tr-wordmark tr-wordmark-settled fu">MENSAPP</h1>
       <div className="tr-title fu1" style={{ fontSize: 'clamp(1.5rem,6vw,2.6rem)', marginTop: '.9rem' }}>{name}</div>
 
       <div className="tr-kretjes fu2">
+        <div className="tr-kretjes-title">Kretjes so far</div>
         <div className="tr-kretjes-count">{kretjes}</div>
         <div className="tr-kretjes-copy">
-          🍺 kretjes deep already. That number only goes one way when the lads actually show up — so don&apos;t just watch this thing, be in the next one.
+          That number doesn&apos;t climb on its own — YOU do that. We need YOU to RSVP. Now.
         </div>
       </div>
 

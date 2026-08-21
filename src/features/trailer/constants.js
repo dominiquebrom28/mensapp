@@ -18,3 +18,8 @@ export const SEEN_KEY = 'md-trailer-seen';
 // End-card roster cap: named avatars shown before the grid folds the rest
 // into a "+N more legends" tile.
 export const ROSTER_MAX_NAMED = 10;
+
+// Pre-play countdown length in whole seconds (2026-08-21b: "a 3-second
+// countdown, then autoplay" -- see EventTrailer.jsx's own docblock for the
+// autoplay-policy mitigation this gates).
+export const COUNTDOWN_SECONDS = 3;
