@@ -1373,6 +1373,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],initialTa
   },[scrollToId]);
   const [editing,setEditing]=useState(false);
   const [presenting,setPresenting]=useState(false);
+  const [soloOpen,setSoloOpen]=useState(false);
   const [quizDash,setQuizDash]=useState(false);
   const [presenterDetected,setPresenterDetected]=useState(false);
   const [viewerDismissed,setViewerDismissed]=useState(false);
@@ -1500,15 +1501,21 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],initialTa
           {isAdmin?(
             <div style={{display:"flex",gap:".5rem",flexWrap:"wrap"}}>
               {evt.schedule.length>0&&<Btn onClick={()=>setPresenting(true)} variant="gold" size="sm">▶ Present</Btn>}
+              {/* Own-pace browsing, distinct from ▶ Present: admins can plausibly want either.
+                  Hidden while a presentation is actually live — that wins, per the owner's call. */}
+              {evt.schedule.length>0&&!presenterDetected&&<Btn onClick={()=>setSoloOpen(true)} variant="ghost" size="sm">🧭 Browse solo</Btn>}
               <Btn onClick={()=>setEditing(true)} variant="ghost" size="sm">✎ Edit</Btn>
               {!isPast&&<Btn onClick={()=>onUpdate({...evt,archived:true})} variant="ghost" size="sm" style={{color:"var(--muted)"}}>Archive</Btn>}
               {isPast&&<Btn onClick={()=>onUpdate({...evt,archived:false})} variant="ghost" size="sm">Reopen</Btn>}
               <Btn onClick={onDelete} variant="danger" size="sm">Delete</Btn>
             </div>
           ):(
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
               <Avatar name={currentUser.username} size={22} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/>
               <span style={{fontSize:".74rem",color:"var(--muted)"}}>Viewing as <strong style={{color:"var(--cream)"}}>{currentUser.username}</strong></span>
+              {/* Members get their own affordance to walk the schedule at their own pace — never broadcasts.
+                  Hidden while a presentation is actually live — that wins, per the owner's call. */}
+              {evt.schedule.length>0&&!presenterDetected&&<Btn onClick={()=>setSoloOpen(true)} variant="ghost" size="sm">🧭 Browse solo</Btn>}
             </div>
           )}
           {canTrailer&&<Btn onClick={()=>setTrailerOpen(true)} variant="gold" size="sm">🎬 Watch the trailer</Btn>}
@@ -1553,6 +1560,11 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],initialTa
       {editing&&<EditEventModal evt={evt} users={users} onSave={u=>{onUpdate(u);setEditing(false)}} onClose={()=>setEditing(false)}/>}
       {presenting&&<PresentationMode evt={evt} onUpdate={onUpdate} isPresenter={true} onClose={()=>setPresenting(false)}/>}
       {!presenting&&presenterDetected&&!viewerDismissed&&<PresentationMode evt={evt} onUpdate={onUpdate} isPresenter={false} currentLive={schedLive} onHide={()=>setViewerDismissed(true)} onPresenterLeft={resetPresenter} onClose={()=>{}}/>}
+      {/* Solo browsing: a live admin presentation still wins -- if one starts
+          mid-session (presenterDetected flips true) this unmounts and the
+          synced viewer above takes over instead, no rejoin banner or
+          join/browse chooser involved, per the owner's explicit call. */}
+      {soloOpen&&!presenterDetected&&<PresentationMode evt={evt} onUpdate={onUpdate} isPresenter={false} isSolo={true} onClose={()=>setSoloOpen(false)}/>}
       {trailerOpen&&<Suspense fallback={null}>
         <EventTrailer input={trailerInput} onClose={()=>setTrailerOpen(false)}/>
       </Suspense>}
@@ -4912,7 +4924,16 @@ const AnnouncementBanner=({announcements,currentUser,onArchive,onHardDelete,onRe
 // ─────────────────────────────────────────────────────────────────────────────
 // PRESENTATION MODE
 // ─────────────────────────────────────────────────────────────────────────────
-const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,onPresenterLeft,onHide})=>{
+// `isSolo` is a third, additive mode (not folded into `isPresenter`, to avoid
+// touching the ~15 existing isPresenter checks below that presenter/viewer
+// already depend on): a solo browser navigates freely like a presenter, but
+// never creates/joins/broadcasts on the sched-<id> channel and never reveals
+// secrets or writes to the event, like a viewer. Every render/behaviour
+// branch below that needs to change for solo says so explicitly with
+// `||isSolo`; anything unlisted (secret ??? treatment, no reveal button, no
+// "X secret" counts, no LIVE badge wording) already falls out of isPresenter
+// being false, same as it does for a real viewer.
+const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,onPresenterLeft,onHide,isSolo=false})=>{
   const allStops=evt.schedule||[];
   const total=allStops.length+1;
   // Display order only, by (day,time) -- everything below that addresses a
@@ -4937,8 +4958,13 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   useEffect(()=>{idxRef.current=idx;},[idx]);
   useEffect(()=>{revealedRef.current=revealedSecrets;},[revealedSecrets]);
 
-  // Channel setup: Presence for detection/initial-state, Broadcast for real-time slide sync
+  // Channel setup: Presence for detection/initial-state, Broadcast for real-time slide sync.
+  // Solo never runs any of this -- no channel is created at all (not
+  // created-and-unused: the `supabase.channel(...)` call itself is skipped),
+  // so a solo browser can never join, subscribe to, or broadcast on the live
+  // presentation channel.
   useEffect(()=>{
+    if(isSolo)return;
     const ch=supabase.channel(`sched-${evtRef.current.id}`);
     chRef.current=ch;
     if(isPresenter){
@@ -4973,7 +4999,7 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
         .subscribe();
     }
     return()=>{if(chRef.current){supabase.removeChannel(chRef.current);chRef.current=null;}};
-  },[isPresenter]);
+  },[isPresenter,isSolo]);
 
   // Presenter: broadcast slide change + update presence for late joiners
   useEffect(()=>{
@@ -4997,23 +5023,23 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   },[onUpdate]);
 
   const handleClose=useCallback(()=>{
-    if(isPresenter){
+    if(isPresenter||isSolo){
       if(chRef.current)chRef.current.untrack();
       onClose();
     } else {
       onHide?.(); // tell EventPage to set viewerDismissed — it unmounts us and shows the banner
     }
-  },[isPresenter,onClose,onHide]);
+  },[isPresenter,isSolo,onClose,onHide]);
 
   const goTo=useCallback(n=>{
-    if(!isPresenter)return;
+    if(!isPresenter&&!isSolo)return;
     if(n<0||n>=total)return;
     setFading(true);
     setTimeout(()=>{setIdx(n);setFading(false);},230);
-  },[total,isPresenter]);
+  },[total,isPresenter,isSolo]);
 
   useEffect(()=>{
-    if(!isPresenter)return;
+    if(!isPresenter&&!isSolo)return;
     const h=e=>{
       if(e.key==="ArrowRight"||e.key==="ArrowDown")goTo(idxRef.current+1);
       else if(e.key==="ArrowLeft"||e.key==="ArrowUp")goTo(idxRef.current-1);
@@ -5021,14 +5047,14 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
     };
     window.addEventListener("keydown",h);
     return()=>window.removeEventListener("keydown",h);
-  },[goTo,handleClose,isPresenter]);
+  },[goTo,handleClose,isPresenter,isSolo]);
 
   useEffect(()=>{
-    if(!isPresenter)return; // viewers don't need fullscreen API — position:fixed already covers screen
+    if(!isPresenter&&!isSolo)return; // viewers don't need fullscreen API — position:fixed already covers screen
     const el=document.documentElement;
     if(el.requestFullscreen)el.requestFullscreen().catch(()=>{});
     return()=>{if(document.exitFullscreen&&document.fullscreenElement)document.exitFullscreen().catch(()=>{});};
-  },[isPresenter]);
+  },[isPresenter,isSolo]);
 
   if(locallyDismissed)return null;
 
@@ -5064,12 +5090,12 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
       <div style={{position:"absolute",top:0,left:0,right:0,padding:"1.4rem 2rem",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:15}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div style={{fontSize:".72rem",color:"rgba(255,255,255,.75)",letterSpacing:".14em",textTransform:"uppercase",fontWeight:600}}>{evt.name}</div>
-          {!isPresenter&&<div style={{background:"rgba(232,148,58,.18)",border:"1px solid rgba(232,148,58,.45)",borderRadius:20,padding:"3px 10px",fontSize:".65rem",color:"var(--amber)",fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:5}}><span style={{width:6,height:6,borderRadius:"50%",background:"var(--amber)",display:"inline-block",animation:"pulse 1.5s ease-in-out infinite"}}/>LIVE</div>}
+          {!isPresenter&&!isSolo&&<div style={{background:"rgba(232,148,58,.18)",border:"1px solid rgba(232,148,58,.45)",borderRadius:20,padding:"3px 10px",fontSize:".65rem",color:"var(--amber)",fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:5}}><span style={{width:6,height:6,borderRadius:"50%",background:"var(--amber)",display:"inline-block",animation:"pulse 1.5s ease-in-out infinite"}}/>LIVE</div>}
           {isPresenter&&isSecret&&!isIntro&&<div style={{background:isRevealed?"rgba(76,175,125,.18)":"rgba(224,85,85,.18)",border:`1px solid ${isRevealed?"rgba(76,175,125,.4)":"rgba(224,85,85,.4)"}`,borderRadius:20,padding:"3px 10px",fontSize:".65rem",color:isRevealed?"var(--green)":"var(--red)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase"}}>{isRevealed?"✓ Revealed":"🔒 Secret"}</div>}
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div style={{fontSize:".72rem",color:"rgba(255,255,255,.75)",padding:"4px 11px",border:"1px solid rgba(255,255,255,.25)",borderRadius:20,backdropFilter:"blur(6px)"}}>{idx+1} / {total}</div>
-          <button onClick={handleClose} onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,.18)";}} onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,.09)";}} style={{background:"rgba(255,255,255,.09)",border:"1px solid rgba(255,255,255,.18)",borderRadius:8,color:"rgba(255,255,255,.8)",padding:"7px 15px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,backdropFilter:"blur(8px)",transition:"background .15s"}}>{isPresenter?"✕ Exit":"✕ Hide"}</button>
+          <button onClick={handleClose} onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,.18)";}} onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,.09)";}} style={{background:"rgba(255,255,255,.09)",border:"1px solid rgba(255,255,255,.18)",borderRadius:8,color:"rgba(255,255,255,.8)",padding:"7px 15px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,backdropFilter:"blur(8px)",transition:"background .15s"}}>{(isPresenter||isSolo)?"✕ Exit":"✕ Hide"}</button>
         </div>
       </div>
 
@@ -5128,13 +5154,13 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
         )}
       </div>
 
-      {/* Prev button — presenter only */}
-      {isPresenter&&idx>0&&<button onClick={()=>goTo(idx-1)}
+      {/* Prev button — presenter and solo (free navigation) */}
+      {(isPresenter||isSolo)&&idx>0&&<button onClick={()=>goTo(idx-1)}
         onMouseEnter={e=>{e.currentTarget.style.background=isMobile?"rgba(255,255,255,.1)":"rgba(255,255,255,.15)";}}
         onMouseLeave={e=>{e.currentTarget.style.background=isMobile?"rgba(255,255,255,.03)":"rgba(255,255,255,.07)";}}
         style={{position:"absolute",left:0,top:"50%",transform:"translateY(-50%)",background:isMobile?"rgba(255,255,255,.03)":"rgba(255,255,255,.07)",border:isMobile?"none":"1px solid rgba(255,255,255,.14)",borderRadius:isMobile?"0 10px 10px 0":12,color:isMobile?"rgba(255,255,255,.5)":"#fff",width:isMobile?36:52,height:isMobile?72:52,cursor:"pointer",fontSize:isMobile?"1rem":"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",zIndex:15,transition:"background .15s",backdropFilter:"blur(8px)"}}>←</button>}
-      {/* Next button — presenter only */}
-      {isPresenter&&idx<total-1&&<button onClick={()=>goTo(idx+1)}
+      {/* Next button — presenter and solo (free navigation) */}
+      {(isPresenter||isSolo)&&idx<total-1&&<button onClick={()=>goTo(idx+1)}
         onMouseEnter={e=>{e.currentTarget.style.background=isMobile?"rgba(255,255,255,.1)":"rgba(255,255,255,.15)";}}
         onMouseLeave={e=>{e.currentTarget.style.background=isMobile?"rgba(255,255,255,.03)":"rgba(255,255,255,.07)";}}
         style={{position:"absolute",right:0,top:"50%",transform:"translateY(-50%)",background:isMobile?"rgba(255,255,255,.03)":"rgba(255,255,255,.07)",border:isMobile?"none":"1px solid rgba(255,255,255,.14)",borderRadius:isMobile?"10px 0 0 10px":12,color:isMobile?"rgba(255,255,255,.5)":"#fff",width:isMobile?36:52,height:isMobile?72:52,cursor:"pointer",fontSize:isMobile?"1rem":"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",zIndex:15,transition:"background .15s",backdropFilter:"blur(8px)"}}>→</button>}
@@ -5148,8 +5174,8 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
           const dotRevealed=dotSecret&&revealedSecrets.includes(si);
           const dotColor=i===idx?"var(--amber)":dotSecret?(dotRevealed?"rgba(76,175,125,.6)":"rgba(224,85,85,.5)"):"rgba(255,255,255,.2)";
           return(
-            <button key={i} onClick={()=>isPresenter&&goTo(i)}
-              style={{width:i===idx?22:7,height:7,borderRadius:4,background:dotColor,border:"none",cursor:isPresenter?"pointer":"default",padding:0,transition:"all .25s cubic-bezier(.4,0,.2,1)"}}/>
+            <button key={i} onClick={()=>(isPresenter||isSolo)&&goTo(i)}
+              style={{width:i===idx?22:7,height:7,borderRadius:4,background:dotColor,border:"none",cursor:(isPresenter||isSolo)?"pointer":"default",padding:0,transition:"all .25s cubic-bezier(.4,0,.2,1)"}}/>
           );
         })}
       </div>
