@@ -1,5 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { supabase, hashPin } from "./supabase.js";
+import { isSafeImageUrl, isSafeVideoUrl } from "./features/trailer/safeUrl.js";
+import { hasSeenTrailer } from "./features/trailer/seen.js";
+import { hasDismissedTeaser, dismissTeaser } from "./features/teaser/dismissed.js";
+
+// The app's first code split (technical spec `docs/trailer-technical-spec.md`
+// §3): keeps the trailer's weight out of the main chunk, loaded only when an
+// event page's "🎬 Watch the trailer" button is actually clicked.
+const EventTrailer = lazy(() => import("./features/trailer/EventTrailer.jsx"));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GLOBAL STYLES
@@ -87,8 +95,8 @@ const GS = () => (
 // ─────────────────────────────────────────────────────────────────────────────
 // PRIMITIVES
 // ─────────────────────────────────────────────────────────────────────────────
-const Card = ({children,style={},className=""}) => (
-  <div className={className} style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"1.4rem",...style}}>{children}</div>
+const Card = ({children,style={},className="",id}) => (
+  <div id={id} className={className} style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"1.4rem",...style}}>{children}</div>
 );
 const H = ({children,size="1.35rem",style={}}) => (
   <h2 style={{fontFamily:"var(--font-h)",fontSize:size,color:"var(--amber2)",marginBottom:".9rem",lineHeight:1.2,...style}}>{children}</h2>
@@ -128,6 +136,19 @@ const Inp = ({value,onChange,placeholder,style={},type="text",multiline=false,on
     : <input type={type} value={value} onChange={onChange} placeholder={placeholder} onKeyDown={onKeyDown} autoFocus={autoFocus} style={{...base,...style}}/>;
 };
 const Lbl = ({children}) => <div style={{fontSize:".75rem",color:"var(--muted)",letterSpacing:".06em",textTransform:"uppercase",marginBottom:5}}>{children}</div>;
+// Accessible on/off toggle -- a real `<button role="switch">` (native
+// Enter/Space activation + a visible focus ring for free), unlike the
+// ad-hoc `<div onClick>` `Toggle` scoped inside PollsTab (not reachable from
+// here, and not keyboard-operable). 42x24 hit area clears WCAG 2.2's 24x24
+// minimum target size.
+const Switch = ({checked,onChange,label,id}) => (
+  <div style={{display:"flex",alignItems:"center",gap:10}}>
+    <button type="button" id={id} role="switch" aria-checked={checked} onClick={()=>onChange(!checked)} style={{width:42,height:24,borderRadius:12,border:`1px solid ${checked?"var(--amber)":"var(--border)"}`,background:checked?"var(--amber)":"var(--bg3)",position:"relative",cursor:"pointer",padding:0,flexShrink:0}}>
+      <span aria-hidden="true" style={{position:"absolute",top:2,left:checked?20:2,width:18,height:18,borderRadius:"50%",background:checked?"#1a1008":"var(--muted2)",transition:"left .15s"}}/>
+    </button>
+    {label&&<label htmlFor={id} style={{fontSize:".83rem",color:"var(--cream)",cursor:"pointer"}}>{label}</label>}
+  </div>
+);
 const Tag = ({children,color="var(--amber)"}) => (
   <span style={{background:color+"22",color,border:`1px solid ${color}33`,borderRadius:6,padding:"3px 10px",fontSize:".73rem",fontWeight:600}}>{children}</span>
 );
@@ -138,11 +159,23 @@ const Avatar = ({name,size=32,index=0,photoUrl="",style={}}) => {
 };
 const getUA=(name,users=[])=>{const u=users.find(x=>x.username?.toLowerCase()===name?.toLowerCase());return{index:u?.animal_avatar??u?.avatar??0,photoUrl:u?.photo_url||""};};
 const getDisplayName=(name,users=[])=>{const u=users.find(x=>x.username?.toLowerCase()===name?.toLowerCase());return u?.display_name||name;};
-const Modal = ({children,onClose,maxWidth=500}) => {
+const Tooltip=({label,children})=>{
+  const [show,setShow]=useState(false);
+  return(
+    <div style={{position:"relative",display:"inline-flex"}} onMouseEnter={()=>setShow(true)} onMouseLeave={()=>setShow(false)}>
+      {children}
+      {show&&label&&<div style={{position:"absolute",bottom:"calc(100% + 6px)",left:"50%",transform:"translateX(-50%)",background:"rgba(15,15,20,.97)",border:"1px solid var(--border2)",borderRadius:6,padding:"3px 8px",fontSize:".7rem",color:"#fff",whiteSpace:"nowrap",pointerEvents:"none",zIndex:200,boxShadow:"0 2px 8px rgba(0,0,0,.4)"}}>
+        {label}
+        <div style={{position:"absolute",top:"100%",left:"50%",transform:"translateX(-50%)",width:0,height:0,border:"5px solid transparent",borderTopColor:"rgba(15,15,20,.97)"}}/>
+      </div>}
+    </div>
+  );
+};
+const Modal = ({children,onClose,maxWidth=500,onBackdropClose}) => {
   const ready=useRef(false);
   useEffect(()=>{const t=setTimeout(()=>{ready.current=true;},350);return()=>clearTimeout(t);},[]);
   return (
-  <div className="ov" onClick={()=>{if(ready.current)onClose();}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
+  <div className="ov" onClick={()=>{if(ready.current)(onBackdropClose||onClose)();}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
     <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth,maxHeight:"92vh",overflowY:"auto"}}>
       <Card style={{padding:"1.8rem"}}>{children}</Card>
     </div>
@@ -150,15 +183,14 @@ const Modal = ({children,onClose,maxWidth=500}) => {
   );
 };
 const RoleBadge = ({role}) => {
-  const m={
-    admin:{color:"var(--amber)",label:"Admin"},
-    organisation:{color:"var(--purple)",label:"Organisation"},
-    lad:{color:"var(--green)",label:"Lad"},
-    member:{color:"var(--green)",label:"Lad"},
-    pending:{color:"var(--muted)",label:"Pending"},
-  };
-  const r=m[role]||m.pending;
-  return <Tag color={r.color}>{r.label}</Tag>;
+  const badges=[];
+  if(hasAdmin({role}))badges.push({color:"var(--amber)",label:"Admin"});
+  if(hasOrg({role}))badges.push({color:"var(--purple)",label:"Org"});
+  if(!badges.length){
+    if(role==="lad"||role==="member")badges.push({color:"var(--green)",label:"Lad"});
+    else badges.push({color:"var(--muted)",label:"Pending"});
+  }
+  return <>{badges.map(b=><Tag key={b.label} color={b.color}>{b.label}</Tag>)}</>;
 };
 const Divider = ({label}) => (
   <div style={{display:"flex",alignItems:"center",gap:12,margin:".5rem 0"}}>
@@ -171,18 +203,20 @@ const Divider = ({label}) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // PERMISSIONS
 // ─────────────────────────────────────────────────────────────────────────────
-const ACTIVE_ROLES=["admin","organisation","lad","member"];
+const ACTIVE_ROLES=["admin","admin+org","org","organisation","lad","member"];
+const hasAdmin=u=>["admin","admin+org"].includes(u?.role);
+const hasOrg=u=>["org","admin+org","organisation"].includes(u?.role);
 const can = {
-  editEvent:    u=>u?.role==="admin",
-  manageUsers:  u=>u?.role==="admin",
-  addWinner:    u=>u?.role==="admin",
-  editSchedule: u=>["admin","organisation"].includes(u?.role),
-  createPoll:   u=>["admin","organisation"].includes(u?.role),
-  closePoll:    u=>["admin","organisation"].includes(u?.role),
-  deletePoll:   u=>["admin","organisation"].includes(u?.role),
-  deletePhoto:  u=>u?.role==="admin",
-  hostQuiz:     u=>["admin","organisation"].includes(u?.role),
-  announce:     u=>["admin","organisation"].includes(u?.role),
+  editEvent:    u=>hasAdmin(u),
+  manageUsers:  u=>hasAdmin(u),
+  addWinner:    u=>hasAdmin(u)||hasOrg(u),
+  editSchedule: u=>hasOrg(u),
+  createPoll:   u=>hasOrg(u),
+  closePoll:    u=>hasOrg(u),
+  deletePoll:   u=>hasOrg(u),
+  deletePhoto:  u=>hasAdmin(u),
+  hostQuiz:     u=>hasOrg(u),
+  announce:     u=>hasAdmin(u)||hasOrg(u),
   vote:         u=>ACTIVE_ROLES.includes(u?.role),
   uploadPhoto:  u=>ACTIVE_ROLES.includes(u?.role),
   reactPhoto:   u=>ACTIVE_ROLES.includes(u?.role),
@@ -250,6 +284,156 @@ const computeMemberStats=(username,events)=>{
   const mentions=[];
   events.forEach(e=>{(e.winners||[]).forEach(w=>{if(w.winner.toLowerCase()===n)mentions.push({...w,eventName:e.name});});});
   return{mensdays,weekends,quizWins,mentions,total:mensdays+weekends};
+};
+// Formats a single date, or a start–end range when endDateStr is a different
+// day, in nl-NL. Falls back to the plain single-day format (unchanged from
+// pre-multi-day behaviour) whenever there's no end date or it equals the
+// start date. opts.weekday/opts.year toggle those parts (both default true),
+// opts.month picks "long"|"short" (default "long"). Defensive against a
+// reversed range (endDateStr before dateStr, e.g. bad/legacy data) -- the
+// earlier date always renders first rather than producing garbled output.
+const formatEventDateRange=(dateStr,endDateStr,opts={})=>{
+  if(!dateStr)return"";
+  const{weekday=true,year=true,month="long"}=opts;
+  const start=new Date(dateStr+"T12:00:00");
+  const hasRange=!!endDateStr&&endDateStr!==dateStr;
+  if(!hasRange){
+    const o={day:"numeric",month};
+    if(weekday)o.weekday="long";
+    if(year)o.year="numeric";
+    return start.toLocaleDateString("nl-NL",o);
+  }
+  const endRaw=new Date(endDateStr+"T12:00:00");
+  const[from,to]=endRaw<start?[endRaw,start]:[start,endRaw];
+  const sameYear=from.getFullYear()===to.getFullYear();
+  const sameMonth=sameYear&&from.getMonth()===to.getMonth();
+  const wd=dt=>weekday?`${dt.toLocaleDateString("nl-NL",{weekday:"short"})} `:"";
+  const showYear=year||!sameYear;
+  const endStr=`${wd(to)}${to.getDate()} ${to.toLocaleDateString("nl-NL",{month})}${showYear?` ${to.getFullYear()}`:""}`;
+  const startStr=sameMonth
+    ?`${wd(from)}${from.getDate()}`
+    :`${wd(from)}${from.getDate()} ${from.toLocaleDateString("nl-NL",{month})}${!sameYear?` ${from.getFullYear()}`:""}`;
+  return`${startStr} – ${endStr}`;
+};
+// Number of calendar days an event spans (inclusive), `date` as day 0 and
+// `end_date` (if any) as the last day. No end_date, blank, or equal-to-date
+// all mean a single-day event (returns 1). Defensive against a reversed
+// range the same way formatEventDateRange is.
+const eventDayCount=(dateStr,endDateStr)=>{
+  if(!dateStr||!endDateStr||endDateStr===dateStr)return 1;
+  const start=new Date(dateStr+"T12:00:00");
+  const end=new Date(endDateStr+"T12:00:00");
+  const days=Math.round(Math.abs(end-start)/86400000);
+  return days+1;
+};
+// Maps a schedule stop's 0-based `day` index to its actual calendar date,
+// offset from the event's start `date` (day:0 = the start date itself).
+// Deliberately date-derived rather than stored, so moving the whole event
+// (editing `date`) keeps every stop correctly attached instead of orphaning
+// them -- see the `day` field on schedule stops.
+const dateForEventDay=(dateStr,dayIndex)=>{
+  if(!dateStr)return"";
+  const d=new Date(dateStr+"T12:00:00");
+  d.setDate(d.getDate()+(dayIndex||0));
+  return d.toISOString().slice(0,10);
+};
+// Human label for a schedule day group/heading, e.g. "Dag 1 · vrijdag 12 september".
+const dayHeadingLabel=(dateStr,dayIndex)=>{
+  const iso=dateForEventDay(dateStr,dayIndex);
+  const suffix=iso?` · ${new Date(iso+"T12:00:00").toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long"})}`:"";
+  return`Dag ${(dayIndex||0)+1}${suffix}`;
+};
+// Sort comparator for schedule stops: day first (missing/undefined treated
+// as 0, i.e. pre-multi-day stops), then time-of-day within the day. Stable
+// (ties keep their existing relative order) so manual reordering via the
+// editor's ↑/↓ still shows through whenever times are equal or blank.
+const scheduleDayTimeOrder=(a,b)=>((a.day??0)-(b.day??0))||(a.time||"").localeCompare(b.time||"");
+// Boundary adapter for the trailer feature (src/features/trailer/). The
+// trailer now plays the event's real, owner-produced video and ends on a
+// single end-card view -- direction change from the owner, 2026-08-21. The
+// beat-engine this used to feed (schedule montage, secret tease, "reigning
+// champion" legacy nod scanning every archived edition) has no consumer any
+// more and was deleted outright, not just unwired -- see `findChampion`'s
+// removal in the same change. Produces a plain, serialisable view model with
+// exactly what the end card needs: roster, kretjes, event identity, the
+// video URL. Keep the `const NAME=(...)=>{ ... };` shape: the
+// source-extraction test helpers in src/test/ match on it.
+// `kretjes` is the all-time total across every event, not this one's --
+// 2026-08-21 owner direction change (matches `Home`'s own
+// `events.reduce((s,e)=>s+(e.kretjes||0),0)` total at the top of the app).
+// Needs the full `events` list for that, hence the third param. Guarded with
+// the same `Number.isFinite` check `Home` doesn't bother with but this file
+// already applies elsewhere below -- `kretjes` is hand-editable JSONB-
+// adjacent data, so a stray string/null on any one event must not corrupt
+// the sum via string concatenation.
+const toTrailerInput=(evt,users=[],events=[])=>{
+  const going=(evt.attendees||[]).filter(a=>a.status==="going")
+    .slice(0,12).map(a=>({name:getDisplayName(a.name,users),...getUA(a.name,users)}));
+  return{
+    eventId:evt.id,name:evt.name||"",
+    videoUrl:isSafeVideoUrl(evt.trailer_video_url)?evt.trailer_video_url:"",
+    kretjes:events.reduce((s,e)=>s+(Number.isFinite(e.kretjes)?e.kretjes:0),0),
+    goingCount:(evt.attendees||[]).filter(a=>a.status==="going").length,
+    going:going.map(g=>({name:g.name,photoUrl:isSafeImageUrl(g.photoUrl)?g.photoUrl:"",avatarIndex:g.index??0})),
+  };
+};
+// ─────────────────────────────────────────────────────────────────────────────
+// LOGIN TEASER (owner request, 2026-08-21): an admin-configurable modal that
+// greets users on entry and routes them to an event's trailer. Lives next to
+// the trailer adapter above because both read the same
+// `trailer_video_url`/`teaser_*` event columns and exist for the same
+// reason: getting the trailer actually watched.
+//
+// Selection rule: any NON-archived event with `teaser_active` AND a valid
+// `trailer_video_url` (same `isSafeVideoUrl` guard `canTrailer` uses on the
+// event page, so a teaser can never point its own button at a dead end).
+// Deliberately NOT filtered on the event being upcoming -- direct owner
+// instruction: "it doesn't matter when the event is... the feature should
+// work regardless of when an event is." A date comparison would
+// second-guess the admin's own `teaser_active` decision; archiving is the
+// deliberate way to retire a teaser (`isPast` is `evt.archived`, not
+// date-derived, same as the event page). Among qualifying events the
+// soonest `date` wins.
+//
+// No-video edge case: handled right here, at selection, by simply excluding
+// that event from the candidate pool -- NOT by suppressing the whole
+// feature or pointing the button at the event page instead. That way, if a
+// different qualifying event DOES have a valid video, the teaser still
+// shows for that one; only an admin flipping `teaser_active` on with no
+// video AND no other qualifying event stays silent (same "no qualifying
+// event -> nothing shows" rule as any other empty-candidates case).
+const selectTeaserEvent=(events=[])=>{
+  const candidates=events.filter(e=>!e.archived&&e.teaser_active&&isSafeVideoUrl(e.trailer_video_url));
+  if(!candidates.length)return null;
+  return[...candidates].sort((a,b)=>new Date(a.date)-new Date(b.date))[0];
+};
+// Purely presentational -- no localStorage, no navigation, no Supabase. The
+// caller decides what "watch"/"skip" actually mean: the real App-root mount
+// wires them to navigation + dismissal/seen-state (see `App`'s "teaser"
+// state below), while EditEventModal/NewEventModal's preview affordance
+// wires both to just closing the preview -- so an admin can check their own
+// teaser copy any number of times without ever touching the real
+// dismissed-state, which would otherwise cost them their only look at their
+// own teaser the moment they tried it once.
+// Sensible fallbacks for a blank title/text/button label: an
+// active-but-unconfigured teaser must never render an empty dialog or a
+// button with no label.
+const TeaserModal=({evt,onWatch,onSkip})=>{
+  const title=evt.teaser_title?.trim()||"🎬 A new trailer just dropped";
+  const text=evt.teaser_text?.trim()||`Get hyped for ${evt.name||"the next Mensdag"} — the trailer is ready.`;
+  const buttonLabel=evt.teaser_button_label?.trim()||"🎬 Watch the trailer";
+  return(
+    <Modal onClose={onSkip} onBackdropClose={()=>{}} maxWidth={440}>
+      <div role="dialog" aria-modal="true" aria-label={title}>
+        <H>{title}</H>
+        <div style={{color:"var(--cream)",fontSize:".92rem",lineHeight:1.6,opacity:.9,marginBottom:"1.3rem"}}>{text}</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <Btn onClick={onWatch} variant="gold">{buttonLabel}</Btn>
+          <Btn onClick={onSkip} variant="ghost">Skip</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
 };
 const ICONS=["📍","🍺","🏎️","🎯","🧠","🍽️","🍝","🍹","🎳","🔐","🎤","🎲","🏆","🚗","🎉","🍻","🎸","🏄","⚽","🎾","🎨","🎭"];
 const TROPHY_ICONS=["🏆","🥇","🥈","🥉","🎯","🧠","🍺","😴","😅","📸","🎤","🏎️","🔐","🎳","🎲","👑","💀","🤡","🎖️","⚡","🦆","🐐"];
@@ -338,7 +522,7 @@ const AuthShell = ({children}) => (
     <GS/><div style={{width:"100%",maxWidth:420}}>
       <div style={{textAlign:"center",marginBottom:"2rem"}}>
         <div style={{fontSize:"3.2rem",marginBottom:".4rem"}}>🍺</div>
-        <div style={{fontFamily:"var(--font-h)",fontSize:"2.2rem",color:"var(--amber2)"}}>MensDay</div>
+        <div style={{fontFamily:"var(--font-h)",fontSize:"2.2rem",color:"var(--amber2)"}}>MensApp</div>
         <div style={{color:"var(--muted)",fontSize:".8rem",letterSpacing:".08em",marginTop:4}}>THE ANNUAL GATHERING</div>
       </div>
       {children}
@@ -462,7 +646,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
         <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}}>
           {view!=="home"&&<button onClick={onBack} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Terug</button>}
           <div onClick={onHome} onMouseEnter={e=>e.currentTarget.style.opacity=".72"} onMouseLeave={e=>e.currentTarget.style.opacity=""} style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer",transition:"opacity .15s"}}>
-            {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":view==="teams"?"🎲 Team Creator":view==="timer"?"⏱ Timer":view==="sarajay"?"🤖 Sara Jay":eventName}
+            {view==="home"?"🍺 MensApp":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":view==="teams"?"🎲 Team Creator":view==="timer"?"⏱ Timer":view==="sarajay"?"🤖 Sara Jay":eventName}
           </div>
         </div>
         {!isMobile&&(
@@ -471,7 +655,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
             <button onClick={onHof} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
             <button onClick={onTeams} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🎲 Teams</button>
             <button onClick={onTimer} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⏱ Timer</button>
-            <button onClick={saraJayUnlocked?onSaraJay:undefined} className="nav-btn" style={{background:view==="sarajay"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:saraJayUnlocked?"var(--amber2)":"var(--muted)",padding:"5px 12px",cursor:saraJayUnlocked?"pointer":"not-allowed",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,opacity:saraJayUnlocked?1:.55}}>{saraJayUnlocked?"🤖":"🔒"} Sara Jay</button>
+            <button onClick={saraJayUnlocked?onSaraJay:undefined} className="nav-btn" style={{background:view==="sarajay"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:saraJayUnlocked?"var(--amber2)":"var(--muted)",padding:"5px 12px",cursor:saraJayUnlocked?"pointer":"not-allowed",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,opacity:saraJayUnlocked?1:.55}}>{saraJayUnlocked?"🤖 Sara Jay":"🔒 ???"}</button>
             {can.announce(currentUser)&&<button onClick={onAnnounce} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>📢 Announce</button>}
             {can.manageUsers(currentUser)&&<button onClick={onAdmin} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
             {bellBtn()}
@@ -498,7 +682,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
           <button onClick={()=>{onHof();setMenuOpen(false);}} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
           <button onClick={()=>{onTeams();setMenuOpen(false);}} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🎲 Team Creator</button>
           <button onClick={()=>{onTimer();setMenuOpen(false);}} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>⏱ Timer</button>
-          <button onClick={saraJayUnlocked?()=>{onSaraJay();setMenuOpen(false);}:undefined} className="nav-btn" style={{background:view==="sarajay"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:saraJayUnlocked?"var(--amber2)":"var(--muted)",padding:"10px 14px",cursor:saraJayUnlocked?"pointer":"not-allowed",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",opacity:saraJayUnlocked?1:.55}}>{saraJayUnlocked?"🤖":"🔒"} Sara Jay or JAI{!saraJayUnlocked?" · Binnenkort":""}</button>
+          <button onClick={saraJayUnlocked?()=>{onSaraJay();setMenuOpen(false);}:undefined} className="nav-btn" style={{background:view==="sarajay"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:saraJayUnlocked?"var(--amber2)":"var(--muted)",padding:"10px 14px",cursor:saraJayUnlocked?"pointer":"not-allowed",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",opacity:saraJayUnlocked?1:.55}}>{saraJayUnlocked?"🤖 Sara Jay or JAI":"🔒 ???"}</button>
           {can.announce(currentUser)&&<button onClick={()=>{onAnnounce();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>📢 Announce</button>}
           {can.manageUsers(currentUser)&&<button onClick={()=>{onAdmin();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:".7rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{pendingCount}</span>}</button>}
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"8px 14px"}}>
@@ -518,7 +702,20 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose,saraJayUnlocked,on
   const [tab,setTab]=useState("pending");
   const pending=users.filter(u=>u.role==="pending");
   const approved=users.filter(u=>u.role!=="pending");
-  const setRole=(id,role)=>onUpdateUsers(users.map(u=>u.id===id?{...u,role}:u));
+  const setRole=(id,newBaseRole)=>onUpdateUsers(users.map(u=>{
+    if(u.id!==id)return u;
+    const keepOrg=hasOrg(u);
+    let role=newBaseRole;
+    if(keepOrg&&newBaseRole==="admin")role="admin+org";
+    if(keepOrg&&(newBaseRole==="lad"||newBaseRole==="member"))role="org";
+    return{...u,role};
+  }));
+  const toggleOrg=id=>onUpdateUsers(users.map(u=>{
+    if(u.id!==id)return u;
+    const wasOrg=hasOrg(u);const isAdm=hasAdmin(u);
+    const role=wasOrg?(isAdm?"admin":"lad"):(isAdm?"admin+org":"org");
+    return{...u,role};
+  }));
   const reject=id=>onDeleteUser(id);
   const remove=id=>{if(window.confirm("Remove this user?"))onDeleteUser(id);};
   const tabBtn=(t,label)=>(
@@ -547,7 +744,7 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose,saraJayUnlocked,on
             <div style={{flex:1}}><div style={{fontWeight:600,fontSize:".95rem"}}>{u.username}</div><div style={{color:"var(--muted)",fontSize:".75rem"}}>Requested {new Date(u.joined_at).toLocaleDateString("nl-NL")}</div></div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
               <Btn onClick={()=>setRole(u.id,"lad")} variant="success" size="sm">✓ Lad</Btn>
-              <Btn onClick={()=>setRole(u.id,"organisation")} variant="ghost" size="sm" style={{color:"var(--purple)",borderColor:"rgba(155,127,232,.4)",fontSize:".73rem"}}>★ Org</Btn>
+              <Btn onClick={()=>onUpdateUsers(users.map(u2=>u2.id===u.id?{...u2,role:"org"}:u2))} variant="ghost" size="sm" style={{color:"var(--purple)",borderColor:"rgba(155,127,232,.4)",fontSize:".73rem"}}>★ Org</Btn>
               <Btn onClick={()=>setRole(u.id,"admin")} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"var(--border2)",fontSize:".73rem"}}>★ Admin</Btn>
               <Btn onClick={()=>reject(u.id)} variant="danger" size="sm">✕</Btn>
             </div>
@@ -579,12 +776,13 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose,saraJayUnlocked,on
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontWeight:600,fontSize:".92rem"}}>{u.username}</span><RoleBadge role={u.role}/></div>
               <div style={{color:"var(--muted)",fontSize:".73rem",marginTop:2}}>Joined {new Date(u.joined_at).toLocaleDateString("nl-NL")}</div>
             </div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {(u.role==="lad"||u.role==="member")&&<Btn onClick={()=>setRole(u.id,"organisation")} variant="ghost" size="sm" style={{color:"var(--purple)",borderColor:"rgba(155,127,232,.4)",fontSize:".73rem"}}>→ Org</Btn>}
-              {(u.role==="lad"||u.role==="member")&&<Btn onClick={()=>setRole(u.id,"admin")} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"var(--border2)",fontSize:".73rem"}}>→ Admin</Btn>}
-              {u.role==="organisation"&&<Btn onClick={()=>setRole(u.id,"admin")} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"var(--border2)",fontSize:".73rem"}}>→ Admin</Btn>}
-              {u.role==="organisation"&&<Btn onClick={()=>setRole(u.id,"lad")} variant="ghost" size="sm" style={{fontSize:".73rem"}}>↓ Lad</Btn>}
-              {u.role==="admin"&&<Btn onClick={()=>setRole(u.id,"organisation")} variant="ghost" size="sm" style={{color:"var(--purple)",borderColor:"rgba(155,127,232,.4)",fontSize:".73rem"}}>↓ Org</Btn>}
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+              {hasAdmin(u)
+                ?<Btn onClick={()=>setRole(u.id,"lad")} variant="ghost" size="sm" style={{fontSize:".73rem"}}>↓ Lad</Btn>
+                :<Btn onClick={()=>setRole(u.id,"admin")} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"rgba(232,148,58,.4)",fontSize:".73rem"}}>→ Admin</Btn>}
+              <Btn onClick={()=>toggleOrg(u.id)} variant="ghost" size="sm" style={{color:hasOrg(u)?"var(--purple)":"var(--muted2)",borderColor:hasOrg(u)?"rgba(155,127,232,.45)":"var(--border)",fontSize:".73rem"}}>
+                {hasOrg(u)?"★ Org":"☆ Org"}
+              </Btn>
               <Btn onClick={()=>remove(u.id)} variant="danger" size="sm" style={{fontSize:".73rem"}}>✕</Btn>
             </div>
           </div>
@@ -666,7 +864,7 @@ const HallOfFame = ({events,users=[]}) => {
       <div className="fu2">
         <H>📅 Attendance Record</H>
         {attendance.slice(0,3).length>0&&(
-          <div style={{display:"flex",alignItems:"flex-end",justifyContent:"center",gap:"1rem",marginBottom:"1.5rem",height:160}}>
+          <div style={{display:"flex",alignItems:"flex-end",justifyContent:"center",gap:"1rem",marginBottom:"1.5rem"}}>
             {[attendance[1],attendance[0],attendance[2]].filter(Boolean).map((p,i)=>{
               const realIdx=i===0?1:i===1?0:2;
               const h=[120,160,90][realIdx];
@@ -794,8 +992,8 @@ const MemberCard=({user,events,onClick,isMe})=>{
 
 const MembersPage=({users,events,onOpenMember,currentUser})=>{
   const members=users.filter(u=>u.role!=="pending").sort((a,b)=>{
-    if(a.role==="admin"&&b.role!=="admin")return -1;
-    if(b.role==="admin"&&a.role!=="admin")return 1;
+    if(hasAdmin(a)&&!hasAdmin(b))return -1;
+    if(hasAdmin(b)&&!hasAdmin(a))return 1;
     return new Date(a.joined_at)-new Date(b.joined_at);
   });
   return(
@@ -893,7 +1091,7 @@ const EditProfileModal=({user,onSave,onClose})=>{
   };
   const save=()=>onSave({display_name:displayName.trim()||null,age:age?parseInt(age):null,bio:bio.trim()||null,animal_avatar:animalAvatar,photo_url:photoUrl||null});
   return(
-    <Modal onClose={onClose} maxWidth={460}>
+    <Modal onClose={onClose} onBackdropClose={save} maxWidth={460}>
       <H>Profiel bewerken</H>
       <div style={{display:"grid",gap:"1.1rem"}}>
         <div style={{textAlign:"center"}}>
@@ -922,9 +1120,10 @@ const EditProfileModal=({user,onSave,onClose})=>{
         <div><Lbl>Weergavenaam</Lbl><Inp value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder={user.username}/></div>
         <div><Lbl>Leeftijd</Lbl><Inp value={age} onChange={e=>setAge(e.target.value.replace(/\D/g,""))} placeholder="bijv. 28"/></div>
         <div><Lbl>Bio / tagline</Lbl><Inp value={bio} onChange={e=>setBio(e.target.value)} placeholder="Korte beschrijving…" multiline rows={2}/></div>
-        <div style={{display:"flex",gap:8,marginTop:4}}>
+        <div style={{display:"flex",gap:8,marginTop:4,alignItems:"center",flexWrap:"wrap"}}>
           <Btn onClick={save}>Opslaan</Btn>
-          <Btn onClick={onClose} variant="ghost">Annuleren</Btn>
+          <Btn onClick={onClose} variant="ghost">Discard changes</Btn>
+          <span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span>
         </div>
       </div>
     </Modal>
@@ -935,8 +1134,10 @@ const EditProfileModal=({user,onSave,onClose})=>{
 // HOME
 // ─────────────────────────────────────────────────────────────────────────────
 const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onSaraJay,saraJayUnlocked}) => {
-  const upcoming=events.filter(e=>!e.archived).sort((a,b)=>new Date(a.date)-new Date(b.date));
-  const past=events.filter(e=>e.archived).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const isMobile=useIsMobile();
+  const isOver=e=>e.archived||new Date(`${e.end_date||e.date}T${e.end_time||"23:59"}:00`)<new Date();
+  const upcoming=events.filter(e=>!isOver(e)).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const past=events.filter(e=>isOver(e)).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const nextEvt=upcoming[0];
   const goingLads=nextEvt?nextEvt.attendees.filter(a=>a.status==="going"):[];
   const totalEditions=events.length;
@@ -947,17 +1148,17 @@ const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onSaraJa
     <div style={{display:"grid",gap:"2.5rem"}}>
 
       {/* ── HERO ── */}
-      <div className="fu" style={{textAlign:"center",padding:"3rem 0 .5rem",position:"relative"}}>
+      <div className="fu" style={{textAlign:"center",padding:isMobile?"1.2rem 0 .3rem":"3rem 0 .5rem",position:"relative"}}>
         <div style={{position:"absolute",inset:0,background:"var(--hero-glow)",pointerEvents:"none"}}/>
-        <div className="float" style={{fontSize:"4.5rem",marginBottom:".5rem",display:"inline-block"}}>🍺</div>
-        <h1 style={{fontFamily:"var(--font-h)",fontStyle:"italic",fontSize:"clamp(3rem,10vw,6rem)",color:"var(--amber2)",lineHeight:.9,letterSpacing:"-.02em",marginBottom:".6rem"}}>MENSDAY</h1>
-        <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:12,marginBottom:"1.2rem"}}>
+        <div className="float" style={{fontSize:isMobile?"2.8rem":"4.5rem",marginBottom:isMobile?".2rem":".5rem",display:"inline-block"}}>🍺</div>
+        <h1 style={{fontFamily:"var(--font-h)",fontStyle:"italic",fontSize:isMobile?"2.6rem":"clamp(3rem,10vw,6rem)",color:"var(--amber2)",lineHeight:.9,letterSpacing:"-.02em",marginBottom:isMobile?".4rem":".6rem"}}>MENSAPP</h1>
+        <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:12,marginBottom:isMobile?".8rem":"1.2rem"}}>
           <div style={{height:1,flex:1,maxWidth:60,background:"linear-gradient(to right,transparent,var(--border2))"}}/>
           <span style={{color:"var(--muted)",fontSize:".72rem",letterSpacing:".25em",textTransform:"uppercase"}}>{hype}</span>
           <div style={{height:1,flex:1,maxWidth:60,background:"linear-gradient(to left,transparent,var(--border2))"}}/>
         </div>
         {totalEditions>0&&(
-          <div style={{display:"inline-flex",gap:"2rem",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:50,padding:".6rem 2rem",flexWrap:"wrap",justifyContent:"center"}}>
+          <div style={{display:"inline-flex",gap:isMobile?".8rem":"2rem",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:50,padding:isMobile?".45rem 1.2rem":".6rem 2rem",flexWrap:"nowrap",justifyContent:"center"}}>
             {[
               [goingLads.length,"Lads In 🔥"],
               [totalEditions,"Editions 🏆"],
@@ -965,8 +1166,8 @@ const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onSaraJa
               [kretjes,"Kretjes 🍺"],
             ].map(([v,l])=>(
               <div key={l} style={{textAlign:"center"}}>
-                <div style={{fontFamily:"var(--font-h)",fontSize:"1.6rem",color:"var(--amber)",lineHeight:1}}>{v}</div>
-                <div style={{fontSize:".62rem",color:"var(--muted)",letterSpacing:".12em",textTransform:"uppercase",marginTop:2}}>{l}</div>
+                <div style={{fontFamily:"var(--font-h)",fontSize:isMobile?"1.15rem":"1.6rem",color:"var(--amber)",lineHeight:1}}>{v}</div>
+                <div style={{fontSize:isMobile?".55rem":".62rem",color:"var(--muted)",letterSpacing:".1em",textTransform:"uppercase",marginTop:2}}>{l}</div>
               </div>
             ))}
           </div>
@@ -1014,7 +1215,7 @@ const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onSaraJa
               onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="";}}
               style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"1.5rem 1.4rem",cursor:isLocked?"not-allowed":"pointer",transition:"all .2s cubic-bezier(.4,0,.2,1)",display:"flex",flexDirection:"column",gap:".65rem",opacity:isLocked?.65:1}}>
               <div style={{fontSize:"2.2rem",lineHeight:1}}>{icon}</div>
-              <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:color,lineHeight:1.2}}>{title}</div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:color,lineHeight:1.2}}>{isLocked?"???" : title}</div>
               <div style={{fontSize:".82rem",color:"var(--muted)",lineHeight:1.5}}>{desc}</div>
               <div style={{marginTop:"auto",paddingTop:".5rem",fontSize:".75rem",color:color,opacity:.7,fontWeight:600,letterSpacing:".04em"}}>{isLocked?"Binnenkort beschikbaar":"Openen →"}</div>
             </div>
@@ -1042,8 +1243,13 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
   const countdown=useCountdown(evt.date,evt.start_time);
   const myStatus=evt.attendees.find(a=>a.name.toLowerCase()===currentUser?.username.toLowerCase())?.status;
   const colorOf=s=>statusMap[s]?.color??"var(--muted)";
-  const isUpcoming=!evt.archived&&!countdown.past;
+  const isMobile=useIsMobile();
   const myStatusColor=myStatus?colorOf(myStatus):"var(--muted)";
+  const _now=new Date();
+  const _start=new Date(`${evt.date}T${evt.start_time||"00:00"}:00`);
+  const _end=new Date(`${evt.end_date||evt.date}T${evt.end_time||"23:59"}:00`);
+  const isLive=!evt.archived&&_now>=_start&&_now<=_end;
+  const isUpcoming=!evt.archived&&!countdown.past&&!isLive;
 
   if(compact) return(
     <div className="event-card-upcoming" style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",cursor:"pointer",position:"relative",overflow:"hidden",display:"flex",alignItems:"center",gap:"1rem"}}
@@ -1054,7 +1260,7 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
       <div style={{flex:1,minWidth:0}}>
         <div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:"var(--amber2)"}}>{evt.name}</div>
         <div style={{color:"var(--muted)",fontSize:".73rem",marginTop:2}}>
-          {new Date(evt.date).toLocaleDateString("nl-NL",{day:"numeric",month:"long"})}
+          {formatEventDateRange(evt.date,evt.end_date,{weekday:false,year:false})}
           {evt.location&&evt.location!=="TBD"&&` · ${evt.location}`}
         </div>
       </div>
@@ -1067,21 +1273,27 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
   );
 
   return(
-    <div className={`event-card-upcoming${isUpcoming?" glow-pulse":""}`}
-      style={{background:isUpcoming?"linear-gradient(135deg,#1a1008,#221608,#1a1008)":"var(--bg2)",border:`1px solid ${isUpcoming?"rgba(232,148,58,.3)":"var(--border)"}`,borderRadius:"var(--radius)",cursor:"pointer",position:"relative",overflow:"hidden"}}
+    <div className={`event-card-upcoming${isLive?" live-pulse":isUpcoming?" glow-pulse":""}`}
+      style={{background:isLive?"linear-gradient(135deg,#081a0e,#0f2214,#081a0e)":isUpcoming?"linear-gradient(135deg,#1a1008,#221608,#1a1008)":"var(--bg2)",border:`1px solid ${isLive?"rgba(76,175,125,.45)":isUpcoming?"rgba(232,148,58,.3)":"var(--border)"}`,borderRadius:"var(--radius)",cursor:"pointer",position:"relative",overflow:"hidden"}}
       onClick={()=>onOpen(evt.id)}>
 
       {/* Top accent bar */}
-      {isUpcoming&&<div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,var(--orange),var(--amber),var(--gold),var(--amber))",backgroundSize:"200% 100%",animation:"goldShimmer 3s linear infinite"}}/>}
+      {(isUpcoming||isLive)&&<div style={{position:"absolute",top:0,left:0,right:0,height:3,background:isLive?"linear-gradient(90deg,var(--green),#52c41a,var(--green),#52c41a)":"linear-gradient(90deg,var(--orange),var(--amber),var(--gold),var(--amber))",backgroundSize:"200% 100%",animation:"goldShimmer 3s linear infinite"}}/>}
 
       {/* Main content */}
       <div style={{padding:"1.4rem"}}>
-        <div style={{display:"flex",gap:"1.2rem",alignItems:"flex-start"}}>
-          <div style={{flex:1,minWidth:0}}>
+        <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:"1.2rem",alignItems:"flex-start"}}>
+          <div style={{flex:1,minWidth:0,width:"100%"}}>
             {/* Tags */}
             <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap",alignItems:"center"}}>
               <Tag color={evt.type==="weekend"?"var(--purple)":"var(--amber)"}>{evt.type==="weekend"?"🏕️ Weekend":"📅 Day Event"}</Tag>
               {evt.theme&&<Tag color="var(--gold)">✨ {evt.theme}</Tag>}
+              {isLive&&(
+                <span style={{background:"rgba(76,175,125,.18)",color:"var(--green)",border:"1px solid rgba(76,175,125,.45)",borderRadius:6,padding:"3px 10px",fontSize:".72rem",fontWeight:700,display:"flex",alignItems:"center",gap:5}}>
+                  <span style={{width:7,height:7,borderRadius:"50%",background:"var(--green)",display:"inline-block",animation:"pulse 1.1s ease-in-out infinite"}}/>
+                  HAPPENING NOW
+                </span>
+              )}
               {myStatus&&(
                 <span style={{background:myStatusColor+"22",color:myStatusColor,border:`1px solid ${myStatusColor}44`,borderRadius:6,padding:"3px 10px",fontSize:".72rem",fontWeight:700}}>
                   {myStatus==="going"?"🔒 Locked In":myStatus==="maybe"?"🤔 Maybe":myStatus==="not coming"?"❌ Can't Make It":statusMap[myStatus]?.label}
@@ -1094,7 +1306,7 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
 
             {/* Date / location */}
             <div style={{color:"var(--muted)",fontSize:".82rem",marginBottom:4}}>
-              {new Date(evt.date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+              {formatEventDateRange(evt.date,evt.end_date)}
               {evt.start_time&&<span style={{color:"var(--amber)",marginLeft:6}}>⏰ {evt.start_time}{evt.end_time&&`–${evt.end_time}`}</span>}
               {evt.location&&evt.location!=="TBD"&&<span style={{marginLeft:6}}>· 📍 {evt.location}</span>}
             </div>
@@ -1106,16 +1318,25 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
             </div>
           </div>
 
-          {/* Right: countdown or year */}
-          <div style={{flexShrink:0,textAlign:"center"}}>
-          {isUpcoming?(
-            <div style={{background:"rgba(232,148,58,.08)",border:"1px solid rgba(232,148,58,.2)",borderRadius:12,padding:".8rem .9rem"}}>
-              <div style={{fontSize:".6rem",color:"var(--amber)",letterSpacing:".15em",textTransform:"uppercase",marginBottom:6}}>Happening in</div>
-              <div style={{display:"flex",gap:4,alignItems:"flex-end"}}>
-                {[["d","d"],["h","h"],["m","m"]].map(([k,l])=>(
-                  <div key={k} style={{textAlign:"center",minWidth:28}}>
-                    <div style={{fontFamily:"var(--font-h)",fontSize:"1.6rem",color:"var(--amber2)",lineHeight:1,fontWeight:900}}>{String(countdown[k]??0).padStart(2,"0")}</div>
-                    <div style={{fontSize:".55rem",color:"var(--muted)",letterSpacing:".1em"}}>{l}</div>
+          {/* Right: live / countdown / year */}
+          <div style={{flexShrink:0,textAlign:"center",width:isMobile?"100%":"auto"}}>
+          {isLive?(
+            <div style={{background:"rgba(76,175,125,.08)",border:"1px solid rgba(76,175,125,.3)",borderRadius:12,padding:isMobile?"1rem 1.4rem":".9rem 1.2rem",display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <span style={{width:8,height:8,borderRadius:"50%",background:"var(--green)",display:"inline-block",animation:"pulse 1.1s ease-in-out infinite"}}/>
+                <span style={{fontSize:".6rem",color:"var(--green)",letterSpacing:".18em",textTransform:"uppercase",fontWeight:700}}>Live nu</span>
+              </div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:isMobile?"3rem":"2.2rem",lineHeight:1,color:"var(--green)"}}>⚡</div>
+              {evt.end_time&&<div style={{fontSize:".65rem",color:"rgba(76,175,125,.65)",letterSpacing:".08em"}}>tot {evt.end_time}</div>}
+            </div>
+          ):isUpcoming?(
+            <div style={{background:"rgba(232,148,58,.08)",border:"1px solid rgba(232,148,58,.2)",borderRadius:12,padding:isMobile?"1rem 1.2rem":".8rem .9rem"}}>
+              <div style={{fontSize:".6rem",color:"var(--amber)",letterSpacing:".15em",textTransform:"uppercase",marginBottom:8}}>Happening in</div>
+              <div style={{display:"flex",gap:isMobile?0:4,alignItems:"flex-end",justifyContent:isMobile?"space-around":"flex-start"}}>
+                {[["d","days"],["h","hrs"],["m","min"]].map(([k,l])=>(
+                  <div key={k} style={{textAlign:"center",flex:isMobile?1:undefined,minWidth:isMobile?0:28}}>
+                    <div style={{fontFamily:"var(--font-h)",fontSize:isMobile?"2.4rem":"1.6rem",color:"var(--amber2)",lineHeight:1,fontWeight:900}}>{String(countdown[k]??0).padStart(2,"0")}</div>
+                    <div style={{fontSize:isMobile?".7rem":".55rem",color:"var(--muted)",letterSpacing:".08em",marginTop:4}}>{l}</div>
                   </div>
                 ))}
               </div>
@@ -1128,13 +1349,14 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
           )}
           </div>
         </div>
-        {evt.description&&<div style={{color:"var(--cream)",opacity:.6,fontSize:".84rem",lineHeight:1.5,marginTop:".75rem",borderTop:"1px solid rgba(232,148,58,.08)",paddingTop:".7rem"}} dangerouslySetInnerHTML={{__html:renderMd(evt.description)}}/>}
+        {evt.description&&(()=>{const plain=(evt.description).replace(/[*_`#>~]/g,"").replace(/\[([^\]]+)\]\([^)]+\)/g,"$1").replace(/\n+/g," ").trim();const truncated=plain.length>110?plain.slice(0,110).replace(/\s+\S*$/,"")+"…":plain;return(<div style={{color:"var(--cream)",opacity:.6,fontSize:".84rem",lineHeight:1.5,marginTop:".75rem",borderTop:"1px solid rgba(232,148,58,.08)",paddingTop:".7rem"}}>{truncated}<span style={{color:"var(--amber)",fontSize:".79rem",marginLeft:5,fontWeight:600,opacity:.85,whiteSpace:"nowrap"}}>Lees meer →</span></div>);})()}
       </div>
 
       {/* Activity sneak-peek strip */}
       {evt.schedule&&evt.schedule.length>0&&(()=>{
         const isEditor=can.editSchedule(currentUser);
-        const visible=isEditor?evt.schedule:evt.schedule.filter(s=>!s.secret);
+        const sortedSchedule=[...evt.schedule].sort(scheduleDayTimeOrder);
+        const visible=isEditor?sortedSchedule:sortedSchedule.filter(s=>!s.secret);
         const hiddenCount=evt.schedule.filter(s=>s.secret).length;
         if(!isEditor&&visible.length===0)return null;
         return(
@@ -1221,14 +1443,91 @@ const TeamsTab=({evt,onUpdate,currentUser,users=[]})=>{
   );
 };
 
-const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
-  const [tab,setTab]=useState("Overview");
+const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif,autoOpenTrailerId,onAutoTrailerConsumed})=>{
+  const [tab,setTab]=useState(initialTab||"Overview");
+  useEffect(()=>{
+    if(!scrollToId)return;
+    const t=setTimeout(()=>{
+      const el=document.getElementById(scrollToId);
+      if(el){el.scrollIntoView({behavior:"smooth",block:"center"});el.style.outline="2px solid var(--amber)";setTimeout(()=>{el.style.outline="";},1800);}
+    },250);
+    return()=>clearTimeout(t);
+  },[scrollToId]);
   const [editing,setEditing]=useState(false);
   const [presenting,setPresenting]=useState(false);
+  const [soloOpen,setSoloOpen]=useState(false);
   const [quizDash,setQuizDash]=useState(false);
+  const [presenterDetected,setPresenterDetected]=useState(false);
+  const [viewerDismissed,setViewerDismissed]=useState(false);
+  const [schedLive,setSchedLive]=useState(null);
   const countdown=useCountdown(evt.date,evt.start_time);
   const isPast=evt.archived;
   const isAdmin=can.editEvent(currentUser);
+  const isMobile=useIsMobile();
+  const [trailerOpen,setTrailerOpen]=useState(false);
+  // Gates on the event actually having a real trailer video now (owner
+  // direction change, 2026-08-21) -- not on schedule length. Visible to
+  // everyone, not just admins.
+  const canTrailer=isSafeVideoUrl(evt.trailer_video_url);
+  // Gated on `trailerOpen`, not just memoized on identity: cheap as
+  // `toTrailerInput` now is, there's no reason to rebuild the view model on
+  // every EventPage render regardless of whether anyone ever opens the
+  // trailer. `null` while closed; the `<EventTrailer>` mount below is gated
+  // on the same flag, so it never sees the `null`. Still memoized on
+  // evt/users/events identity so an unrelated realtime sync elsewhere
+  // doesn't rebuild the view model while the trailer IS open.
+  const trailerInput=useMemo(()=>(trailerOpen?toTrailerInput(evt,users,events):null),[trailerOpen,evt,users,events]);
+  // Login teaser's "Watch the trailer" button lands here (via `openEvent` +
+  // `autoOpenTrailerId` set together at the App root) and auto-opens the
+  // same trailer overlay the page's own button uses -- one code path, so
+  // behaviour (RSVP CTA closing back to this page, `markTrailerSeen`, etc.)
+  // is identical either way. Guarded on `canTrailer` too: `selectTeaserEvent`
+  // already only ever teases events with a valid video, but this stays
+  // defensive rather than trusting the caller. Consumed exactly once via
+  // the callback, so navigating away and back doesn't reopen it.
+  useEffect(()=>{
+    if(autoOpenTrailerId===evt.id&&canTrailer){setTrailerOpen(true);onAutoTrailerConsumed?.();}
+  },[autoOpenTrailerId,evt.id,canTrailer,onAutoTrailerConsumed]);
+
+  const resetPresenter=useCallback(()=>{setPresenterDetected(false);setViewerDismissed(false);setSchedLive(null);},[]);
+
+  // Realtime: push any DB write on this event to all clients immediately
+  const onSyncEvtRef=useRef(onSyncEvt);
+  useEffect(()=>{onSyncEvtRef.current=onSyncEvt;},[onSyncEvt]);
+  useEffect(()=>{
+    const ch=supabase.channel(`event-data-${evt.id}`)
+      .on('postgres_changes',{event:'UPDATE',schema:'public',table:'events',filter:`id=eq.${evt.id}`},
+        ({new:updated})=>{if(updated)onSyncEvtRef.current(updated);}
+      )
+      .subscribe();
+    return()=>supabase.removeChannel(ch);
+  },[evt.id]);
+
+  // Subscribe when: no active viewer PresentationMode (not detected, or detected but dismissed).
+  // While dismissed, keeps schedLive current so Rejoin lands on the right slide.
+  useEffect(()=>{
+    if(presenting||(presenterDetected&&!viewerDismissed))return;
+    const ch=supabase.channel(`sched-${evt.id}`);
+    let seenPresenter=false; // guard: don't reset on empty initial sync
+    ch.on('presence',{event:'sync'},()=>{
+        const st=ch.presenceState();
+        const p=Object.values(st).flat().find(x=>x.presenting);
+        if(p){
+          seenPresenter=true;
+          setSchedLive({idx:p.idx??0,revealedSecrets:p.revealedSecrets??[]});
+          setPresenterDetected(true);
+        } else if(seenPresenter){
+          resetPresenter(); // presenter actually ended (we had confirmed they were there)
+        }
+      })
+      .on('broadcast',{event:'slide'},({payload})=>{
+        // Keep schedLive current while dismissed so Rejoin shows the right slide
+        seenPresenter=true;
+        setSchedLive({idx:payload.idx??0,revealedSecrets:payload.revealedSecrets??[]});
+      })
+      .subscribe();
+    return()=>supabase.removeChannel(ch);
+  },[presenting,presenterDetected,viewerDismissed,evt.id,resetPresenter]);
 
   return(
     <div style={{display:"grid",gap:"1.5rem"}}>
@@ -1249,14 +1548,14 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
             {!isPast&&!countdown.past&&<span style={{background:"rgba(255,107,53,.15)",color:"var(--orange)",border:"1px solid rgba(255,107,53,.4)",borderRadius:6,padding:"3px 10px",fontSize:".72rem",fontWeight:700,letterSpacing:".06em",animation:"borderFire 2s ease-in-out infinite"}}>🔥 INCOMING</span>}
           </div>
 
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:"1.5rem"}}>
-            <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:"flex-start",gap:"1.2rem"}}>
+            <div style={{flex:1,minWidth:0,width:"100%"}}>
               {/* Big italic event name */}
               <div style={{fontFamily:"var(--font-h)",fontStyle:"italic",fontSize:"clamp(1.8rem,5vw,2.8rem)",color:"var(--amber2)",lineHeight:1.05,marginBottom:".7rem",fontWeight:900,letterSpacing:"-.01em"}}>{evt.name}</div>
 
               {/* Date + time row */}
               <div style={{display:"flex",flexWrap:"wrap",gap:".5rem",marginBottom:".4rem",alignItems:"center"}}>
-                <span style={{color:"var(--cream)",opacity:.75,fontSize:".88rem"}}>📅 {new Date(evt.date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</span>
+                <span style={{color:"var(--cream)",opacity:.75,fontSize:".88rem"}}>📅 {formatEventDateRange(evt.date,evt.end_date)}</span>
                 {evt.start_time&&<span style={{color:"var(--amber)",fontSize:".88rem",fontWeight:700}}>⏰ {evt.start_time}{evt.end_time&&` – ${evt.end_time}`}</span>}
               </div>
               {evt.location&&evt.location!=="TBD"&&<div style={{color:"var(--cream)",opacity:.65,fontSize:".86rem",marginBottom:".5rem"}}>📍 {evt.location}</div>}
@@ -1274,9 +1573,9 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
 
             {/* Right: countdown */}
             {!isPast&&!countdown.past&&(
-              <div style={{flexShrink:0}}>
+              <div style={{flexShrink:0,width:isMobile?"100%":"auto"}}>
                 <div style={{fontSize:".6rem",color:"var(--orange)",letterSpacing:".18em",textTransform:"uppercase",textAlign:"center",marginBottom:12,fontWeight:700}}>⚡ T-MINUS</div>
-                <div style={{display:"flex",gap:".4rem",alignItems:"flex-end"}}>
+                <div style={{display:"flex",gap:".4rem",alignItems:"flex-end",justifyContent:isMobile?"center":"flex-start"}}>
                   {[["d","days"],["h","hrs"],["m","min"],["s","sec"]].map(([k,l],i)=>(
                     <div key={k} style={{display:"flex",alignItems:"flex-end",gap:".4rem"}}>
                       <CU v={countdown[k]} l={l}/>
@@ -1295,17 +1594,24 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
           {isAdmin?(
             <div style={{display:"flex",gap:".5rem",flexWrap:"wrap"}}>
               {evt.schedule.length>0&&<Btn onClick={()=>setPresenting(true)} variant="gold" size="sm">▶ Present</Btn>}
+              {/* Own-pace browsing, distinct from ▶ Present: admins can plausibly want either.
+                  Hidden while a presentation is actually live — that wins, per the owner's call. */}
+              {evt.schedule.length>0&&!presenterDetected&&<Btn onClick={()=>setSoloOpen(true)} variant="ghost" size="sm">🧭 Browse solo</Btn>}
               <Btn onClick={()=>setEditing(true)} variant="ghost" size="sm">✎ Edit</Btn>
               {!isPast&&<Btn onClick={()=>onUpdate({...evt,archived:true})} variant="ghost" size="sm" style={{color:"var(--muted)"}}>Archive</Btn>}
               {isPast&&<Btn onClick={()=>onUpdate({...evt,archived:false})} variant="ghost" size="sm">Reopen</Btn>}
               <Btn onClick={onDelete} variant="danger" size="sm">Delete</Btn>
             </div>
           ):(
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
               <Avatar name={currentUser.username} size={22} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/>
               <span style={{fontSize:".74rem",color:"var(--muted)"}}>Viewing as <strong style={{color:"var(--cream)"}}>{currentUser.username}</strong></span>
+              {/* Members get their own affordance to walk the schedule at their own pace — never broadcasts.
+                  Hidden while a presentation is actually live — that wins, per the owner's call. */}
+              {evt.schedule.length>0&&!presenterDetected&&<Btn onClick={()=>setSoloOpen(true)} variant="ghost" size="sm">🧭 Browse solo</Btn>}
             </div>
           )}
+          {canTrailer&&<Btn onClick={()=>setTrailerOpen(true)} variant="gold" size="sm">🎬 Watch the trailer</Btn>}
           {evt.schedule&&evt.schedule.length>0&&<span style={{fontSize:".71rem",color:"var(--muted)",letterSpacing:".05em"}}>{evt.schedule.length} activities on the menu 👀</span>}
         </div>
       </div>
@@ -1320,8 +1626,8 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
       </div>
 
       <div className="fu2">
-        {tab==="Overview"             &&<OverviewTab evt={evt} onUpdate={onUpdate} isPast={isPast} currentUser={currentUser} users={users}/>}
-        {tab==="Polls"                &&<PollsTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users}/>}
+        {tab==="Overview"             &&<OverviewTab evt={evt} onUpdate={onUpdate} isPast={isPast} currentUser={currentUser} users={users} onSendNotif={onSendNotif}/>}
+        {tab==="Polls"                &&<PollsTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users} onSendNotif={onSendNotif}/>}
         {tab==="Quiz"                 &&<QuizTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users} onOpenQuizDash={()=>setQuizDash(true)}/>}
         {tab==="Teams"                &&<TeamsTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} users={users}/>}
         {tab==="Photos"               &&<PhotosTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
@@ -1330,8 +1636,31 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
         {tab==="Kretjes 🍺"           &&<KretjesTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
       </div>
 
+      {/* Live presentation banner — fixed at top of screen */}
+      {!presenting&&presenterDetected&&viewerDismissed&&(
+        <div className="ann-banner" style={{position:"fixed",top:0,left:0,right:0,zIndex:999,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:"linear-gradient(90deg,rgba(15,10,2,.97),rgba(30,18,4,.97))",borderBottom:"1px solid rgba(232,148,58,.45)",padding:".7rem 1.4rem",backdropFilter:"blur(12px)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{width:8,height:8,borderRadius:"50%",background:"var(--red)",flexShrink:0,animation:"pulse 1s ease-in-out infinite",display:"inline-block"}}/>
+            <div>
+              <div style={{fontWeight:700,color:"var(--amber2)",fontSize:".88rem"}}>🎬 Presentation is live</div>
+              <div style={{fontSize:".73rem",color:"var(--muted)"}}>The event schedule is being presented right now</div>
+            </div>
+          </div>
+          <Btn onClick={()=>setViewerDismissed(false)} variant="primary" size="sm">▶ Rejoin</Btn>
+        </div>
+      )}
+
       {editing&&<EditEventModal evt={evt} users={users} onSave={u=>{onUpdate(u);setEditing(false)}} onClose={()=>setEditing(false)}/>}
-      {presenting&&<PresentationMode evt={evt} onClose={()=>setPresenting(false)}/>}
+      {presenting&&<PresentationMode evt={evt} onUpdate={onUpdate} isPresenter={true} onClose={()=>setPresenting(false)}/>}
+      {!presenting&&presenterDetected&&!viewerDismissed&&<PresentationMode evt={evt} onUpdate={onUpdate} isPresenter={false} currentLive={schedLive} onHide={()=>setViewerDismissed(true)} onPresenterLeft={resetPresenter} onClose={()=>{}}/>}
+      {/* Solo browsing: a live admin presentation still wins -- if one starts
+          mid-session (presenterDetected flips true) this unmounts and the
+          synced viewer above takes over instead, no rejoin banner or
+          join/browse chooser involved, per the owner's explicit call. */}
+      {soloOpen&&!presenterDetected&&<PresentationMode evt={evt} onUpdate={onUpdate} isPresenter={false} isSolo={true} onClose={()=>setSoloOpen(false)}/>}
+      {trailerOpen&&<Suspense fallback={null}>
+        <EventTrailer input={trailerInput} onClose={()=>setTrailerOpen(false)}/>
+      </Suspense>}
       {quizDash&&<QuizDashboard evt={evt} onUpdate={onUpdate} users={users} onClose={()=>setQuizDash(false)}/>}
       {/* Live quiz participant view — shown to everyone when a quiz is being presented */}
       {(()=>{const liveQ=(evt.quizzes||[]).find(q=>q._liveState);return liveQ&&!quizDash&&<QuizParticipantView evt={evt} liveQ={liveQ} currentUser={currentUser} onUpdate={onUpdate} users={users}/>;})()}
@@ -1342,15 +1671,24 @@ const EventPage=({evt,onUpdate,onDelete,currentUser,users=[]})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // OVERVIEW TAB — Member RSVP + Schedule
 // ─────────────────────────────────────────────────────────────────────────────
-const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[]})=>{
+const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
   const [editSched,setEditSched]=useState(false);
+  const [notifyPending,setNotifyPending]=useState(null);
+  const isMobile=useIsMobile();
   const statusOpts=isPast?["went","absent"]:["going","maybe","not coming"];
   const colorOf=s=>statusMap[s]?.color??"var(--muted)";
   const isAdmin=can.editEvent(currentUser);
   const isScheduleEditor=can.editSchedule(currentUser);
+  const statusEmoji={going:"🔥",maybe:"🤔","not coming":"❌",went:"✅",absent:"😴"};
+  const _hasStatus=evt.attendees.find(a=>a.name.toLowerCase()===currentUser.username.toLowerCase())?.status;
+  const [rsvpOpen,setRsvpOpen]=useState(!_hasStatus);
 
   const toggleSecretStop=(i,secret)=>{
     onUpdate({...evt,schedule:evt.schedule.map((s,j)=>j===i?{...s,secret}:s)});
+    if(!secret&&onSendNotif){
+      const stop=evt.schedule[i];
+      setNotifyPending({message:`📍 Stop onthuld: "${stop.activity}"`,type:"schedule",tab:"Overview",targetId:null,eventId:evt.id,event:evt.name});
+    }
   };
 
   const updateStatus=(idx,val)=>{
@@ -1372,6 +1710,7 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[]})=>{
       updated={...evt,attendees:[...evt.attendees,{name:currentUser.username,status:val}]};
     }
     onUpdate(updated);
+    setRsvpOpen(false);
   };
 
   const totals=statusOpts.reduce((acc,s)=>{acc[s]=evt.attendees.filter(a=>a.status===s).length;return acc;},{});
@@ -1381,40 +1720,64 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[]})=>{
 
       {/* ── RSVP card ── */}
       {!isPast&&can.updateRsvp(currentUser)&&(
-        <Card style={{background:"linear-gradient(135deg,#1e1508,#291a08)",borderColor:"var(--border2)",position:"relative",overflow:"hidden"}}>
-          <div style={{position:"absolute",top:-40,right:-40,width:140,height:140,background:"radial-gradient(circle,rgba(232,148,58,.1),transparent 70%)",borderRadius:"50%",pointerEvents:"none"}}/>
-          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1rem"}}>
-            <Avatar name={currentUser.username} size={38} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/>
-            <div>
-              <div style={{fontFamily:"var(--font-h)",fontSize:"1.05rem",color:"var(--amber2)",fontWeight:700}}>{currentUser.username}</div>
-              <div style={{fontSize:".75rem",color:"var(--muted)",marginTop:1}}>
-                {myEntry?<>Current status: <strong style={{color:colorOf(myEntry.status)}}>{statusMap[myEntry.status]?.label}</strong></>:"Not on the list yet — lock in your spot"}
+        <Card style={{background:"linear-gradient(135deg,#1e1508,#291a08)",borderColor:myEntry?.status?`${colorOf(myEntry.status)}44`:"var(--border2)",position:"relative",overflow:"hidden",transition:"border-color .3s"}}>
+          <div style={{position:"absolute",top:-40,right:-40,width:140,height:140,background:"radial-gradient(circle,rgba(232,148,58,.08),transparent 70%)",borderRadius:"50%",pointerEvents:"none"}}/>
+          {/* Always-visible compact header */}
+          <div onClick={()=>setRsvpOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer",userSelect:"none"}}>
+            <Avatar name={currentUser.username} size={34} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--amber2)",fontWeight:700,lineHeight:1}}>{currentUser.username}</div>
+              <div style={{fontSize:".73rem",color:"var(--muted)",marginTop:3}}>
+                {myEntry?.status
+                  ? <><span style={{color:colorOf(myEntry.status)}}>{statusEmoji[myEntry.status]} {statusMap[myEntry.status]?.label}</span> · tap to change</>
+                  : "Not locked in yet — tap to set status"}
+              </div>
+            </div>
+            {myEntry?.status&&!rsvpOpen&&(
+              <div style={{background:`${colorOf(myEntry.status)}18`,border:`1px solid ${colorOf(myEntry.status)}55`,borderRadius:8,padding:"5px 12px",fontSize:".8rem",color:colorOf(myEntry.status),fontWeight:700,flexShrink:0,whiteSpace:"nowrap"}}>
+                {statusEmoji[myEntry.status]} {statusMap[myEntry.status]?.label}
+              </div>
+            )}
+            <span style={{color:"var(--muted)",fontSize:"1.1rem",flexShrink:0,transition:"transform .22s cubic-bezier(.4,0,.2,1)",transform:rsvpOpen?"rotate(90deg)":"none",display:"inline-block"}}>›</span>
+          </div>
+          {/* Animated expandable buttons */}
+          <div style={{maxHeight:rsvpOpen?"160px":"0",overflow:"hidden",transition:"max-height .3s cubic-bezier(.4,0,.2,1)"}}>
+            <div style={{paddingTop:"1rem",opacity:rsvpOpen?1:0,transform:rsvpOpen?"translateY(0)":"translateY(-6px)",transition:"opacity .22s ease .06s,transform .22s ease .06s"}}>
+              <div style={{fontFamily:"var(--font-h)",fontSize:".9rem",color:"var(--cream)",opacity:.7,marginBottom:".7rem",fontStyle:"italic"}}>Are you coming? Make it official.</div>
+              <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                {[{s:"going",emoji:"🔥",label:"I'm In"},{s:"maybe",emoji:"🤔",label:"Maybe"},{s:"not coming",emoji:"❌",label:"Can't Make It"}].map(({s,emoji,label})=>{
+                  const sel=myEntry?.status===s;
+                  const c=colorOf(s);
+                  return(
+                    <button key={s} className="rsvp-btn" onClick={e=>{e.stopPropagation();selfRsvp(s);}} style={{
+                      background:sel?`${c}22`:"transparent",
+                      border:`2px solid ${sel?c:`${c}40`}`,
+                      color:sel?c:"var(--muted)",
+                      borderRadius:"var(--radius-sm)",padding:"9px 18px",cursor:"pointer",
+                      fontFamily:"var(--font-b)",fontWeight:700,fontSize:".85rem",
+                      display:"flex",alignItems:"center",gap:7,
+                      boxShadow:sel?`0 0 18px ${c}30`:"none",
+                    }}>
+                      <span style={{fontSize:"1.1rem"}}>{emoji}</span>
+                      {label}
+                      {sel&&<span style={{fontSize:".62rem",letterSpacing:".08em",opacity:.75,marginLeft:2}}>✓</span>}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
-          <div style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--cream)",opacity:.85,marginBottom:".8rem",fontStyle:"italic"}}>Are you coming? Make it official.</div>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            {[{s:"going",emoji:"🔥",label:"I'm In"},{s:"maybe",emoji:"🤔",label:"Maybe"},{s:"not coming",emoji:"❌",label:"Can't Make It"}].map(({s,emoji,label})=>{
-              const sel=myEntry?.status===s;
-              const c=colorOf(s);
-              return(
-                <button key={s} className="rsvp-btn" onClick={()=>selfRsvp(s)} style={{
-                  background:sel?`${c}22`:"transparent",
-                  border:`2px solid ${sel?c:`${c}40`}`,
-                  color:sel?c:"var(--muted)",
-                  borderRadius:"var(--radius-sm)",padding:"10px 20px",cursor:"pointer",
-                  fontFamily:"var(--font-b)",fontWeight:700,fontSize:".88rem",
-                  display:"flex",alignItems:"center",gap:7,
-                  boxShadow:sel?`0 0 18px ${c}30`:"none",
-                }}>
-                  <span style={{fontSize:"1.15rem"}}>{emoji}</span>
-                  {label}
-                  {sel&&<span style={{fontSize:".62rem",letterSpacing:".08em",opacity:.75,marginLeft:2}}>✓</span>}
-                </button>
-              );
-            })}
-          </div>
         </Card>
+      )}
+
+      {notifyPending&&(
+        <div style={{background:"rgba(232,148,58,.08)",border:"1px solid rgba(232,148,58,.3)",borderRadius:"var(--radius-sm)",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+          <div style={{fontSize:".83rem",color:"var(--amber2)"}}>📣 Leden inlichten over deze reveal?</div>
+          <div style={{display:"flex",gap:6}}>
+            <Btn size="sm" onClick={()=>{onSendNotif(notifyPending);setNotifyPending(null);}}>Verstuur</Btn>
+            <Btn size="sm" variant="ghost" onClick={()=>setNotifyPending(null)}>Niet nu</Btn>
+          </div>
+        </div>
       )}
 
       {/* ── Schedule — Sneak Peek ── */}
@@ -1437,68 +1800,68 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[]})=>{
         )}
 
         {(()=>{
-          const visibleStops=isScheduleEditor?evt.schedule:evt.schedule.filter(s=>!s.secret);
+          const sortedSchedule=[...evt.schedule].sort(scheduleDayTimeOrder);
+          const visibleStops=isScheduleEditor?sortedSchedule:sortedSchedule.filter(s=>!s.secret);
           const hiddenCount=evt.schedule.filter(s=>s.secret).length;
-          return(
-            <>
-              <div style={{display:"grid",gap:".55rem"}}>
-                {visibleStops.map((s,i)=>{
+          // Day separators only appear when the visible stops actually span
+          // more than one distinct day -- a true single-day event (or one
+          // where every visible stop still sits on day 0) renders identically
+          // to before, no separators at all.
+          const showDaySeparators=new Set(visibleStops.map(s=>s.day??0)).size>1;
+          const stopEls=[];
+          visibleStops.forEach((s,i)=>{
                   const globalIdx=evt.schedule.indexOf(s);
                   const isSecret=!!s.secret;
-                  return(
+                  const stopDay=s.day??0;
+                  if(showDaySeparators&&(i===0||stopDay!==(visibleStops[i-1].day??0))){
+                    stopEls.push(
+                      <div key={`day-${stopDay}-${i}`} style={{fontSize:".68rem",color:"var(--amber)",letterSpacing:".08em",fontWeight:700,marginTop:i===0?0:".2rem",paddingBottom:5,borderBottom:"1px solid var(--border)"}}>{dayHeadingLabel(evt.date,stopDay)}</div>
+                    );
+                  }
+                  stopEls.push(
                     <div key={i} className="schedule-card" style={{
                       background:isSecret?"rgba(30,10,10,.9)":isPast?"var(--bg3)":"linear-gradient(90deg,rgba(29,20,8,.9),rgba(21,14,4,.7))",
                       border:`1px solid ${isSecret?"rgba(224,85,85,.28)":isPast?"var(--border)":"rgba(232,148,58,.18)"}`,
-                      borderRadius:"var(--radius-sm)",padding:".8rem 1rem",
+                      borderRadius:"var(--radius-sm)",padding:".75rem 1rem",
                       position:"relative",overflow:"hidden",
                       animationDelay:`${i*.07}s`,
                     }}>
                       {/* Left accent */}
                       <div style={{position:"absolute",left:0,top:0,bottom:0,width:3,background:isSecret?"linear-gradient(to bottom,var(--red),rgba(224,85,85,.4))":isPast?"linear-gradient(to bottom,var(--muted2),var(--muted))":"linear-gradient(to bottom,var(--amber),var(--gold))",opacity:isSecret?.7:isPast?.4:.7}}/>
 
-                      {/* Top row: icon + time + activity + badge */}
-                      <div style={{display:"flex",alignItems:"center",gap:"1rem"}}>
-                        <div style={{
-                          width:42,height:42,borderRadius:11,flexShrink:0,
-                          background:isSecret?"rgba(224,85,85,.08)":isPast?"var(--bg4)":"rgba(232,148,58,.1)",
-                          border:`1px solid ${isSecret?"rgba(224,85,85,.2)":isPast?"var(--border)":"rgba(232,148,58,.28)"}`,
-                          display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.25rem",
-                        }}>{isSecret?"🔒":s.icon||"📍"}</div>
-                        {s.time&&<div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:isSecret?"rgba(224,85,85,.7)":isPast?"var(--muted)":"var(--amber)",fontWeight:700,flexShrink:0,minWidth:38,textAlign:"center"}}>{s.time}</div>}
-                        <div style={{flex:1,minWidth:0,fontWeight:600,fontSize:".92rem",color:isSecret?"rgba(224,85,85,.6)":isPast?"var(--cream)":"var(--amber2)"}}>{s.activity}</div>
-                        <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                          {isPast&&!isSecret&&<div style={{fontSize:".62rem",color:"var(--green)",letterSpacing:".1em",textTransform:"uppercase",opacity:.7,fontWeight:700}}>✓ Done</div>}
-                          {!isPast&&!isSecret&&!isScheduleEditor&&<div style={{fontSize:".62rem",color:"var(--amber)",letterSpacing:".1em",textTransform:"uppercase",opacity:.65,fontWeight:700}}>Revealed</div>}
-                          {isScheduleEditor&&(
-                            <button onClick={()=>toggleSecretStop(globalIdx,!isSecret)}
-                              title={isSecret?"Openbaren voor iedereen":"Verbergen voor leden"}
-                              onMouseEnter={e=>{e.currentTarget.style.opacity="1";}}
-                              onMouseLeave={e=>{e.currentTarget.style.opacity=".75";}}
-                              style={{background:isSecret?"rgba(76,175,125,.12)":"rgba(224,85,85,.1)",border:`1px solid ${isSecret?"rgba(76,175,125,.3)":"rgba(224,85,85,.3)"}`,borderRadius:6,cursor:"pointer",padding:"3px 8px",fontSize:".68rem",fontWeight:700,color:isSecret?"var(--green)":"var(--red)",letterSpacing:".04em",opacity:.75,transition:"opacity .15s"}}>
-                              {isSecret?"👁 Reveal":"🔒 Hide"}
-                            </button>
-                          )}
-                        </div>
+                      {/* Top row: icon + time + activity */}
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                        <div style={{width:28,height:28,borderRadius:7,flexShrink:0,background:isSecret?"rgba(224,85,85,.08)":isPast?"var(--bg4)":"rgba(232,148,58,.1)",border:`1px solid ${isSecret?"rgba(224,85,85,.2)":isPast?"var(--border)":"rgba(232,148,58,.28)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:".95rem"}}>{isSecret?"🔒":s.icon||"📍"}</div>
+                        {s.time&&<span style={{fontFamily:"var(--font-h)",fontSize:".82rem",color:isSecret?"rgba(224,85,85,.7)":isPast?"var(--muted)":"var(--amber)",fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>{s.time}</span>}
+                        <span style={{fontWeight:600,fontSize:".9rem",color:isSecret?"rgba(224,85,85,.6)":isPast?"var(--cream)":"var(--amber2)",lineHeight:1.3,flex:1,minWidth:0}}>{s.activity}</span>
+                        {isPast&&!isSecret&&<span style={{fontSize:".6rem",color:"var(--green)",letterSpacing:".1em",textTransform:"uppercase",opacity:.7,fontWeight:700,flexShrink:0}}>✓ Done</span>}
+                        {isScheduleEditor&&(
+                          <button onClick={()=>toggleSecretStop(globalIdx,!isSecret)}
+                            onMouseEnter={e=>{e.currentTarget.style.opacity="1";}}
+                            onMouseLeave={e=>{e.currentTarget.style.opacity=".75";}}
+                            style={{background:isSecret?"rgba(76,175,125,.12)":"rgba(224,85,85,.1)",border:`1px solid ${isSecret?"rgba(76,175,125,.3)":"rgba(224,85,85,.3)"}`,borderRadius:6,cursor:"pointer",padding:"2px 8px",fontSize:".66rem",fontWeight:700,color:isSecret?"var(--green)":"var(--red)",opacity:.75,transition:"opacity .15s",flexShrink:0}}>
+                            {isSecret?"👁 Reveal":"🔒 Hide"}
+                          </button>
+                        )}
                       </div>
 
-                      {/* Details row */}
+                      {/* Location / note */}
                       {!isSecret&&(s.location||s.note)&&(
-                        <div style={{marginTop:".4rem",paddingLeft:"calc(42px + 1rem)"}}>
+                        <div style={{marginTop:5,display:"flex",flexDirection:"column",gap:2}}>
                           {s.location&&(
-                            <div style={{marginBottom:s.note?2:0}}>
-                              {s.locationUrl
-                                ?<a href={s.locationUrl} target="_blank" rel="noreferrer" style={{fontSize:".74rem",color:"var(--amber)",textDecoration:"none",opacity:.8}}>📍 {s.location} ↗</a>
-                                :<span style={{fontSize:".74rem",color:"var(--muted)"}}>📍 {s.location}</span>
-                              }
-                            </div>
+                            s.locationUrl
+                              ?<a href={s.locationUrl} target="_blank" rel="noreferrer" style={{fontSize:".74rem",color:"var(--amber)",textDecoration:"none",opacity:.8}}>📍 {s.location} ↗</a>
+                              :<span style={{fontSize:".74rem",color:"var(--muted)"}}>📍 {s.location}</span>
                           )}
-                          {s.note&&<div style={{fontSize:".72rem",color:"var(--muted)",fontStyle:"italic"}}>💬 {s.note}</div>}
+                          {s.note&&<span style={{fontSize:".72rem",color:"var(--muted)",fontStyle:"italic"}}>💬 {s.note}</span>}
                         </div>
                       )}
                     </div>
                   );
-                })}
-              </div>
+          });
+          return(
+            <>
+              <div style={{display:"grid",gap:".55rem"}}>{stopEls}</div>
               {!isScheduleEditor&&hiddenCount>0&&(
                 <div style={{textAlign:"center",padding:".7rem",marginTop:".3rem",background:"var(--bg3)",borderRadius:"var(--radius-sm)",border:"1px solid var(--border)"}}>
                   <span style={{fontSize:".78rem",color:"var(--muted)"}}>🔒 {hiddenCount} stop{hiddenCount!==1?"s":""} nog geheim — wordt later onthuld</span>
@@ -1578,8 +1941,8 @@ const normalizeQuiz=q=>{
   const normAnswer=a=>Array.isArray(a)?a:(a!=null?[a]:[0]);
   const withType=qs=>(qs||[]).map(q=>({...q,type:q.type||"multiple",answer:normAnswer(q.answer),openAnswer:q.openAnswer||"",songUrl:q.songUrl||"",songStartSeconds:q.songStartSeconds||0,songPlaySeconds:q.songPlaySeconds||30,songArtist:q.songArtist||"",songTitle:q.songTitle||""}));
   const normTeams=(ts=[])=>ts.map((t,i)=>({avatar:TEAM_AVATARS[i%TEAM_AVATARS.length],...t}));
-  if(q.rounds)return{...q,teams:normTeams(q.teams),rounds:q.rounds.map(r=>({icon:"🎯",description:"",bgImage:null,...r,questions:withType(r.questions)}))};
-  return{...q,teams:normTeams(q.teams),defaultTime:30,rounds:[{id:"r0",title:"Round 1",theme:"",icon:"🎯",description:"",bgImage:null,questions:withType(q.questions)}]};
+  if(q.rounds)return{...q,teams:normTeams(q.teams),rounds:q.rounds.map(r=>({icon:"🎯",description:"",bgImage:null,secret:false,...r,questions:withType(r.questions)}))};
+  return{...q,teams:normTeams(q.teams),defaultTime:30,rounds:[{id:"r0",title:"Round 1",theme:"",icon:"🎯",description:"",bgImage:null,secret:false,questions:withType(q.questions)}]};
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1715,6 +2078,13 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[]})=>{
                         🎤 Present
                       </button>
                     )}
+                    <button onClick={()=>{const dup={...quiz,id:`qz${Date.now()}`,title:`Copy of ${quiz.title}`,status:"ready",scores:{},_liveState:null};saveQuizzes([...quizzes,dup]);}}
+                      title="Duplicate quiz"
+                      style={{background:"rgba(91,155,213,.08)",border:"1px solid rgba(91,155,213,.2)",borderRadius:6,color:"var(--blue)",padding:"4px 9px",cursor:"pointer",fontSize:".7rem",fontFamily:"var(--font-b)",transition:"background .12s"}}
+                      onMouseEnter={e=>e.currentTarget.style.background="rgba(91,155,213,.2)"}
+                      onMouseLeave={e=>e.currentTarget.style.background="rgba(91,155,213,.08)"}>
+                      ⧉
+                    </button>
                     <button onClick={()=>{if(isActive)closePanel();saveQuizzes(quizzes.filter(q=>q.id!==quiz.id));}}
                       style={{background:"rgba(224,85,85,.08)",border:"1px solid rgba(224,85,85,.2)",borderRadius:6,color:"var(--red)",padding:"4px 9px",cursor:"pointer",fontSize:".7rem",fontFamily:"var(--font-b)",transition:"background .12s"}}
                       onMouseEnter={e=>e.currentTarget.style.background="rgba(224,85,85,.2)"}
@@ -1870,6 +2240,8 @@ const TYPE_META={
 const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
   const [title,setTitle]=useState(existing?.title||"");
   const [defaultTime,setDefaultTime]=useState(existing?.defaultTime||30);
+  const [introText,setIntroText]=useState(existing?.introText||"");
+  const [introBg,setIntroBg]=useState(existing?.introBg||"");
   const [rounds,setRounds]=useState(()=>{
     if(existing?.rounds)return existing.rounds.map(r=>({icon:"🎯",description:"",...r,questions:r.questions.map(q=>({...blankQuestion(q.type||"multiple"),...q}))}));
     return[{id:`r${Date.now()}`,title:"Round 1",theme:"",icon:"🎯",description:"",bgImage:null,questions:[blankQuestion()]}];
@@ -1898,6 +2270,12 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
     setRounds(r=>r.filter((_,i)=>i!==ri));
     setActiveRi(p=>p>=rounds.length-1?rounds.length-2:p);
     setExpandedQ(null);
+  };
+  const moveRound=(ri,d)=>{
+    const j=ri+d;
+    if(j<0||j>=rounds.length)return;
+    setRounds(r=>{const rs=[...r];[rs[ri],rs[j]]=[rs[j],rs[ri]];return rs;});
+    setActiveRi(j);
   };
   const updRound=(ri,f,v)=>setRounds(r=>r.map((x,i)=>i===ri?{...x,[f]:v}:x));
 
@@ -2005,7 +2383,7 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
         </div>
         <div style={{display:"flex",gap:6,flexShrink:0}}>
           <Btn onClick={onCancel} variant="ghost" size="sm">Cancel</Btn>
-          <Btn onClick={()=>onSave({title,defaultTime,rounds,teams})} disabled={!valid} variant="gold" size="sm">
+          <Btn onClick={()=>onSave({title,defaultTime,rounds,teams,introText,introBg})} disabled={!valid} variant="gold" size="sm">
             {existing?"Save Changes":"Create Quiz"}
           </Btn>
         </div>
@@ -2015,6 +2393,7 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
       <div style={{display:"flex",borderBottom:"1px solid var(--border)",marginBottom:"1.2rem"}}>
         <TabBtn id="rounds" label="📋 Rounds" badge={0}/>
         <TabBtn id="teams" label="👥 Teams" badge={teams.length}/>
+        <TabBtn id="intro" label="🎬 Intro" badge={0}/>
       </div>
 
       {/* ════════════════════════════════════════════════════════ */}
@@ -2031,11 +2410,19 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
                   style={{background:"none",border:"none",color:rIdx===activeRi?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"7px 12px",fontFamily:"var(--font-b)",fontSize:".82rem",fontWeight:rIdx===activeRi?600:400,whiteSpace:"nowrap",transition:"color .12s"}}>
                   {r.icon} {r.title||`Round ${rIdx+1}`}
                 </button>
-                {rounds.length>1&&rIdx===activeRi&&(
-                  <button onClick={()=>delRound(rIdx)}
-                    style={{background:"none",border:"none",color:"var(--muted2)",cursor:"pointer",padding:"0 8px 0 0",fontSize:".7rem",lineHeight:1}}
-                    onMouseEnter={e=>e.target.style.color="var(--red)"}
-                    onMouseLeave={e=>e.target.style.color="var(--muted2)"}>✕</button>
+                {rIdx===activeRi&&(
+                  <div style={{display:"flex",alignItems:"center",gap:1,paddingRight:6}}>
+                    <button onClick={e=>{e.stopPropagation();moveRound(rIdx,-1);}} disabled={rIdx===0}
+                      style={{background:"none",border:"none",color:"var(--muted2)",cursor:rIdx===0?"default":"pointer",padding:"0 4px",fontSize:".65rem",lineHeight:1,opacity:rIdx===0?.25:1}}
+                      title="Move left">←</button>
+                    <button onClick={e=>{e.stopPropagation();moveRound(rIdx,1);}} disabled={rIdx===rounds.length-1}
+                      style={{background:"none",border:"none",color:"var(--muted2)",cursor:rIdx===rounds.length-1?"default":"pointer",padding:"0 4px",fontSize:".65rem",lineHeight:1,opacity:rIdx===rounds.length-1?.25:1}}
+                      title="Move right">→</button>
+                    {rounds.length>1&&<button onClick={()=>delRound(rIdx)}
+                      style={{background:"none",border:"none",color:"var(--muted2)",cursor:"pointer",padding:"0 4px",fontSize:".7rem",lineHeight:1}}
+                      onMouseEnter={e=>e.target.style.color="var(--red)"}
+                      onMouseLeave={e=>e.target.style.color="var(--muted2)"}>✕</button>}
+                  </div>
                 )}
               </div>
             ))}
@@ -2053,6 +2440,11 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
               </select>
               <Inp value={ar.title} onChange={e=>updRound(ri,"title",e.target.value)} placeholder="Round title…" style={{flex:1,minWidth:110,padding:"8px 10px",fontSize:".88rem"}}/>
               <Inp value={ar.theme} onChange={e=>updRound(ri,"theme",e.target.value)} placeholder="Theme (optional)…" style={{flex:1,minWidth:110,padding:"8px 10px",fontSize:".88rem"}}/>
+              <button onClick={()=>updRound(ri,"secret",!ar.secret)}
+                title={ar.secret?"Secret round — click to reveal on intro":"Visible on intro — click to hide"}
+                style={{...ICON_BTN,padding:"7px 10px",whiteSpace:"nowrap",color:ar.secret?"var(--red)":"var(--muted)",background:ar.secret?"rgba(224,85,85,.08)":"transparent",border:`1px solid ${ar.secret?"rgba(224,85,85,.35)":"transparent"}`,borderRadius:6,transition:"all .15s"}}>
+                {ar.secret?"🔒 Secret":"👁 Visible"}
+              </button>
               <button onClick={()=>setShowDesc(v=>!v)}
                 style={{...ICON_BTN,color:"var(--muted)",padding:"7px 10px",whiteSpace:"nowrap"}}>
                 {showDesc?"▲":"▼"} Intro text
@@ -2237,6 +2629,37 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
             <Btn onClick={()=>addQ(ri,"multiple")} variant="subtle" size="sm">+ Multiple Choice</Btn>
             <Btn onClick={()=>addQ(ri,"open")} variant="subtle" size="sm">+ Open</Btn>
             <Btn onClick={()=>addQ(ri,"music")} variant="subtle" size="sm">+ 🎵 Music</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════ */}
+      {/* INTRO TAB                                               */}
+      {/* ════════════════════════════════════════════════════════ */}
+      {builderTab==="intro"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:"1.1rem",maxWidth:620}}>
+          <div>
+            <Lbl>Intro Text</Lbl>
+            <textarea value={introText} onChange={e=>setIntroText(e.target.value)}
+              placeholder="Shown on the starting screen before the quiz begins…"
+              style={{width:"100%",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 12px",color:"var(--cream)",fontFamily:"var(--font-b)",fontSize:".88rem",outline:"none",resize:"vertical",minHeight:80,boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <Lbl>Background Image URL</Lbl>
+            <Inp value={introBg} onChange={e=>setIntroBg(e.target.value)} placeholder="https://… (fullscreen behind the intro slide)"/>
+            {introBg&&<img src={introBg} alt="" style={{marginTop:8,maxHeight:100,borderRadius:6,objectFit:"cover",display:"block"}} onError={e=>e.target.style.display="none"}/>}
+          </div>
+          <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"1rem"}}>
+            <div style={{fontSize:".72rem",color:"var(--muted)",marginBottom:".7rem",textTransform:"uppercase",letterSpacing:".08em"}}>Round preview on intro slide</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {rounds.map((r,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:5,background:"rgba(255,255,255,.06)",border:`1px solid ${r.secret?"rgba(224,85,85,.3)":"rgba(255,255,255,.12)"}`,borderRadius:8,padding:"5px 11px",fontSize:".8rem",color:r.secret?"var(--red)":"rgba(255,255,255,.7)"}}>
+                  <span>{r.icon||"🎯"}</span>
+                  <span>{r.secret?"???":(r.title||`Round ${i+1}`)}</span>
+                  {r.secret&&<span style={{fontSize:".65rem",opacity:.7}}>(secret)</span>}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -2682,6 +3105,12 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[currentQ,answers,scores]);
 
+  const awardPoints=(key,delta)=>{
+    const newScores={...scores,[key]:Math.max(0,(scores[key]||0)+delta)};
+    setScores(newScores);
+    publishLive({scores:newScores});
+  };
+
   const doNextStep=()=>{
     clearInterval(timerRef.current);
     clearInterval(musicRef.current);
@@ -2742,6 +3171,10 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
   };
 
   const sortedScores=Object.entries(scores).sort((a,b)=>b[1]-a[1]);
+  // Stable order for award panels — follows attendees/teams list, not score rank
+  const scorePairs=isTeamQuiz
+    ?(quiz.teams||[]).map(t=>[t.name,scores[t.name]??0])
+    :(evt.attendees||[]).map(a=>[a.name,scores[a.name]??0]);
   const medal=["🥇","🥈","🥉"];
 
   // ── Shared styles ────────────────────────────────────────────────────────────
@@ -2794,15 +3227,33 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
 
         {/* ── INTRO ─────────────────────────────────────────────────────── */}
         {phase==="intro"&&(
-          <div style={{textAlign:"center",maxWidth:700}}>
+          <div style={{textAlign:"center",maxWidth:760}}>
             <div style={{fontSize:"3rem",marginBottom:"1.2rem",filter:"drop-shadow(0 0 30px rgba(232,148,58,.4))"}}>🧠</div>
             <div style={{fontSize:".75rem",color:"var(--amber)",letterSpacing:".2em",textTransform:"uppercase",fontWeight:700,marginBottom:"1rem",opacity:.8}}>{evt.name}</div>
             <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(2.4rem,7vw,5rem)",color:"#fff",lineHeight:1.08,marginBottom:"1.2rem",textShadow:"0 0 60px rgba(232,148,58,.2)"}}>{quiz.title}</div>
-            <div style={{color:"rgba(255,255,255,.4)",fontSize:"1rem",marginBottom:"3rem"}}>{totalRounds} round{totalRounds!==1?"s":""} · {quiz.rounds.reduce((s,r)=>s+r.questions.length,0)} questions</div>
+            {quiz.introText&&<div style={{color:"rgba(255,255,255,.55)",fontSize:"1rem",lineHeight:1.65,marginBottom:"1.4rem",maxWidth:560,margin:"0 auto 1.4rem"}}>{quiz.introText}</div>}
+            <div style={{color:"rgba(255,255,255,.4)",fontSize:"1rem",marginBottom:totalRounds>1?"1.4rem":"3rem"}}>{totalRounds} round{totalRounds!==1?"s":""} · {quiz.rounds.reduce((s,r)=>s+r.questions.length,0)} questions</div>
+            {totalRounds>1&&(
+              <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap",marginBottom:"2.6rem"}}>
+                {quiz.rounds.map((r,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,.07)",border:`1px solid ${r.secret?"rgba(255,255,255,.1)":"rgba(255,255,255,.14)"}`,borderRadius:10,padding:"7px 15px",fontSize:".82rem",color:r.secret?"rgba(255,255,255,.3)":"rgba(255,255,255,.75)"}}>
+                    <span style={{fontSize:"1rem"}}>{r.icon||"🎯"}</span>
+                    <span>{r.secret?"???":(r.title||`Round ${i+1}`)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <button onClick={()=>fade(()=>setPhase("round-intro"))} style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.5)",borderRadius:14,color:"var(--amber2)",padding:"14px 40px",fontSize:"1.05rem",cursor:"pointer",fontFamily:"var(--font-h)",fontWeight:700,backdropFilter:"blur(8px)",letterSpacing:".04em",display:"inline-flex",alignItems:"center",gap:10}}>
               Start Quiz →
               <span style={{fontSize:".6rem",opacity:.35,fontWeight:400,letterSpacing:".03em"}}>[→]</span>
             </button>
+          </div>
+        )}
+        {/* Intro background image */}
+        {phase==="intro"&&quiz.introBg&&(
+          <div style={{position:"absolute",inset:0,zIndex:-1,pointerEvents:"none"}}>
+            <div style={{position:"absolute",inset:0,backgroundImage:`url(${quiz.introBg})`,backgroundSize:"cover",backgroundPosition:"center"}}/>
+            <div style={{position:"absolute",inset:0,background:"rgba(7,5,1,.68)"}}/>
           </div>
         )}
 
@@ -2912,46 +3363,113 @@ const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
 
             {/* OPEN QUESTION */}
             {currentQ.type==="open"&&(
-              <div style={{textAlign:"center"}}>
-                {slidePhase==="question"&&<div style={{color:"rgba(255,255,255,.35)",fontSize:"1rem",marginBottom:".8rem"}}>Open your answer books…</div>}
+              <div>
+                {slidePhase==="question"&&<div style={{textAlign:"center",color:"rgba(255,255,255,.35)",fontSize:"1rem",marginBottom:"1.2rem"}}>Open your answer books…</div>}
                 {slidePhase==="answer"&&currentQ.openAnswer&&(
-                  <div style={{background:"rgba(76,175,125,.12)",border:"2px solid var(--green)",borderRadius:14,padding:"1.4rem 2rem",display:"inline-block",marginTop:".5rem"}}>
-                    <div style={{fontSize:".75rem",color:"var(--green)",letterSpacing:".1em",textTransform:"uppercase",marginBottom:".5rem",fontWeight:700}}>✓ Answer</div>
-                    <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.3rem,4vw,2.2rem)",color:"#fff"}}>{currentQ.openAnswer}</div>
+                  <div style={{textAlign:"center",marginBottom:"1.4rem"}}>
+                    <div style={{background:"rgba(76,175,125,.12)",border:"2px solid var(--green)",borderRadius:14,padding:"1.4rem 2rem",display:"inline-block",marginTop:".5rem"}}>
+                      <div style={{fontSize:".75rem",color:"var(--green)",letterSpacing:".1em",textTransform:"uppercase",marginBottom:".5rem",fontWeight:700}}>✓ Answer</div>
+                      <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.3rem,4vw,2.2rem)",color:"#fff"}}>{currentQ.openAnswer}</div>
+                    </div>
                   </div>
                 )}
+                {/* Award-points panel — quizmaster manually scores open answers */}
+                <div style={{background:"rgba(0,0,0,.38)",border:"1px solid rgba(232,148,58,.22)",borderRadius:14,padding:"1rem 1.2rem",marginTop:".4rem"}}>
+                  <div style={{fontSize:".68rem",color:"var(--amber)",textTransform:"uppercase",letterSpacing:".12em",fontWeight:700,marginBottom:".75rem"}}>
+                    Award Points — {currentQ.points} pt{currentQ.points!==1?"s":""} each
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:".5rem"}}>
+                    {scorePairs.map(([key,score])=>{
+                      const team=isTeamQuiz?(quiz.teams||[]).find(t=>t.name===key):null;
+                      const pts=currentQ.points||10;
+                      return(
+                        <div key={key} style={{display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"7px 10px"}}>
+                          {isTeamQuiz
+                            ?<span style={{fontSize:"1.15rem",flexShrink:0}}>{team?.avatar||"🎯"}</span>
+                            :<Avatar name={key} size={24} {...(users.find(u=>u.username===key)||{})}/>}
+                          <span style={{flex:1,fontSize:".8rem",color:"rgba(255,255,255,.8)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:500}}>{isTeamQuiz?key:getDisplayName(key,users)}</span>
+                          <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                            <button onClick={()=>awardPoints(key,-pts)}
+                              style={{width:26,height:26,borderRadius:6,background:"rgba(224,85,85,.15)",border:"1px solid rgba(224,85,85,.3)",color:"var(--red)",cursor:"pointer",fontSize:".9rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"var(--font-b)"}}
+                              onMouseEnter={e=>e.currentTarget.style.background="rgba(224,85,85,.3)"}
+                              onMouseLeave={e=>e.currentTarget.style.background="rgba(224,85,85,.15)"}>−</button>
+                            <span style={{fontSize:".82rem",color:"var(--amber)",fontWeight:700,minWidth:28,textAlign:"center"}}>{score}</span>
+                            <button onClick={()=>awardPoints(key,pts)}
+                              style={{width:26,height:26,borderRadius:6,background:"rgba(76,175,125,.15)",border:"1px solid rgba(76,175,125,.3)",color:"var(--green)",cursor:"pointer",fontSize:".9rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"var(--font-b)"}}
+                              onMouseEnter={e=>e.currentTarget.style.background="rgba(76,175,125,.3)"}
+                              onMouseLeave={e=>e.currentTarget.style.background="rgba(76,175,125,.15)"}>+</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
 
             {/* MUSIC QUESTION */}
-            {currentQ.type==="music"&&slidePhase==="question"&&(
-              <MusicPlayer q={currentQ} musicPhase={musicPhase} musicTimer={musicTimer}
-                onPlayStart={()=>setMusicPhase("playing")}
-                onPlayEnd={()=>{clearInterval(musicRef.current);setMusicPhase("done");}}/>
-            )}
-            {currentQ.type==="music"&&slidePhase==="answer"&&(
-              <div style={{textAlign:"center"}}>
-                <div style={{fontSize:".72rem",color:"var(--green)",letterSpacing:".14em",textTransform:"uppercase",fontWeight:700,marginBottom:".6rem"}}>🎵 The song was…</div>
-                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.6rem,4.5vw,2.8rem)",color:"var(--amber2)",marginBottom:".25rem",lineHeight:1.15}}>{currentQ.songTitle||"?"}</div>
-                {currentQ.songArtist&&<div style={{color:"rgba(255,255,255,.5)",fontSize:"1.1rem",marginBottom:"1.6rem"}}>{currentQ.songArtist}</div>}
-                {/* Reveal the video now */}
-                {getYouTubeId(currentQ.songUrl)&&(
-                  <div style={{display:"inline-block",borderRadius:14,overflow:"hidden",boxShadow:"0 16px 60px rgba(0,0,0,.6)",border:"1px solid rgba(255,255,255,.12)"}}>
-                    <iframe
-                      src={`https://www.youtube-nocookie.com/embed/${getYouTubeId(currentQ.songUrl)}?autoplay=1&controls=1&modestbranding=1&rel=0`}
-                      allow="autoplay; accelerometer; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                      style={{width:480,height:270,maxWidth:"80vw",display:"block",border:"none"}}
-                      title="reveal"/>
+            {currentQ.type==="music"&&(
+              <div>
+                {slidePhase==="question"&&(
+                  <MusicPlayer q={currentQ} musicPhase={musicPhase} musicTimer={musicTimer}
+                    onPlayStart={()=>setMusicPhase("playing")}
+                    onPlayEnd={()=>{clearInterval(musicRef.current);setMusicPhase("done");}}/>
+                )}
+                {slidePhase==="answer"&&(
+                  <div style={{textAlign:"center",marginBottom:"1.2rem"}}>
+                    <div style={{fontSize:".72rem",color:"var(--green)",letterSpacing:".14em",textTransform:"uppercase",fontWeight:700,marginBottom:".6rem"}}>🎵 The song was…</div>
+                    <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.6rem,4.5vw,2.8rem)",color:"var(--amber2)",marginBottom:".25rem",lineHeight:1.15}}>{currentQ.songTitle||"?"}</div>
+                    {currentQ.songArtist&&<div style={{color:"rgba(255,255,255,.5)",fontSize:"1.1rem",marginBottom:"1.6rem"}}>{currentQ.songArtist}</div>}
+                    {getYouTubeId(currentQ.songUrl)&&(
+                      <div style={{display:"inline-block",borderRadius:14,overflow:"hidden",boxShadow:"0 16px 60px rgba(0,0,0,.6)",border:"1px solid rgba(255,255,255,.12)"}}>
+                        <iframe
+                          src={`https://www.youtube-nocookie.com/embed/${getYouTubeId(currentQ.songUrl)}?autoplay=1&controls=1&modestbranding=1&rel=0`}
+                          allow="autoplay; accelerometer; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                          style={{width:480,height:270,maxWidth:"80vw",display:"block",border:"none"}}
+                          title="reveal"/>
+                      </div>
+                    )}
+                    {getSpotifyTrackId(currentQ.songUrl)&&!getYouTubeId(currentQ.songUrl)&&(
+                      <iframe
+                        src={`https://open.spotify.com/embed/track/${getSpotifyTrackId(currentQ.songUrl)}?utm_source=generator&theme=0`}
+                        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                        style={{width:320,height:80,borderRadius:12,border:"none",marginTop:".5rem"}}
+                        title="spotify-reveal"/>
+                    )}
                   </div>
                 )}
-                {getSpotifyTrackId(currentQ.songUrl)&&!getYouTubeId(currentQ.songUrl)&&(
-                  <iframe
-                    src={`https://open.spotify.com/embed/track/${getSpotifyTrackId(currentQ.songUrl)}?utm_source=generator&theme=0`}
-                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                    style={{width:320,height:80,borderRadius:12,border:"none",marginTop:".5rem"}}
-                    title="spotify-reveal"/>
-                )}
+                {/* Award-points panel — quizmaster manually scores music answers */}
+                <div style={{background:"rgba(0,0,0,.38)",border:"1px solid rgba(232,148,58,.22)",borderRadius:14,padding:"1rem 1.2rem",marginTop:".4rem"}}>
+                  <div style={{fontSize:".68rem",color:"var(--amber)",textTransform:"uppercase",letterSpacing:".12em",fontWeight:700,marginBottom:".75rem"}}>
+                    Award Points — {currentQ.points} pt{currentQ.points!==1?"s":""} each
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:".5rem"}}>
+                    {scorePairs.map(([key,score])=>{
+                      const team=isTeamQuiz?(quiz.teams||[]).find(t=>t.name===key):null;
+                      const pts=currentQ.points||10;
+                      return(
+                        <div key={key} style={{display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"7px 10px"}}>
+                          {isTeamQuiz
+                            ?<span style={{fontSize:"1.15rem",flexShrink:0}}>{team?.avatar||"🎯"}</span>
+                            :<Avatar name={key} size={24} {...(users.find(u=>u.username===key)||{})}/>}
+                          <span style={{flex:1,fontSize:".8rem",color:"rgba(255,255,255,.8)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:500}}>{isTeamQuiz?key:getDisplayName(key,users)}</span>
+                          <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                            <button onClick={()=>awardPoints(key,-pts)}
+                              style={{width:26,height:26,borderRadius:6,background:"rgba(224,85,85,.15)",border:"1px solid rgba(224,85,85,.3)",color:"var(--red)",cursor:"pointer",fontSize:".9rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"var(--font-b)"}}
+                              onMouseEnter={e=>e.currentTarget.style.background="rgba(224,85,85,.3)"}
+                              onMouseLeave={e=>e.currentTarget.style.background="rgba(224,85,85,.15)"}>−</button>
+                            <span style={{fontSize:".82rem",color:"var(--amber)",fontWeight:700,minWidth:28,textAlign:"center"}}>{score}</span>
+                            <button onClick={()=>awardPoints(key,pts)}
+                              style={{width:26,height:26,borderRadius:6,background:"rgba(76,175,125,.15)",border:"1px solid rgba(76,175,125,.3)",color:"var(--green)",cursor:"pointer",fontSize:".9rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"var(--font-b)"}}
+                              onMouseEnter={e=>e.currentTarget.style.background="rgba(76,175,125,.3)"}
+                              onMouseLeave={e=>e.currentTarget.style.background="rgba(76,175,125,.15)"}>+</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -3687,13 +4205,44 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[]})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // POLLS TAB
 // ─────────────────────────────────────────────────────────────────────────────
-const PollsTab=({evt,onUpdate,currentUser,isPast,users=[]})=>{
+const PollsTab=({evt,onUpdate,currentUser,isPast,users=[],onSendNotif})=>{
   const [creating,setCreating]=useState(false);
-  const [newPoll,setNewPoll]=useState({title:"",emoji:"📊",options:["",""]});
+  const blankPoll={title:"",emoji:"📊",options:["",""],secret:false,locked:false,allowUserOptions:false,linkUrl:"",linkLabel:""};
+  const [newPoll,setNewPoll]=useState(blankPoll);
+  const [showLink,setShowLink]=useState(false);
+  const [userOptInputs,setUserOptInputs]=useState({});
+  const [expanded,setExpanded]=useState({});
+  const [editingOpt,setEditingOpt]=useState(null);
+  const [notifyPending,setNotifyPending]=useState(null);
+  const isOrg=can.closePoll(currentUser);
+
   const savePolls=p=>onUpdate({...evt,polls:p});
+
+  const saveEditOpt=()=>{
+    if(!editingOpt)return;
+    const{pollId,idx,value}=editingOpt;
+    if(!value.trim())return;
+    savePolls((evt.polls||[]).map(p=>p.id!==pollId?p:{...p,options:p.options.map((o,i)=>i===idx?{...o,label:value.trim()}:o)}));
+    setEditingOpt(null);
+  };
+
+  const movePoll=(pollId,d)=>{
+    const arr=[...(evt.polls||[])];
+    const p=arr.find(x=>x.id===pollId);
+    if(!p)return;
+    const grp=arr.filter(x=>!!x.closed===!!p.closed);
+    const gi=grp.findIndex(x=>x.id===pollId);
+    const ni=gi+d;
+    if(ni<0||ni>=grp.length)return;
+    const ia=arr.findIndex(x=>x.id===pollId);
+    const ja=arr.findIndex(x=>x.id===grp[ni].id);
+    [arr[ia],arr[ja]]=[arr[ja],arr[ia]];
+    savePolls(arr);
+  };
+
   const vote=(pollId,optIdx)=>{
     if(!can.vote(currentUser))return;
-    savePolls(evt.polls.map(p=>{
+    savePolls((evt.polls||[]).map(p=>{
       if(p.id!==pollId||p.closed)return p;
       return{...p,options:p.options.map((o,i)=>{
         if(i===optIdx)return o.votes.includes(currentUser.username)?{...o,votes:o.votes.filter(v=>v!==currentUser.username)}:{...o,votes:[...o.votes,currentUser.username]};
@@ -3701,72 +4250,238 @@ const PollsTab=({evt,onUpdate,currentUser,isPast,users=[]})=>{
       })};
     }));
   };
+
+  const addUserOption=(pollId)=>{
+    const label=(userOptInputs[pollId]||"").trim();
+    if(!label)return;
+    savePolls((evt.polls||[]).map(p=>{
+      if(p.id!==pollId)return p;
+      // Remove user's existing vote, add new option with their vote
+      const cleared=p.options.map(o=>({...o,votes:o.votes.filter(v=>v!==currentUser.username)}));
+      return{...p,options:[...cleared,{label,votes:[currentUser.username],addedBy:currentUser.username}]};
+    }));
+    setUserOptInputs(s=>({...s,[pollId]:""}));
+  };
+
   const addPoll=()=>{
     const opts=newPoll.options.filter(o=>o.trim());
-    if(!newPoll.title.trim()||opts.length<2)return;
-    savePolls([...evt.polls,{id:`p${Date.now()}`,title:newPoll.title,emoji:newPoll.emoji,closed:false,options:opts.map(o=>({label:o,votes:[]}))}]);
-    setNewPoll({title:"",emoji:"📊",options:["",""]});setCreating(false);
+    if(!newPoll.title.trim())return;
+    if(!newPoll.allowUserOptions&&opts.length<2)return;
+    const link=(newPoll.linkUrl.trim())?{url:newPoll.linkUrl.trim(),label:newPoll.linkLabel.trim()||newPoll.linkUrl.trim()}:null;
+    savePolls([...(evt.polls||[]),{
+      id:`p${Date.now()}`,title:newPoll.title,emoji:newPoll.emoji,
+      closed:false,secret:!!newPoll.secret,locked:!!newPoll.locked,allowUserOptions:!!newPoll.allowUserOptions,
+      link,options:opts.map(o=>({label:o,votes:[]}))
+    }]);
+    setNewPoll(blankPoll);setShowLink(false);setCreating(false);
   };
+
+  const Toggle=({value,onChange,label})=>(
+    <div onClick={onChange} style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",userSelect:"none"}}>
+      <div style={{width:36,height:20,borderRadius:10,background:value?"var(--amber)":"var(--bg3)",border:`1px solid ${value?"var(--amber)":"var(--border)"}`,position:"relative",transition:"background .15s,border-color .15s",flexShrink:0}}>
+        <div style={{position:"absolute",top:2,left:value?18:2,width:14,height:14,borderRadius:"50%",background:value?"#1a1008":"var(--muted2)",transition:"left .15s"}}/>
+      </div>
+      <span style={{fontSize:".83rem",color:"var(--cream)"}}>{label}</span>
+    </div>
+  );
+
   return(
     <div style={{display:"grid",gap:"1.2rem"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:".8rem"}}>
         <div style={{fontSize:".82rem",color:"var(--muted)"}}>Voting as <strong style={{color:"var(--cream)"}}>{currentUser.username}</strong></div>
         {can.createPoll(currentUser)&&!isPast&&<Btn onClick={()=>setCreating(true)} size="sm">+ New Poll</Btn>}
       </div>
+      {notifyPending&&(
+        <div style={{background:"rgba(232,148,58,.08)",border:"1px solid rgba(232,148,58,.3)",borderRadius:"var(--radius-sm)",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+          <div style={{fontSize:".83rem",color:"var(--amber2)"}}>📣 Leden inlichten over deze reveal?</div>
+          <div style={{display:"flex",gap:6}}>
+            <Btn size="sm" onClick={()=>{onSendNotif(notifyPending);setNotifyPending(null);}}>Verstuur</Btn>
+            <Btn size="sm" variant="ghost" onClick={()=>setNotifyPending(null)}>Niet nu</Btn>
+          </div>
+        </div>
+      )}
       {!can.vote(currentUser)&&<div style={{background:"rgba(232,148,58,.07)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"10px 14px",fontSize:".83rem",color:"var(--muted)"}}>🔒 Member access required to vote.</div>}
-      {evt.polls.length===0&&<Card style={{textAlign:"center",padding:"3rem",color:"var(--muted)"}}>No polls yet{!can.createPoll(currentUser)?" — admin will add one soon.":""}.</Card>}
-      {evt.polls.map(poll=>{
-        const total=poll.options.reduce((s,o)=>s+o.votes.length,0);
-        const maxV=Math.max(...poll.options.map(o=>o.votes.length));
-        return(
-          <Card key={poll.id}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"1rem"}}>
-              <div>
-                <div style={{fontSize:"1.3rem",marginBottom:3}}>{poll.emoji}</div>
-                <div style={{fontFamily:"var(--font-h)",fontSize:"1.05rem",color:"var(--amber2)"}}>{poll.title}</div>
-                <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{total} vote{total!==1?"s":""} · {poll.closed?"🔒 Closed":"🟢 Open"}</div>
-              </div>
-              {can.closePoll(currentUser)&&!isPast&&(
-                <div style={{display:"flex",gap:6}}>
-                  <Btn onClick={()=>savePolls(evt.polls.map(p=>p.id===poll.id?{...p,closed:!p.closed}:p))} variant="ghost" size="sm">{poll.closed?"Reopen":"Close"}</Btn>
-                  <Btn onClick={()=>savePolls(evt.polls.filter(p=>p.id!==poll.id))} variant="danger" size="sm">✕</Btn>
+      {(evt.polls||[]).length===0&&<Card style={{textAlign:"center",padding:"3rem",color:"var(--muted)"}}>No polls yet{!can.createPoll(currentUser)?" — admin will add one soon.":""}.</Card>}
+      {(()=>{
+        const renderPoll=(poll,grp,gi)=>{
+          const isExp=expanded[poll.id]!==false;
+          const resultsHidden=!!poll.locked&&!isOrg;
+          if(!!poll.secret&&!isOrg){
+            return(
+              <Card key={poll.id} style={{opacity:.75}}>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{fontSize:"2rem",opacity:.4}}>🔒</div>
+                  <div>
+                    <div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:"var(--muted)"}}>Hidden poll</div>
+                    <div style={{fontSize:".75rem",color:"var(--muted2)",marginTop:2}}>The organisation will reveal this at the right moment</div>
+                  </div>
                 </div>
-              )}
-            </div>
-            <div style={{display:"grid",gap:6}}>
-              {poll.options.map((opt,i)=>{
-                const pct=total?Math.round(opt.votes.length/total*100):0;
-                const myVote=opt.votes.includes(currentUser.username);
-                const isWinner=opt.votes.length===maxV&&opt.votes.length>0;
-                const clickable=can.vote(currentUser)&&!isPast&&!poll.closed;
-                return(
-                  <div key={i} onClick={()=>clickable&&vote(poll.id,i)}
-                    onMouseEnter={e=>{if(clickable){e.currentTarget.style.borderColor=myVote?"var(--amber2)":"var(--border2)";e.currentTarget.style.transform="translateX(2px)";}}}
-                    onMouseLeave={e=>{e.currentTarget.style.borderColor="";e.currentTarget.style.transform="";}}
-                    style={{borderRadius:10,overflow:"hidden",position:"relative",border:myVote?"1px solid var(--amber)":"1px solid var(--border)",cursor:clickable?"pointer":"default",transition:"border-color .2s,transform .18s"}}>
-                    <div style={{position:"absolute",inset:0,background:myVote?"rgba(232,148,58,.12)":"rgba(255,255,255,.02)",width:pct+"%",transition:"width .35s ease"}}/>
-                    <div style={{position:"relative",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:7}}>
-                        {isWinner&&<span style={{fontSize:"13px"}}>👑</span>}
-                        <span style={{fontWeight:myVote?600:400,color:myVote?"var(--amber2)":"var(--cream)",fontSize:".87rem"}}>{opt.label}</span>
-                      </div>
-                      <div style={{display:"flex",alignItems:"center",gap:9}}>
-                        <div style={{display:"flex"}}>{opt.votes.slice(0,5).map((v,vi)=><div key={vi} style={{marginLeft:vi===0?0:-6}}><Avatar name={v} size={20} {...getUA(v,users)}/></div>)}{opt.votes.length>5&&<span style={{fontSize:".68rem",color:"var(--muted)",marginLeft:4,alignSelf:"center"}}>+{opt.votes.length-5}</span>}</div>
-                        <span style={{color:"var(--amber)",fontWeight:700,fontSize:".86rem",minWidth:32,textAlign:"right"}}>{pct}%</span>
+              </Card>
+            );
+          }
+          const total=poll.options.reduce((s,o)=>s+o.votes.length,0);
+          const maxV=Math.max(...poll.options.map(o=>o.votes.length));
+          return(
+            <Card key={poll.id} id={`poll-${poll.id}`} style={{...(poll.closed?{opacity:.8}:{}),padding:0,overflow:"hidden"}}>
+              {/* Header — click anywhere to expand/collapse */}
+              <div onClick={()=>setExpanded(s=>({...s,[poll.id]:!isExp}))}
+                style={{cursor:"pointer",padding:"1rem 1.2rem",display:"flex",alignItems:"center",gap:12,userSelect:"none"}}>
+                <div style={{fontSize:"1.6rem",lineHeight:1,flexShrink:0}}>{poll.emoji}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--amber2)",marginBottom:3}}>{poll.title}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span style={{fontSize:".7rem",fontWeight:600,letterSpacing:".05em",padding:"2px 7px",borderRadius:20,background:poll.closed?"rgba(255,255,255,.06)":"rgba(80,200,120,.12)",color:poll.closed?"var(--muted)":"#5dc87a",border:poll.closed?"1px solid rgba(255,255,255,.08)":"1px solid rgba(80,200,120,.2)"}}>{poll.closed?"Closed":"Open"}</span>
+                    {!resultsHidden&&<span style={{fontSize:".72rem",color:"var(--muted)"}}>{total} vote{total!==1?"s":""}</span>}
+                    {resultsHidden&&<span style={{fontSize:".7rem",color:"var(--orange)",fontWeight:600}}>🔒 Results locked</span>}
+                    {isOrg&&!!poll.secret&&<span style={{fontSize:".7rem",color:"rgba(220,80,80,.85)",fontWeight:600}}>🤫 Secret</span>}
+                    {poll.link?.url&&<span style={{fontSize:".7rem",color:"var(--amber)",opacity:.7}}>🔗</span>}
+                  </div>
+                </div>
+                <div style={{fontSize:".7rem",color:"var(--muted)",transition:"transform .2s",transform:isExp?"rotate(0deg)":"rotate(-90deg)",flexShrink:0}}>▼</div>
+              </div>
+
+              {/* Collapsible body */}
+              <div style={{overflow:"hidden",maxHeight:isExp?"800px":"0",transition:"max-height .28s ease"}}>
+                <div style={{padding:"0 1.2rem 1.2rem",display:"grid",gap:8}}>
+
+                  {/* Locked results banner */}
+                  {resultsHidden&&(
+                    <div style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,140,0,.08)",border:"1px solid rgba(255,140,0,.25)",borderRadius:8,padding:"8px 12px"}}>
+                      <span>👁</span>
+                      <div>
+                        <div style={{fontSize:".8rem",fontWeight:600,color:"var(--orange)"}}>Results are locked</div>
+                        <div style={{fontSize:".7rem",color:"var(--muted)"}}>The organisation will reveal results later</div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  )}
+
+                  {/* External link */}
+                  {poll.link?.url&&(
+                    <a href={poll.link.url} target="_blank" rel="noreferrer"
+                      style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderRadius:10,background:"rgba(232,148,58,.07)",border:"1px solid rgba(232,148,58,.2)",color:"var(--amber2)",textDecoration:"none",fontSize:".85rem",fontWeight:500}}>
+                      <span style={{fontSize:"1rem"}}>🔗</span>
+                      <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{poll.link.label||poll.link.url}</span>
+                      <span style={{opacity:.5,fontSize:".7rem"}}>↗</span>
+                    </a>
+                  )}
+
+                  {/* Vote options */}
+                  {poll.options.map((opt,i)=>{
+                    const pct=total?Math.round(opt.votes.length/total*100):0;
+                    const myVote=opt.votes.includes(currentUser.username);
+                    const isWinner=!resultsHidden&&opt.votes.length===maxV&&opt.votes.length>0;
+                    const clickable=can.vote(currentUser)&&!isPast&&!poll.closed;
+                    const isMyOpt=opt.addedBy===currentUser.username;
+                    const onlyMyVote=opt.votes.length===1&&opt.votes[0]===currentUser.username;
+                    const canEditOpt=isMyOpt&&onlyMyVote&&!poll.closed&&!isPast;
+                    const canDelOpt=(isOrg||(isMyOpt&&onlyMyVote))&&!poll.closed&&!isPast;
+                    const isEditing=editingOpt?.pollId===poll.id&&editingOpt?.idx===i;
+                    return(
+                      <div key={i} style={{position:"relative",borderRadius:12,overflow:"hidden",border:myVote?"1px solid var(--amber)":"1px solid var(--border)",transition:"border-color .15s"}}>
+                        {/* progress bar bg */}
+                        {!isEditing&&!resultsHidden&&(
+                          <div style={{position:"absolute",inset:0,background:myVote?"rgba(232,148,58,.1)":"rgba(255,255,255,.02)",width:pct+"%",transition:"width .4s ease",pointerEvents:"none"}}/>
+                        )}
+                        {isEditing?(
+                          <div style={{display:"flex",gap:8,padding:"10px 12px",alignItems:"center"}}>
+                            <Inp value={editingOpt.value} autoFocus
+                              onChange={e=>setEditingOpt(s=>({...s,value:e.target.value}))}
+                              onKeyDown={e=>{if(e.key==="Enter")saveEditOpt();if(e.key==="Escape")setEditingOpt(null);}}
+                              style={{flex:1,fontSize:".88rem",padding:"6px 10px"}}/>
+                            <Btn onClick={saveEditOpt} size="sm" variant="ghost">✓</Btn>
+                            <Btn onClick={()=>setEditingOpt(null)} size="sm" variant="ghost">✕</Btn>
+                          </div>
+                        ):(
+                          <div onClick={()=>clickable&&vote(poll.id,i)}
+                            style={{position:"relative",display:"flex",alignItems:"center",gap:10,padding:"13px 14px",cursor:clickable?"pointer":"default",minHeight:48}}>
+                            {/* Vote indicator */}
+                            <div style={{width:20,height:20,borderRadius:"50%",border:myVote?"2px solid var(--amber)":"2px solid var(--border)",background:myVote?"var(--amber)":"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+                              {myVote&&<div style={{width:8,height:8,borderRadius:"50%",background:"#1a1008"}}/>}
+                            </div>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                                {isWinner&&<span style={{fontSize:"13px"}}>👑</span>}
+                                <span style={{fontWeight:myVote?600:400,color:myVote?"var(--amber2)":"var(--cream)",fontSize:".9rem"}}>{opt.label}</span>
+                                {opt.addedBy&&<span style={{fontSize:".68rem",color:"var(--muted)",fontStyle:"italic"}}>by {getDisplayName(opt.addedBy,users)||opt.addedBy}</span>}
+                              </div>
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                              {resultsHidden?(
+                                myVote&&<span style={{fontSize:".78rem",color:"var(--amber)",fontWeight:600}}>✓</span>
+                              ):(
+                                <>
+                                  <div style={{display:"flex",alignItems:"center"}}>{opt.votes.slice(0,4).map((v,vi)=><div key={vi} style={{marginLeft:vi===0?0:-6}}><Avatar name={v} size={18} {...getUA(v,users)}/></div>)}{opt.votes.length>4&&<span style={{fontSize:".65rem",color:"var(--muted)",marginLeft:4}}>+{opt.votes.length-4}</span>}</div>
+                                  <span style={{color:"var(--amber)",fontWeight:700,fontSize:".82rem",minWidth:28,textAlign:"right"}}>{pct}%</span>
+                                </>
+                              )}
+                              {(canEditOpt||canDelOpt)&&(
+                                <div style={{display:"flex",gap:2}} onClick={e=>e.stopPropagation()}>
+                                  {canEditOpt&&<button onClick={()=>setEditingOpt({pollId:poll.id,idx:i,value:opt.label})}
+                                    style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:".8rem",padding:"2px 4px",opacity:.55}}>✎</button>}
+                                  {canDelOpt&&<button onClick={()=>savePolls((evt.polls||[]).map(p=>p.id===poll.id?{...p,options:p.options.filter((_,j)=>j!==i)}:p))}
+                                    style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:".75rem",padding:"2px 4px",opacity:.55}}>✕</button>}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Add own option */}
+                  {poll.allowUserOptions&&!poll.closed&&can.vote(currentUser)&&!isPast&&(
+                    <div style={{display:"flex",gap:8}}>
+                      <Inp value={userOptInputs[poll.id]||""} onChange={e=>setUserOptInputs(s=>({...s,[poll.id]:e.target.value}))}
+                        onKeyDown={e=>e.key==="Enter"&&addUserOption(poll.id)}
+                        placeholder="Voeg je eigen optie toe…" style={{flex:1,fontSize:".85rem",padding:"9px 12px"}}/>
+                      <Btn onClick={()=>addUserOption(poll.id)} size="sm" variant="ghost">+</Btn>
+                    </div>
+                  )}
+
+                  {/* Admin toolbar — always at bottom, never in header */}
+                  {isOrg&&!isPast&&(
+                    <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",paddingTop:4,borderTop:"1px solid var(--border)",marginTop:4}}>
+                      <Btn onClick={()=>movePoll(poll.id,-1)} variant="ghost" size="sm" style={{opacity:gi===0?.3:1,minWidth:32}}>↑</Btn>
+                      <Btn onClick={()=>movePoll(poll.id,1)} variant="ghost" size="sm" style={{opacity:gi===grp.length-1?.3:1,minWidth:32}}>↓</Btn>
+                      <div style={{width:1,height:16,background:"var(--border)",margin:"0 2px"}}/>
+                      <Btn onClick={()=>{savePolls((evt.polls||[]).map(p=>p.id===poll.id?{...p,secret:!p.secret}:p));if(poll.secret&&onSendNotif)setNotifyPending({message:`📊 Poll beschikbaar: "${poll.title}"`,type:"poll",tab:"Polls",targetId:`poll-${poll.id}`,eventId:evt.id,event:evt.name});}} variant="ghost" size="sm">{poll.secret?"👁 Toon":"🤫 Geheim"}</Btn>
+                      <Btn onClick={()=>savePolls((evt.polls||[]).map(p=>p.id===poll.id?{...p,locked:!p.locked}:p))} variant="ghost" size="sm">{poll.locked?"🔓 Onthul":"🔒 Vergrendel"}</Btn>
+                      <Btn onClick={()=>savePolls((evt.polls||[]).map(p=>p.id===poll.id?{...p,closed:!p.closed}:p))} variant="ghost" size="sm">{poll.closed?"Heropenen":"Sluiten"}</Btn>
+                      <Btn onClick={()=>savePolls((evt.polls||[]).filter(p=>p.id!==poll.id))} variant="danger" size="sm">Verwijder</Btn>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Card>
+          );
+        };
+        const open=(evt.polls||[]).filter(p=>!p.closed);
+        const closed=(evt.polls||[]).filter(p=>p.closed);
+        return(<>
+          {open.map((p,i)=>renderPoll(p,open,i))}
+          {closed.length>0&&<>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginTop:".4rem"}}>
+              <div style={{flex:1,height:1,background:"var(--border)"}}/>
+              <span style={{fontSize:".72rem",color:"var(--muted)",letterSpacing:".08em",textTransform:"uppercase"}}>🔒 Closed Polls</span>
+              <div style={{flex:1,height:1,background:"var(--border)"}}/>
             </div>
-          </Card>
-        );
-      })}
+            {closed.map((p,i)=>renderPoll(p,closed,i))}
+          </>}
+        </>);
+      })()}
+
       {creating&&(
-        <Modal onClose={()=>setCreating(false)} maxWidth={440}>
+        <Modal onClose={()=>{setCreating(false);setNewPoll(blankPoll);setShowLink(false);}} onBackdropClose={()=>{}} maxWidth={460}>
           <H>New Poll</H>
-          <div style={{display:"grid",gap:".85rem"}}>
-            <div style={{display:"flex",gap:8}}><Inp value={newPoll.emoji} onChange={e=>setNewPoll({...newPoll,emoji:e.target.value})} style={{width:52,textAlign:"center",fontSize:"1.1rem",flexShrink:0}}/><Inp value={newPoll.title} onChange={e=>setNewPoll({...newPoll,title:e.target.value})} placeholder="Poll question…"/></div>
+          <div style={{display:"grid",gap:"1rem"}}>
+            {/* Title + emoji */}
+            <div style={{display:"flex",gap:8}}>
+              <Inp value={newPoll.emoji} onChange={e=>setNewPoll({...newPoll,emoji:e.target.value})} style={{width:52,textAlign:"center",fontSize:"1.1rem",flexShrink:0}}/>
+              <Inp value={newPoll.title} onChange={e=>setNewPoll({...newPoll,title:e.target.value})} placeholder="Poll question…" autoFocus/>
+            </div>
+
+            {/* Options */}
             <div>
               <Lbl>Options</Lbl>
               {newPoll.options.map((o,i)=>(
@@ -3777,7 +4492,29 @@ const PollsTab=({evt,onUpdate,currentUser,isPast,users=[]})=>{
               ))}
               <Btn onClick={()=>setNewPoll({...newPoll,options:[...newPoll.options,""]})} variant="ghost" size="sm">+ Option</Btn>
             </div>
-            <div style={{display:"flex",gap:8}}><Btn onClick={addPoll}>Create</Btn><Btn onClick={()=>setCreating(false)} variant="ghost">Cancel</Btn></div>
+
+            {/* Toggles */}
+            <div style={{display:"grid",gap:".6rem",background:"var(--bg3)",borderRadius:10,padding:".8rem 1rem",border:"1px solid var(--border)"}}>
+              <Toggle value={newPoll.secret} onChange={()=>setNewPoll({...newPoll,secret:!newPoll.secret})} label="🤫 Secret poll — hidden from members until you reveal it"/>
+              <Toggle value={newPoll.locked} onChange={()=>setNewPoll({...newPoll,locked:!newPoll.locked})} label="🔒 Lock results — members can vote but not see results"/>
+              <Toggle value={newPoll.allowUserOptions} onChange={()=>setNewPoll({...newPoll,allowUserOptions:!newPoll.allowUserOptions})} label="✏️ Let members add their own options"/>
+            </div>
+
+            {/* External link */}
+            {!showLink?(
+              <button onClick={()=>setShowLink(true)} style={{background:"none",border:"none",color:"var(--amber)",cursor:"pointer",fontSize:".8rem",textAlign:"left",padding:0,fontFamily:"var(--font-b)"}}>🔗 Add external link (optional)</button>
+            ):(
+              <div style={{display:"grid",gap:6}}>
+                <Lbl>Link</Lbl>
+                <Inp value={newPoll.linkUrl} onChange={e=>setNewPoll({...newPoll,linkUrl:e.target.value})} placeholder="https://…"/>
+                <Inp value={newPoll.linkLabel} onChange={e=>setNewPoll({...newPoll,linkLabel:e.target.value})} placeholder="Link label (e.g. Food order form)"/>
+              </div>
+            )}
+
+            <div style={{display:"flex",gap:8}}>
+              <Btn onClick={addPoll} disabled={!newPoll.title.trim()||(!newPoll.allowUserOptions&&newPoll.options.filter(o=>o.trim()).length<2)}>Create</Btn>
+              <Btn onClick={()=>{setCreating(false);setNewPoll(blankPoll);setShowLink(false);}} variant="ghost">Cancel</Btn>
+            </div>
           </div>
         </Modal>
       )}
@@ -3822,7 +4559,7 @@ const PhotosTab=({evt,onUpdate,currentUser})=>{
       {(!evt.photos||evt.photos.length===0)&&<Card style={{textAlign:"center",padding:"3.5rem 2rem"}}><div style={{fontSize:"2.5rem",marginBottom:"1rem"}}>📷</div><div style={{color:"var(--muted)",fontFamily:"var(--font-h)"}}>No photos yet</div>{can.uploadPhoto(currentUser)&&<Btn onClick={()=>fileRef.current?.click()} style={{marginTop:"1.2rem"}} size="sm">Upload first photo</Btn>}</Card>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(185px,1fr))",gap:"1rem"}}>
         {(evt.photos||[]).map(photo=>(
-          <div key={photo.id} style={{background:"var(--bg2)",borderRadius:"var(--radius)",border:"1px solid var(--border)",overflow:"hidden",cursor:"pointer",transition:"transform .2s"}} onMouseEnter={e=>e.currentTarget.style.transform="translateY(-3px)"} onMouseLeave={e=>e.currentTarget.style.transform=""} onClick={()=>setLightbox(photo)}>
+          <div key={photo.id} id={`photo-${photo.id}`} style={{background:"var(--bg2)",borderRadius:"var(--radius)",border:"1px solid var(--border)",overflow:"hidden",cursor:"pointer",transition:"transform .2s"}} onMouseEnter={e=>e.currentTarget.style.transform="translateY(-3px)"} onMouseLeave={e=>e.currentTarget.style.transform=""} onClick={()=>setLightbox(photo)}>
             <div style={{aspectRatio:"4/3",overflow:"hidden"}}><img src={photo.src} alt="" style={{width:"100%",height:"100%",objectFit:"cover",transition:"transform .3s"}} onMouseEnter={e=>e.target.style.transform="scale(1.05)"} onMouseLeave={e=>e.target.style.transform=""}/></div>
             <div style={{padding:"8px 10px"}}>
               {photo.caption&&<div style={{fontSize:".77rem",color:"var(--cream)",opacity:.75,marginBottom:4}}>{photo.caption}</div>}
@@ -3859,6 +4596,15 @@ const WinnersTab=({evt,onUpdate,currentUser,isPast})=>{
   const winners=evt.winners||[];const highlights=evt.highlights||[];
   const saveW=w=>onUpdate({...evt,winners:w});const saveH=h=>onUpdate({...evt,highlights:h});
   const isAdmin=can.addWinner(currentUser);
+  const quizWinners=(evt.quizzes||[]).filter(q=>q.status==="finished"&&q.scores&&Object.keys(q.scores).length>0).map(quiz=>{
+    const isTeam=(quiz.teams||[]).length>0;
+    const sorted=Object.entries(quiz.scores).sort((a,b)=>b[1]-a[1]);
+    if(!sorted.length)return null;
+    const [topName,topScore]=sorted[0];
+    const team=isTeam?(quiz.teams||[]).find(t=>t.name===topName):null;
+    const detail=isTeam&&team?.members?.length?`${topScore} pts · ${team.members.join(", ")}`:`${topScore} pts`;
+    return{id:`quiz-winner-${quiz.id}`,icon:isTeam?(team?.avatar||"🎯"):"🧠",category:`🧠 ${quiz.title}`,winner:topName,detail,topScore};
+  }).filter(Boolean);
   return(
     <div style={{display:"grid",gap:"1.8rem"}}>
       <div>
@@ -3866,8 +4612,18 @@ const WinnersTab=({evt,onUpdate,currentUser,isPast})=>{
           <H style={{marginBottom:0}}>🏆 Awards & Winners</H>
           {isAdmin&&<Btn onClick={()=>setAddingW(true)} size="sm">+ Add Award</Btn>}
         </div>
-        {winners.length===0&&<Card style={{textAlign:"center",padding:"2.5rem",color:"var(--muted)"}}><div style={{fontSize:"2.5rem",marginBottom:".8rem"}}>🏆</div><div style={{fontFamily:"var(--font-h)",marginBottom:".4rem"}}>No awards yet</div></Card>}
+        {winners.length===0&&quizWinners.length===0&&<Card style={{textAlign:"center",padding:"2.5rem",color:"var(--muted)"}}><div style={{fontSize:"2.5rem",marginBottom:".8rem"}}>🏆</div><div style={{fontFamily:"var(--font-h)",marginBottom:".4rem"}}>No awards yet</div></Card>}
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:"1rem"}}>
+          {quizWinners.map(w=>(
+            <div key={w.id} style={{background:"var(--bg2)",border:"1px solid rgba(139,92,246,.35)",borderRadius:"var(--radius)",padding:"1.2rem",position:"relative",overflow:"hidden"}}>
+              <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,#6c63ff,#a78bfa,#6c63ff)"}}/>
+              <div style={{position:"absolute",top:8,right:10,fontSize:".6rem",background:"rgba(139,92,246,.18)",color:"#a78bfa",borderRadius:4,padding:"1px 7px",letterSpacing:".07em",fontWeight:700}}>AUTO</div>
+              <div style={{fontSize:"1.8rem",marginBottom:".5rem"}}>{w.icon}</div>
+              <div style={{fontSize:".72rem",color:"var(--muted)",letterSpacing:".08em",textTransform:"uppercase",marginBottom:3}}>{w.category}</div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"1.25rem",color:"#a78bfa",marginBottom:5}}>{w.winner}</div>
+              {w.detail&&<div style={{fontSize:".81rem",color:"var(--cream)",opacity:.7,lineHeight:1.5}}>{w.detail}</div>}
+            </div>
+          ))}
           {winners.map(w=>(
             <div key={w.id} style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"1.2rem",position:"relative",overflow:"hidden",transition:"border-color .2s"}} onMouseEnter={e=>e.currentTarget.style.borderColor="var(--border2)"} onMouseLeave={e=>e.currentTarget.style.borderColor="var(--border)"}>
               <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,var(--gold),var(--amber2),var(--gold))"}}/>
@@ -3896,21 +4652,35 @@ const WinnersTab=({evt,onUpdate,currentUser,isPast})=>{
           ))}
         </div>
       </div>
-      {(addingW||editW)&&<Modal onClose={()=>{setAddingW(false);setEditW(null)}} maxWidth={440}><WinnerForm initial={editW} attendees={evt.attendees.map(a=>a.name)} onSave={w=>{editW?saveW(winners.map(x=>x.id===w.id?w:x)):saveW([...winners,{...w,id:`w${Date.now()}`}]);setAddingW(false);setEditW(null)}} onClose={()=>{setAddingW(false);setEditW(null)}}/></Modal>}
-      {(addingH||editH)&&<Modal onClose={()=>{setAddingH(false);setEditH(null)}} maxWidth={440}><HighlightForm initial={editH} onSave={h=>{editH?saveH(highlights.map(x=>x.id===h.id?h:x)):saveH([...highlights,{...h,id:`h${Date.now()}`}]);setAddingH(false);setEditH(null)}} onClose={()=>{setAddingH(false);setEditH(null)}}/></Modal>}
+      {(addingW||editW)&&<WinnerForm initial={editW} attendees={evt.attendees.map(a=>a.name)} onSave={w=>{editW?saveW(winners.map(x=>x.id===w.id?w:x)):saveW([...winners,{...w,id:`w${Date.now()}`}]);setAddingW(false);setEditW(null)}} onClose={()=>{setAddingW(false);setEditW(null)}}/>}
+      {(addingH||editH)&&<HighlightForm initial={editH} onSave={h=>{editH?saveH(highlights.map(x=>x.id===h.id?h:x)):saveH([...highlights,{...h,id:`h${Date.now()}`}]);setAddingH(false);setEditH(null)}} onClose={()=>{setAddingH(false);setEditH(null)}}/>}
     </div>
   );
 };
 
+// WinnerForm/HighlightForm own their `<Modal>` directly (rather than being
+// wrapped by one at the call site) specifically so the backdrop-click
+// wiring below can reach each form's own local draft state (`d`) -- same
+// reason EditScheduleModal owns its Modal inline. Both forms serve dual
+// duty (create a new award/highlight, or edit an existing one, selected by
+// whether `initial` is passed) -- per the owner's backdrop-click fix
+// direction: editing an existing item saves on backdrop click (nothing
+// lost, same disabled-Save gate as the button itself), creating a new one
+// ignores backdrop clicks entirely (ellipsis onBackdropClose -- a half-
+// filled award/highlight would otherwise litter the event with junk).
 const WinnerForm=({initial,attendees,onSave,onClose})=>{
   const [d,setD]=useState(initial||{category:"",winner:"",detail:"",icon:"🏆"});
   const [ip,setIp]=useState(false);
-  return(<><H>{initial?"Edit Award":"New Award"}</H><div style={{display:"grid",gap:".85rem"}}><div><Lbl>Icon</Lbl><div style={{position:"relative",display:"inline-block"}}><button onClick={()=>setIp(!ip)} style={{width:44,height:44,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",cursor:"pointer",fontSize:"22px"}}>{d.icon}</button>{ip&&<div style={{position:"absolute",top:48,left:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:10,padding:8,display:"flex",flexWrap:"wrap",gap:4,width:228,zIndex:10}}>{TROPHY_ICONS.map(ic=><button key={ic} onClick={()=>{setD({...d,icon:ic});setIp(false)}} style={{background:d.icon===ic?"rgba(232,148,58,.2)":"transparent",border:"none",borderRadius:6,cursor:"pointer",fontSize:"19px",width:34,height:34}}>{ic}</button>)}</div>}</div></div><div><Lbl>Category</Lbl><Inp value={d.category} onChange={e=>setD({...d,category:e.target.value})} placeholder="🏎️ Go-Kart Winner"/></div><div><Lbl>Winner</Lbl><select value={d.winner} onChange={e=>setD({...d,winner:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:d.winner?"var(--cream)":"var(--muted)",fontSize:".88rem",width:"100%"}}><option value="">Select…</option>{attendees.map(n=><option key={n} value={n}>{n}</option>)}<option value="Everyone">Everyone 🎉</option><option value="Nobody">Nobody 💀</option></select></div><div><Lbl>Story</Lbl><Inp value={d.detail} onChange={e=>setD({...d,detail:e.target.value})} placeholder="What happened?" multiline/></div><div style={{display:"flex",gap:8}}><Btn onClick={()=>onSave(d)} disabled={!d.category.trim()||!d.winner}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div></div></>);
+  const isEdit=!!initial;
+  const canSave=d.category.trim()&&d.winner;
+  return(<Modal onClose={onClose} onBackdropClose={isEdit?(()=>{if(canSave)onSave(d);}):(()=>{})} maxWidth={440}><H>{initial?"Edit Award":"New Award"}</H><div style={{display:"grid",gap:".85rem"}}><div><Lbl>Icon</Lbl><div style={{position:"relative",display:"inline-block"}}><button onClick={()=>setIp(!ip)} style={{width:44,height:44,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",cursor:"pointer",fontSize:"22px"}}>{d.icon}</button>{ip&&<div style={{position:"absolute",top:48,left:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:10,padding:8,display:"flex",flexWrap:"wrap",gap:4,width:228,zIndex:10}}>{TROPHY_ICONS.map(ic=><button key={ic} onClick={()=>{setD({...d,icon:ic});setIp(false)}} style={{background:d.icon===ic?"rgba(232,148,58,.2)":"transparent",border:"none",borderRadius:6,cursor:"pointer",fontSize:"19px",width:34,height:34}}>{ic}</button>)}</div>}</div></div><div><Lbl>Category</Lbl><Inp value={d.category} onChange={e=>setD({...d,category:e.target.value})} placeholder="🏎️ Go-Kart Winner"/></div><div><Lbl>Winner</Lbl><select value={d.winner} onChange={e=>setD({...d,winner:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:d.winner?"var(--cream)":"var(--muted)",fontSize:".88rem",width:"100%"}}><option value="">Select…</option>{attendees.map(n=><option key={n} value={n}>{n}</option>)}<option value="Everyone">Everyone 🎉</option><option value="Nobody">Nobody 💀</option></select></div><div><Lbl>Story</Lbl><Inp value={d.detail} onChange={e=>setD({...d,detail:e.target.value})} placeholder="What happened?" multiline/></div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><Btn onClick={()=>onSave(d)} disabled={!canSave}>Save</Btn><Btn onClick={onClose} variant="ghost">{isEdit?"Discard changes":"Cancel"}</Btn>{isEdit&&<span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span>}</div></div></Modal>);
 };
 
 const HighlightForm=({initial,onSave,onClose})=>{
   const [d,setD]=useState(initial||{text:"",emoji:"✨"});
-  return(<><H>{initial?"Edit":"New Highlight"}</H><div style={{display:"grid",gap:".85rem"}}><div><Lbl>Emoji</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{HIGHLIGHT_EMOJIS.map(e=><button key={e} onClick={()=>setD({...d,emoji:e})} style={{width:36,height:36,background:d.emoji===e?"rgba(232,148,58,.25)":"var(--bg3)",border:d.emoji===e?"1px solid var(--amber)":"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontSize:"18px"}}>{e}</button>)}</div></div><div><Lbl>The story</Lbl><Inp value={d.text} onChange={e=>setD({...d,text:e.target.value})} placeholder="What happened?" multiline style={{minHeight:90}}/></div><div style={{display:"flex",gap:8}}><Btn onClick={()=>onSave(d)} disabled={!d.text.trim()}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div></div></>);
+  const isEdit=!!initial;
+  const canSave=d.text.trim();
+  return(<Modal onClose={onClose} onBackdropClose={isEdit?(()=>{if(canSave)onSave(d);}):(()=>{})} maxWidth={440}><H>{initial?"Edit":"New Highlight"}</H><div style={{display:"grid",gap:".85rem"}}><div><Lbl>Emoji</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{HIGHLIGHT_EMOJIS.map(e=><button key={e} onClick={()=>setD({...d,emoji:e})} style={{width:36,height:36,background:d.emoji===e?"rgba(232,148,58,.25)":"var(--bg3)",border:d.emoji===e?"1px solid var(--amber)":"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontSize:"18px"}}>{e}</button>)}</div></div><div><Lbl>The story</Lbl><Inp value={d.text} onChange={e=>setD({...d,text:e.target.value})} placeholder="What happened?" multiline style={{minHeight:90}}/></div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><Btn onClick={()=>onSave(d)} disabled={!canSave}>Save</Btn><Btn onClick={onClose} variant="ghost">{isEdit?"Discard changes":"Cancel"}</Btn>{isEdit&&<span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span>}</div></div></Modal>);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3925,6 +4695,9 @@ const FAQTab=({evt,onUpdate,currentUser})=>{
   const [question,setQuestion]=useState("");
   const [answeringId,setAnsweringId]=useState(null);
   const [answerText,setAnswerText]=useState("");
+  const [expanded,setExpanded]=useState(()=>new Set());
+  const [hoveredFaq,setHoveredFaq]=useState(null);
+  const toggle=id=>setExpanded(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
 
   const submitQuestion=()=>{
     const q=question.trim();
@@ -3944,6 +4717,8 @@ const FAQTab=({evt,onUpdate,currentUser})=>{
 
   const unanswered=faqs.filter(f=>!f.answer);
   const answered=faqs.filter(f=>f.answer);
+  const myPending=unanswered.filter(f=>f.askedBy===currentUser.username);
+  const visible=isAdmin?[...unanswered,...answered]:[...myPending,...answered];
 
   return(
     <div style={{display:"grid",gap:"1.2rem"}}>
@@ -3960,86 +4735,77 @@ const FAQTab=({evt,onUpdate,currentUser})=>{
         </Card>
       )}
 
-      {isAdmin&&unanswered.length>0&&(
-        <div>
-          <div style={{fontSize:".72rem",color:"var(--amber)",letterSpacing:".08em",textTransform:"uppercase",marginBottom:".6rem",fontWeight:600}}>Needs answer ({unanswered.length})</div>
-          <div style={{display:"grid",gap:".8rem"}}>
-            {unanswered.map(f=>(
-              <Card key={f.id} style={{borderColor:"rgba(232,148,58,.25)",background:"rgba(232,148,58,.04)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:"1rem"}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontWeight:600,fontSize:".92rem",color:"var(--cream)",marginBottom:4}}>{f.question}</div>
-                    <div style={{fontSize:".72rem",color:"var(--muted)"}}>Asked by <strong style={{color:"var(--cream)"}}>{f.askedBy}</strong> · {new Date(f.askedAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short"})}</div>
+      <div style={{display:"grid",gap:".45rem"}}>
+        {visible.map(f=>{
+          const isOpen=expanded.has(f.id);
+          const hasAnswer=!!f.answer;
+          const isOwn=f.askedBy===currentUser.username;
+          const isAnswering=answeringId===f.id;
+          const borderColor=!hasAnswer&&isAdmin?"rgba(232,148,58,.3)":!hasAnswer&&isOwn?"rgba(90,155,213,.25)":"var(--border)";
+          return(
+            <div key={f.id} id={`faq-${f.id}`} style={{background:"var(--bg2)",border:`1px solid ${isOpen?( !hasAnswer&&isAdmin?"rgba(232,148,58,.5)":!hasAnswer&&isOwn?"rgba(90,155,213,.45)":"var(--border2)"):borderColor}`,borderRadius:"var(--radius)",overflow:"hidden",transition:"border-color .2s"}}>
+              <div
+                onClick={()=>toggle(f.id)}
+                onMouseEnter={()=>setHoveredFaq(f.id)}
+                onMouseLeave={()=>setHoveredFaq(null)}
+                style={{display:"flex",alignItems:"center",gap:"1rem",padding:".8rem 1.1rem",cursor:"pointer",userSelect:"none",background:hoveredFaq===f.id&&!isOpen?"rgba(255,255,255,.03)":"transparent",transition:"background .15s"}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:600,fontSize:".9rem",color:hasAnswer?"var(--amber2)":"var(--cream)"}}>{f.question}</div>
+                  <div style={{fontSize:".7rem",color:"var(--muted)",marginTop:2}}>
+                    {hasAnswer?`✓ ${f.answeredBy}`:isOwn?"⏳ Waiting for an answer…":`Asked by ${f.askedBy}`}
                   </div>
-                  <Btn onClick={()=>deleteQuestion(f.id)} variant="danger" size="sm" style={{flexShrink:0}}>✕</Btn>
                 </div>
-                {answeringId===f.id?(
-                  <div style={{marginTop:"1rem",display:"grid",gap:".6rem"}}>
-                    <Inp value={answerText} onChange={e=>setAnswerText(e.target.value)} placeholder="Type your answer…" multiline rows={3} autoFocus/>
-                    <div style={{display:"flex",gap:6}}>
-                      <Btn onClick={()=>submitAnswer(f.id)} disabled={!answerText.trim()} size="sm">Post Answer</Btn>
-                      <Btn onClick={()=>{setAnsweringId(null);setAnswerText("")}} variant="ghost" size="sm">Cancel</Btn>
-                    </div>
-                  </div>
-                ):(
-                  <Btn onClick={()=>{setAnsweringId(f.id);setAnswerText("")}} variant="subtle" size="sm" style={{marginTop:"1rem"}}>Answer</Btn>
-                )}
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {answered.length>0&&(
-        <div>
-          {isAdmin&&unanswered.length>0&&<Divider label="answered"/>}
-          <div style={{display:"grid",gap:".8rem"}}>
-            {answered.map(f=>(
-              <Card key={f.id}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:"1rem"}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontWeight:600,fontSize:".92rem",color:"var(--amber2)",marginBottom:".7rem"}}>{f.question}</div>
-                    <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
-                      <div style={{width:3,borderRadius:2,background:"var(--amber)",flexShrink:0,alignSelf:"stretch",minHeight:20}}/>
-                      <div>
-                        <div style={{fontSize:".88rem",color:"var(--cream)",lineHeight:1.65}}>{f.answer}</div>
-                        <div style={{fontSize:".71rem",color:"var(--muted)",marginTop:5}}>
-                          Answered by <strong style={{color:"var(--amber)"}}>{f.answeredBy}</strong>
-                          {" · "}{new Date(f.answeredAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short"})}
-                          {"  ·  Asked by "}{f.askedBy}
+                {!hasAnswer&&isAdmin&&<Tag color="var(--amber)" style={{flexShrink:0,fontSize:".65rem"}}>Unanswered</Tag>}
+                {!hasAnswer&&!isAdmin&&isOwn&&<Tag color="var(--blue)" style={{flexShrink:0,fontSize:".65rem"}}>Pending</Tag>}
+                <span style={{color:"var(--muted)",fontSize:"1.1rem",flexShrink:0,transition:"transform .22s cubic-bezier(.4,0,.2,1)",transform:isOpen?"rotate(90deg)":"none",display:"inline-block"}}>›</span>
+              </div>
+              <div style={{maxHeight:isOpen?"600px":"0",overflow:"hidden",transition:"max-height .3s cubic-bezier(.4,0,.2,1)"}}>
+                <div style={{borderTop:"1px solid var(--border)",padding:".8rem 1.1rem",opacity:isOpen?1:0,transform:isOpen?"translateY(0)":"translateY(-6px)",transition:"opacity .22s ease .05s, transform .22s ease .05s"}}>
+                  {hasAnswer?(
+                    <div>
+                      <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+                        <div style={{width:3,borderRadius:2,background:"var(--amber)",flexShrink:0,alignSelf:"stretch",minHeight:16}}/>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:".88rem",color:"var(--cream)",lineHeight:1.65}}>{f.answer}</div>
+                          <div style={{fontSize:".71rem",color:"var(--muted)",marginTop:5}}>
+                            Answered by <strong style={{color:"var(--amber)"}}>{f.answeredBy}</strong>
+                            {" · "}{new Date(f.answeredAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short"})}
+                            {" · Asked by "}{f.askedBy}
+                          </div>
                         </div>
                       </div>
+                      {isAdmin&&<div style={{marginTop:".7rem"}}><Btn onClick={()=>deleteQuestion(f.id)} variant="danger" size="sm">✕ Delete</Btn></div>}
                     </div>
-                  </div>
-                  {isAdmin&&<Btn onClick={()=>deleteQuestion(f.id)} variant="danger" size="sm" style={{flexShrink:0}}>✕</Btn>}
+                  ):isAdmin?(
+                    <div style={{display:"grid",gap:".6rem"}}>
+                      <div style={{fontSize:".72rem",color:"var(--muted)"}}>Asked by <strong style={{color:"var(--cream)"}}>{f.askedBy}</strong> · {new Date(f.askedAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short"})}</div>
+                      {isAnswering?(
+                        <>
+                          <Inp value={answerText} onChange={e=>setAnswerText(e.target.value)} placeholder="Type your answer…" multiline rows={3} autoFocus/>
+                          <div style={{display:"flex",gap:6}}>
+                            <Btn onClick={()=>submitAnswer(f.id)} disabled={!answerText.trim()} size="sm">Post Answer</Btn>
+                            <Btn onClick={()=>{setAnsweringId(null);setAnswerText("");}} variant="ghost" size="sm">Cancel</Btn>
+                          </div>
+                        </>
+                      ):(
+                        <div style={{display:"flex",gap:6}}>
+                          <Btn onClick={()=>{setAnsweringId(f.id);setAnswerText("");}} variant="subtle" size="sm">Answer</Btn>
+                          <Btn onClick={()=>deleteQuestion(f.id)} variant="danger" size="sm">✕</Btn>
+                        </div>
+                      )}
+                    </div>
+                  ):(
+                    <div style={{fontSize:".83rem",color:"var(--muted)"}}>The admin will answer this soon.</div>
+                  )}
                 </div>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!isAdmin&&unanswered.filter(f=>f.askedBy===currentUser.username).length>0&&(
-        <div>
-          <div style={{fontSize:".72rem",color:"var(--muted)",letterSpacing:".08em",textTransform:"uppercase",marginBottom:".6rem"}}>Your pending questions</div>
-          <div style={{display:"grid",gap:".7rem"}}>
-            {unanswered.filter(f=>f.askedBy===currentUser.username).map(f=>(
-              <Card key={f.id} style={{borderColor:"rgba(90,155,213,.2)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"1rem"}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:".9rem",color:"var(--cream)"}}>{f.question}</div>
-                    <div style={{fontSize:".71rem",color:"var(--muted)",marginTop:4}}>Waiting for an answer…</div>
-                  </div>
-                  <Tag color="var(--blue)">Pending</Tag>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       {asking&&(
-        <Modal onClose={()=>setAsking(false)} maxWidth={480}>
+        <Modal onClose={()=>setAsking(false)} onBackdropClose={()=>{}} maxWidth={480}>
           <H>Ask a question</H>
           <div style={{display:"grid",gap:".9rem"}}>
             <div>
@@ -4180,7 +4946,7 @@ const AnnouncementModal=({onSave,onClose,existing=null,currentUser})=>{
     });
   };
   return(
-    <Modal onClose={onClose} maxWidth={560}>
+    <Modal onClose={onClose} onBackdropClose={existing?save:()=>{}} maxWidth={560}>
       <H>📢 {existing?"Edit":"New"} Announcement</H>
       <div style={{display:"grid",gap:".9rem"}}>
         <div><Lbl>Title</Lbl><Inp value={title} onChange={e=>setTitle(e.target.value)} placeholder="What's the news?" autoFocus/></div>
@@ -4194,7 +4960,7 @@ const AnnouncementModal=({onSave,onClose,existing=null,currentUser})=>{
             <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"12px 14px",fontSize:".88rem",color:"var(--cream)",lineHeight:1.65}} dangerouslySetInnerHTML={{__html:renderMd(body)}}/>
           </div>
         )}
-        <div style={{display:"flex",gap:8}}><Btn onClick={save} disabled={!title.trim()}>📢 Publiceren</Btn><Btn onClick={onClose} variant="ghost">Annuleren</Btn></div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><Btn onClick={save} disabled={!title.trim()}>📢 Publiceren</Btn><Btn onClick={onClose} variant="ghost">{existing?"Discard changes":"Annuleren"}</Btn>{existing&&<span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span>}</div>
       </div>
     </Modal>
   );
@@ -4265,108 +5031,260 @@ const AnnouncementBanner=({announcements,currentUser,onArchive,onHardDelete,onRe
 // ─────────────────────────────────────────────────────────────────────────────
 // PRESENTATION MODE
 // ─────────────────────────────────────────────────────────────────────────────
-const PresentationMode=({evt,onClose})=>{
-  const stops=(evt.schedule||[]).filter(s=>!s.secret);
-  const total=stops.length+1;
-  const [idx,setIdx]=useState(0);
+// `isSolo` is a third, additive mode (not folded into `isPresenter`, to avoid
+// touching the ~15 existing isPresenter checks below that presenter/viewer
+// already depend on): a solo browser navigates freely like a presenter, but
+// never creates/joins/broadcasts on the sched-<id> channel and never reveals
+// secrets or writes to the event, like a viewer. Every render/behaviour
+// branch below that needs to change for solo says so explicitly with
+// `||isSolo`; anything unlisted (secret ??? treatment, no reveal button, no
+// "X secret" counts, no LIVE badge wording) already falls out of isPresenter
+// being false, same as it does for a real viewer.
+const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,onPresenterLeft,onHide,isSolo=false})=>{
+  const allStops=evt.schedule||[];
+  const total=allStops.length+1;
+  // Display order only, by (day,time) -- everything below that addresses a
+  // stop by index (revealedSecrets, toggleReveal's mutation, the broadcast
+  // payload) still uses its real index in `allStops`/evt.schedule via
+  // `order[n]`, so sync/secret-reveal/keyboard/fullscreen behaviour is
+  // unchanged; only which index is shown at slide position n+1 changes.
+  const order=allStops.map((_,i)=>i).sort((a,b)=>scheduleDayTimeOrder(allStops[a],allStops[b]));
+  const isMultiDay=eventDayCount(evt.date,evt.end_date)>1;
+  const isMobile=useIsMobile();
+  const [idx,setIdx]=useState(isPresenter?0:(currentLive?.idx||0));
+  const [revealedSecrets,setRevealedSecrets]=useState(()=>currentLive?.revealedSecrets||[]);
   const [fading,setFading]=useState(false);
-  const idxRef=useRef(0);
+  const [locallyDismissed,setLocallyDismissed]=useState(false);
+  const idxRef=useRef(isPresenter?0:(currentLive?.idx||0));
+  const revealedRef=useRef(currentLive?.revealedSecrets||[]);
+  const evtRef=useRef(evt);
+  const chRef=useRef(null);
+  const onPresenterLeftRef=useRef(onPresenterLeft);
+  useEffect(()=>{onPresenterLeftRef.current=onPresenterLeft;},[onPresenterLeft]);
+  useEffect(()=>{evtRef.current=evt;},[evt]);
   useEffect(()=>{idxRef.current=idx;},[idx]);
+  useEffect(()=>{revealedRef.current=revealedSecrets;},[revealedSecrets]);
+
+  // Channel setup: Presence for detection/initial-state, Broadcast for real-time slide sync.
+  // Solo never runs any of this -- no channel is created at all (not
+  // created-and-unused: the `supabase.channel(...)` call itself is skipped),
+  // so a solo browser can never join, subscribe to, or broadcast on the live
+  // presentation channel.
+  useEffect(()=>{
+    if(isSolo)return;
+    const ch=supabase.channel(`sched-${evtRef.current.id}`);
+    chRef.current=ch;
+    if(isPresenter){
+      // Presence lets late-joining viewers get the current slide on subscribe
+      ch.subscribe(async status=>{
+        if(status==='SUBSCRIBED'){
+          ch.track({presenting:true,idx:idxRef.current,revealedSecrets:revealedRef.current});
+        }
+      });
+    } else {
+      let seenPresenter=false;
+      const applySlide=(ni,rs)=>{
+        seenPresenter=true;
+        if(ni!==idxRef.current){setFading(true);setTimeout(()=>{setIdx(ni);setFading(false);},230);}
+        setRevealedSecrets(rs??[]);
+      };
+      ch
+        // Presence: initial state for late joiners + detect presenter left
+        .on('presence',{event:'sync'},()=>{
+          const st=ch.presenceState();
+          const p=Object.values(st).flat().find(x=>x.presenting);
+          if(!p){
+            if(seenPresenter){onPresenterLeftRef.current?.();setLocallyDismissed(true);}
+            return;
+          }
+          if(!seenPresenter) applySlide(p.idx??0,p.revealedSecrets);
+        })
+        // Broadcast: real-time slide changes (fires reliably for every track update)
+        .on('broadcast',{event:'slide'},({payload})=>{
+          applySlide(payload.idx??0,payload.revealedSecrets);
+        })
+        .subscribe();
+    }
+    return()=>{if(chRef.current){supabase.removeChannel(chRef.current);chRef.current=null;}};
+  },[isPresenter,isSolo]);
+
+  // Presenter: broadcast slide change + update presence for late joiners
+  useEffect(()=>{
+    if(!isPresenter||!chRef.current)return;
+    chRef.current.track({presenting:true,idx,revealedSecrets:revealedRef.current});
+    chRef.current.send({type:'broadcast',event:'slide',payload:{idx,revealedSecrets:revealedRef.current}});
+  },[idx,isPresenter]);
+
+  const toggleReveal=useCallback(stopIdx=>{
+    const cur=revealedRef.current;
+    const revealing=!cur.includes(stopIdx);
+    const next=revealing?[...cur,stopIdx]:cur.filter(i=>i!==stopIdx);
+    setRevealedSecrets(next);
+    if(chRef.current){
+      chRef.current.track({presenting:true,idx:idxRef.current,revealedSecrets:next});
+      chRef.current.send({type:'broadcast',event:'slide',payload:{idx:idxRef.current,revealedSecrets:next}});
+    }
+    const e=evtRef.current;
+    const updatedSchedule=(e.schedule||[]).map((s,i)=>i===stopIdx?{...s,secret:!revealing}:s);
+    onUpdate({...e,schedule:updatedSchedule});
+  },[onUpdate]);
+
+  const handleClose=useCallback(()=>{
+    if(isPresenter||isSolo){
+      if(chRef.current)chRef.current.untrack();
+      onClose();
+    } else {
+      onHide?.(); // tell EventPage to set viewerDismissed — it unmounts us and shows the banner
+    }
+  },[isPresenter,isSolo,onClose,onHide]);
 
   const goTo=useCallback(n=>{
+    if(!isPresenter&&!isSolo)return;
     if(n<0||n>=total)return;
     setFading(true);
     setTimeout(()=>{setIdx(n);setFading(false);},230);
-  },[total]);
+  },[total,isPresenter,isSolo]);
 
   useEffect(()=>{
+    if(!isPresenter&&!isSolo)return;
     const h=e=>{
       if(e.key==="ArrowRight"||e.key==="ArrowDown")goTo(idxRef.current+1);
       else if(e.key==="ArrowLeft"||e.key==="ArrowUp")goTo(idxRef.current-1);
-      else if(e.key==="Escape")onClose();
+      else if(e.key==="Escape")handleClose();
     };
     window.addEventListener("keydown",h);
     return()=>window.removeEventListener("keydown",h);
-  },[goTo,onClose]);
+  },[goTo,handleClose,isPresenter,isSolo]);
 
   useEffect(()=>{
+    if(!isPresenter&&!isSolo)return; // viewers don't need fullscreen API — position:fixed already covers screen
     const el=document.documentElement;
     if(el.requestFullscreen)el.requestFullscreen().catch(()=>{});
     return()=>{if(document.exitFullscreen&&document.fullscreenElement)document.exitFullscreen().catch(()=>{});};
-  },[]);
+  },[isPresenter,isSolo]);
+
+  if(locallyDismissed)return null;
 
   const isIntro=idx===0;
-  const stop=isIntro?null:stops[idx-1];
-  const media=stop?.image||"";
+  const stopIdx=isIntro?-1:order[idx-1];
+  const stop=isIntro?null:allStops[stopIdx];
+  const isSecret=!!stop?.secret;
+  const isRevealed=revealedSecrets.includes(stopIdx);
+  const isHidden=isSecret&&!isRevealed; // secret and not yet revealed
+  // Only show background media when stop is visible (not hidden to viewers)
+  const media=stop&&(!isHidden||isPresenter)?(stop.image||""):"";
   const isVideo=media&&/\.(mp4|webm|mov|ogg)(\?|$)/i.test(media);
+  const publicCount=allStops.filter(s=>!s.secret).length;
 
   return(
-    <div style={{position:"fixed",inset:0,zIndex:1000,background:"#090700",overflow:"hidden",fontFamily:"var(--font-b)"}}>
+    <div style={{position:"fixed",inset:0,zIndex:1000,background:"#1a1408",overflow:"hidden",fontFamily:"var(--font-b)"}}>
       {/* Gold shimmer top bar */}
       <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,var(--orange),var(--amber),var(--gold),var(--amber),var(--orange))",backgroundSize:"300% 100%",animation:"goldShimmer 3s linear infinite",zIndex:20}}/>
       {/* Background media */}
       {media&&(
         <div style={{position:"absolute",inset:0}}>
           {isVideo
-            ?<video src={media} autoPlay muted loop playsInline style={{width:"100%",height:"100%",objectFit:"cover",opacity:.6}}/>
-            :<img src={media} alt="" style={{width:"100%",height:"100%",objectFit:"cover",opacity:.62}}/>
+            ?<video src={media} autoPlay muted loop playsInline style={{width:"100%",height:"100%",objectFit:"cover",opacity:.75}}/>
+            :<img src={media} alt="" style={{width:"100%",height:"100%",objectFit:"cover",opacity:.78}}/>
           }
-          <div style={{position:"absolute",inset:0,background:"linear-gradient(to top,rgba(6,4,0,.93) 0%,rgba(6,4,0,.52) 45%,rgba(6,4,0,.28) 100%)"}}/>
+          <div style={{position:"absolute",inset:0,background:"linear-gradient(to top,rgba(6,4,0,.82) 0%,rgba(6,4,0,.42) 45%,rgba(6,4,0,.22) 100%)"}}/>
         </div>
       )}
-      {!media&&!isIntro&&<div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 70% 60% at 25% 60%,rgba(201,146,42,.11),transparent 65%)"}}/>}
-      {isIntro&&<div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 80% 70% at 50% 45%,rgba(232,148,58,.16),transparent 65%)"}}/>}
+      {!media&&!isIntro&&<div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 70% 60% at 25% 60%,rgba(201,146,42,.18),transparent 65%)"}}/>}
+      {isIntro&&<div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 80% 70% at 50% 45%,rgba(232,148,58,.22),transparent 65%)"}}/>}
+
       {/* Top bar */}
       <div style={{position:"absolute",top:0,left:0,right:0,padding:"1.4rem 2rem",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:15}}>
-        <div style={{fontSize:".72rem",color:"rgba(255,255,255,.35)",letterSpacing:".14em",textTransform:"uppercase",fontWeight:600}}>{evt.name}</div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{fontSize:".72rem",color:"rgba(255,255,255,.32)",padding:"4px 11px",border:"1px solid rgba(255,255,255,.12)",borderRadius:20,backdropFilter:"blur(6px)"}}>{idx+1} / {total}</div>
-          <button onClick={onClose} onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,.18)";}} onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,.09)";}} style={{background:"rgba(255,255,255,.09)",border:"1px solid rgba(255,255,255,.18)",borderRadius:8,color:"rgba(255,255,255,.8)",padding:"7px 15px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,backdropFilter:"blur(8px)",transition:"background .15s"}}>✕ Exit</button>
+          <div style={{fontSize:".72rem",color:"rgba(255,255,255,.75)",letterSpacing:".14em",textTransform:"uppercase",fontWeight:600}}>{evt.name}</div>
+          {!isPresenter&&!isSolo&&<div style={{background:"rgba(232,148,58,.18)",border:"1px solid rgba(232,148,58,.45)",borderRadius:20,padding:"3px 10px",fontSize:".65rem",color:"var(--amber)",fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:5}}><span style={{width:6,height:6,borderRadius:"50%",background:"var(--amber)",display:"inline-block",animation:"pulse 1.5s ease-in-out infinite"}}/>LIVE</div>}
+          {isPresenter&&isSecret&&!isIntro&&<div style={{background:isRevealed?"rgba(76,175,125,.18)":"rgba(224,85,85,.18)",border:`1px solid ${isRevealed?"rgba(76,175,125,.4)":"rgba(224,85,85,.4)"}`,borderRadius:20,padding:"3px 10px",fontSize:".65rem",color:isRevealed?"var(--green)":"var(--red)",fontWeight:700,letterSpacing:".1em",textTransform:"uppercase"}}>{isRevealed?"✓ Revealed":"🔒 Secret"}</div>}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{fontSize:".72rem",color:"rgba(255,255,255,.75)",padding:"4px 11px",border:"1px solid rgba(255,255,255,.25)",borderRadius:20,backdropFilter:"blur(6px)"}}>{idx+1} / {total}</div>
+          <button onClick={handleClose} onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,.18)";}} onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,.09)";}} style={{background:"rgba(255,255,255,.09)",border:"1px solid rgba(255,255,255,.18)",borderRadius:8,color:"rgba(255,255,255,.8)",padding:"7px 15px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,backdropFilter:"blur(8px)",transition:"background .15s"}}>{(isPresenter||isSolo)?"✕ Exit":"✕ Hide"}</button>
         </div>
       </div>
+
       {/* Main content */}
-      <div style={{position:"absolute",inset:0,display:"flex",alignItems:isIntro?"center":"flex-end",justifyContent:"center",padding:isIntro?"2rem":"3rem 5rem 5.5rem",opacity:fading?0:1,transition:"opacity .2s ease",zIndex:10}}>
+      <div style={{position:"absolute",inset:0,display:"flex",alignItems:isIntro?"center":"flex-end",justifyContent:"center",padding:isIntro?"2rem":isMobile?"3rem 1.2rem 5.5rem":"3rem 5rem 5.5rem",opacity:fading?0:1,transition:"opacity .2s ease",zIndex:10}}>
         {isIntro?(
           <div style={{textAlign:"center",maxWidth:780}}>
             {(evt.type||evt.theme)&&<div style={{fontSize:".82rem",color:"var(--amber)",letterSpacing:".22em",textTransform:"uppercase",fontWeight:700,marginBottom:"1.4rem",opacity:.9}}>
               {evt.type==="weekend"?"🏕️ Weekend":"📅 Mensday"}{evt.theme&&` · ${evt.theme}`}
             </div>}
             <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(2.8rem,8vw,6rem)",color:"#fff",lineHeight:1.05,marginBottom:"1.4rem",textShadow:"0 0 60px rgba(232,148,58,.22)"}}>{evt.name}</div>
-            {evt.date&&<div style={{fontSize:"1.05rem",color:"rgba(255,255,255,.48)",marginBottom:"1.1rem",letterSpacing:".02em"}}>{new Date(evt.date+"T12:00:00").toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>}
+            {evt.date&&<div style={{fontSize:"1.05rem",color:"rgba(255,255,255,.8)",marginBottom:"1.1rem",letterSpacing:".02em"}}>{formatEventDateRange(evt.date,evt.end_date)}</div>}
             {evt.location&&<div style={{fontSize:"1rem",color:"var(--amber2)",opacity:.8,marginBottom:"2.8rem"}}>📍 {evt.location}</div>}
-            {stops.length>0&&<div style={{display:"flex",alignItems:"center",gap:"1rem",justifyContent:"center",color:"rgba(255,255,255,.26)",fontSize:".78rem",letterSpacing:".09em"}}>
+            {allStops.length>0&&<div style={{display:"flex",alignItems:"center",gap:"1rem",justifyContent:"center",color:"rgba(255,255,255,.26)",fontSize:".78rem",letterSpacing:".09em"}}>
               <div style={{height:1,width:36,background:"rgba(255,255,255,.14)"}}/>
-              {stops.length} stops on the menu
+              {publicCount} stop{publicCount!==1?"s":""} on the menu{allStops.length>publicCount&&isPresenter?` · ${allStops.length-publicCount} secret`:""}
               <div style={{height:1,width:36,background:"rgba(255,255,255,.14)"}}/>
             </div>}
           </div>
         ):(
-          <div style={{width:"100%",maxWidth:900}}>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"1.1rem",flexWrap:"wrap"}}>
-              <span style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.4)",borderRadius:20,padding:"4px 14px",fontSize:".7rem",color:"var(--amber)",fontWeight:700,letterSpacing:".12em",textTransform:"uppercase"}}>Stop {idx} / {stops.length}</span>
-              {stop.time&&<span style={{fontSize:".95rem",color:"rgba(255,255,255,.42)",fontWeight:600,letterSpacing:".04em"}}>{stop.time}</span>}
+          /* ── Viewer sees a mystery slide for unrevealed secret stops ── */
+          (isHidden&&!isPresenter)?(
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:"clamp(3rem,8vw,6rem)",marginBottom:"1.2rem",filter:"blur(2px)"}}>🔒</div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.6rem,5vw,3rem)",color:"rgba(255,255,255,.25)",lineHeight:1.1}}>???</div>
+              <div style={{color:"rgba(255,255,255,.2)",fontSize:".88rem",marginTop:".8rem"}}>The organisation is keeping this one a surprise…</div>
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:"1.3rem",marginBottom:"1rem",flexWrap:"wrap"}}>
-              {stop.icon&&<span style={{fontSize:"clamp(2rem,5vw,3.5rem)",lineHeight:1,filter:"drop-shadow(0 4px 24px rgba(232,148,58,.35))"}}>{stop.icon}</span>}
-              <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.9rem,5.5vw,4rem)",color:"#fff",lineHeight:1.08,textShadow:"0 2px 30px rgba(0,0,0,.55)"}}>{stop.activity}</div>
+          ):(
+            /* ── Normal stop content (visible or presenter-only view of secret) ── */
+            <div style={{width:"100%",maxWidth:900}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"1.1rem",flexWrap:"wrap"}}>
+                <span style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.4)",borderRadius:20,padding:"4px 14px",fontSize:".7rem",color:"var(--amber)",fontWeight:700,letterSpacing:".12em",textTransform:"uppercase"}}>Stop {idx} / {allStops.length}</span>
+                {isMultiDay&&<span style={{background:"rgba(255,255,255,.1)",border:"1px solid rgba(255,255,255,.22)",borderRadius:20,padding:"4px 14px",fontSize:".7rem",color:"rgba(255,255,255,.85)",fontWeight:700,letterSpacing:".08em",textTransform:"uppercase"}}>{dayHeadingLabel(evt.date,stop.day??0)}</span>}
+                {stop.time&&<span style={{fontSize:".95rem",color:"rgba(255,255,255,.8)",fontWeight:600,letterSpacing:".04em"}}>{stop.time}</span>}
+                {/* Reveal/hide toggle — presenter only, for secret stops */}
+                {isPresenter&&isSecret&&(
+                  <button onClick={()=>toggleReveal(stopIdx)}
+                    style={{marginLeft:"auto",background:isRevealed?"rgba(224,85,85,.18)":"rgba(76,175,125,.18)",border:`1px solid ${isRevealed?"rgba(224,85,85,.45)":"rgba(76,175,125,.45)"}`,borderRadius:10,color:isRevealed?"var(--red)":"var(--green)",padding:"7px 18px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:700,backdropFilter:"blur(8px)",display:"flex",alignItems:"center",gap:6,transition:"all .15s"}}
+                    onMouseEnter={e=>e.currentTarget.style.opacity=".8"}
+                    onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
+                    {isRevealed?"🔒 Hide from viewers":"👁 Reveal to viewers"}
+                  </button>
+                )}
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:"1.3rem",marginBottom:"1rem",flexWrap:"wrap"}}>
+                {stop.icon&&<span style={{fontSize:"clamp(2rem,5vw,3.5rem)",lineHeight:1,filter:"drop-shadow(0 4px 24px rgba(232,148,58,.35))"}}>{stop.icon}</span>}
+                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.9rem,5.5vw,4rem)",color:"#fff",lineHeight:1.08,textShadow:"0 2px 30px rgba(0,0,0,.55)"}}>{stop.activity}</div>
+              </div>
+              {stop.location&&<div style={{fontSize:"1rem",color:"rgba(255,255,255,.82)",marginBottom:".5rem",display:"flex",alignItems:"center",gap:7}}>
+                <span>📍</span>
+                {stop.locationUrl?<a href={stop.locationUrl} target="_blank" rel="noreferrer" style={{color:"var(--amber2)",textDecoration:"none"}}>{stop.location}</a>:<span>{stop.location}</span>}
+              </div>}
+              {stop.note&&<div style={{fontSize:".95rem",color:"rgba(255,255,255,.72)",fontStyle:"italic",lineHeight:1.6,maxWidth:640,marginTop:4}}>{stop.note}</div>}
             </div>
-            {stop.location&&<div style={{fontSize:"1rem",color:"rgba(255,255,255,.48)",marginBottom:".5rem",display:"flex",alignItems:"center",gap:7}}>
-              <span>📍</span>
-              {stop.locationUrl?<a href={stop.locationUrl} target="_blank" rel="noreferrer" style={{color:"var(--amber2)",textDecoration:"none"}}>{stop.location}</a>:<span>{stop.location}</span>}
-            </div>}
-            {stop.note&&<div style={{fontSize:".95rem",color:"rgba(255,255,255,.38)",fontStyle:"italic",lineHeight:1.6,maxWidth:640,marginTop:4}}>{stop.note}</div>}
-          </div>
+          )
         )}
       </div>
-      {/* Prev button */}
-      {idx>0&&<button onClick={()=>goTo(idx-1)} onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,.15)";}} onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,.07)";}} style={{position:"absolute",left:"1.5rem",top:"50%",transform:"translateY(-50%)",background:"rgba(255,255,255,.07)",border:"1px solid rgba(255,255,255,.14)",borderRadius:12,color:"#fff",width:52,height:52,cursor:"pointer",fontSize:"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",zIndex:15,transition:"background .15s",backdropFilter:"blur(8px)"}}>←</button>}
-      {/* Next button */}
-      {idx<total-1&&<button onClick={()=>goTo(idx+1)} onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,.15)";}} onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,.07)";}} style={{position:"absolute",right:"1.5rem",top:"50%",transform:"translateY(-50%)",background:"rgba(255,255,255,.07)",border:"1px solid rgba(255,255,255,.14)",borderRadius:12,color:"#fff",width:52,height:52,cursor:"pointer",fontSize:"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",zIndex:15,transition:"background .15s",backdropFilter:"blur(8px)"}}>→</button>}
-      {/* Dot navigation */}
+
+      {/* Prev button — presenter and solo (free navigation) */}
+      {(isPresenter||isSolo)&&idx>0&&<button onClick={()=>goTo(idx-1)}
+        onMouseEnter={e=>{e.currentTarget.style.background=isMobile?"rgba(255,255,255,.1)":"rgba(255,255,255,.15)";}}
+        onMouseLeave={e=>{e.currentTarget.style.background=isMobile?"rgba(255,255,255,.03)":"rgba(255,255,255,.07)";}}
+        style={{position:"absolute",left:0,top:"50%",transform:"translateY(-50%)",background:isMobile?"rgba(255,255,255,.03)":"rgba(255,255,255,.07)",border:isMobile?"none":"1px solid rgba(255,255,255,.14)",borderRadius:isMobile?"0 10px 10px 0":12,color:isMobile?"rgba(255,255,255,.5)":"#fff",width:isMobile?36:52,height:isMobile?72:52,cursor:"pointer",fontSize:isMobile?"1rem":"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",zIndex:15,transition:"background .15s",backdropFilter:"blur(8px)"}}>←</button>}
+      {/* Next button — presenter and solo (free navigation) */}
+      {(isPresenter||isSolo)&&idx<total-1&&<button onClick={()=>goTo(idx+1)}
+        onMouseEnter={e=>{e.currentTarget.style.background=isMobile?"rgba(255,255,255,.1)":"rgba(255,255,255,.15)";}}
+        onMouseLeave={e=>{e.currentTarget.style.background=isMobile?"rgba(255,255,255,.03)":"rgba(255,255,255,.07)";}}
+        style={{position:"absolute",right:0,top:"50%",transform:"translateY(-50%)",background:isMobile?"rgba(255,255,255,.03)":"rgba(255,255,255,.07)",border:isMobile?"none":"1px solid rgba(255,255,255,.14)",borderRadius:isMobile?"10px 0 0 10px":12,color:isMobile?"rgba(255,255,255,.5)":"#fff",width:isMobile?36:52,height:isMobile?72:52,cursor:"pointer",fontSize:isMobile?"1rem":"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",zIndex:15,transition:"background .15s",backdropFilter:"blur(8px)"}}>→</button>}
+
+      {/* Dot navigation — clickable for presenter; secret=red dot, revealed=green dot */}
       <div style={{position:"absolute",bottom:"1.2rem",left:0,right:0,display:"flex",justifyContent:"center",gap:7,zIndex:15}}>
-        {Array.from({length:total}).map((_,i)=>(
-          <button key={i} onClick={()=>goTo(i)} style={{width:i===idx?22:7,height:7,borderRadius:4,background:i===idx?"var(--amber)":"rgba(255,255,255,.2)",border:"none",cursor:"pointer",padding:0,transition:"all .25s cubic-bezier(.4,0,.2,1)"}}/>
-        ))}
+        {Array.from({length:total}).map((_,i)=>{
+          const si=i>0?order[i-1]:null;
+          const dotStop=i>0?allStops[si]:null;
+          const dotSecret=dotStop?.secret;
+          const dotRevealed=dotSecret&&revealedSecrets.includes(si);
+          const dotColor=i===idx?"var(--amber)":dotSecret?(dotRevealed?"rgba(76,175,125,.6)":"rgba(224,85,85,.5)"):"rgba(255,255,255,.2)";
+          return(
+            <button key={i} onClick={()=>(isPresenter||isSolo)&&goTo(i)}
+              style={{width:i===idx?22:7,height:7,borderRadius:4,background:dotColor,border:"none",cursor:(isPresenter||isSolo)?"pointer":"default",padding:0,transition:"all .25s cubic-bezier(.4,0,.2,1)"}}/>
+          );
+        })}
       </div>
     </div>
   );
@@ -4375,13 +5293,39 @@ const PresentationMode=({evt,onClose})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // EDIT MODALS
 // ─────────────────────────────────────────────────────────────────────────────
-const blankStop={time:"",activity:"",location:"",locationUrl:"",icon:"📍",note:"",image:"",secret:false};
+const blankStop={time:"",activity:"",location:"",locationUrl:"",icon:"📍",note:"",image:"",secret:false,day:0};
 const EditScheduleModal=({evt,onSave,onClose})=>{
   const [sched,setSched]=useState(evt.schedule.map(s=>({...blankStop,...s})));
   const [iconPicker,setIconPicker]=useState(null);
   const upd=(i,f,v)=>setSched(s=>s.map((r,j)=>j===i?{...r,[f]:v}:r));
-  const move=(i,d)=>{const s=[...sched];const j=i+d;if(j<0||j>=s.length)return;[s[i],s[j]]=[s[j],s[i]];setSched(s);};
-  return(<Modal onClose={onClose} maxWidth={640}><H>Edit Schedule</H><div style={{display:"grid",gap:".9rem"}}>{sched.map((s,i)=>(
+  const stopDay=s=>s.day??0;
+  const dayCount=Math.max(1,eventDayCount(evt.date,evt.end_date));
+  const inRange=d=>d>=0&&d<dayCount;
+  // Move a stop up/down *within its own day group* -- find its same-day
+  // neighbour in `sched` (stops from other days may be interleaved in the
+  // flat array) and swap with that, rather than with the flat neighbour.
+  const moveInDay=(i,d)=>{
+    const day=stopDay(sched[i]);
+    const groupIdxs=sched.reduce((acc,r,j)=>{if(stopDay(r)===day)acc.push(j);return acc;},[]);
+    const pos=groupIdxs.indexOf(i);
+    const j=groupIdxs[pos+d];
+    if(j===undefined)return;
+    setSched(s=>{const next=[...s];[next[i],next[j]]=[next[j],next[i]];return next;});
+  };
+  const addStopOnDay=day=>setSched(s=>[...s,{...blankStop,day}]);
+  // Group stops by day for headings; anything outside the event's current
+  // [0,dayCount) range (e.g. the event's date range shrank after stops were
+  // scheduled further out) is surfaced in its own group instead of being
+  // silently dropped -- see `overflowIdxs` below.
+  const groups=Array.from({length:dayCount},(_,day)=>({day,idxs:sched.reduce((acc,r,j)=>{if(stopDay(r)===day)acc.push(j);return acc;},[])}));
+  const overflowIdxs=sched.reduce((acc,r,j)=>{if(!inRange(stopDay(r)))acc.push(j);return acc;},[]);
+  const isMultiDay=dayCount>1;
+  const showDayPicker=isMultiDay||overflowIdxs.length>0;
+  const renderStop=i=>{
+    const s=sched[i];
+    const group=inRange(stopDay(s))?groups[stopDay(s)].idxs:overflowIdxs;
+    const pos=group.indexOf(i);
+    return(
     <div key={i} style={{background:"var(--bg3)",borderRadius:"var(--radius-sm)",padding:"1rem",border:`1px solid ${s.secret?"rgba(224,85,85,.35)":"var(--border)"}`,position:"relative",overflow:"hidden"}}>
       {s.secret&&<div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,var(--red),rgba(224,85,85,.4))"}}/>}
       <div style={{display:"flex",gap:7,marginBottom:".7rem",alignItems:"center"}}>
@@ -4390,8 +5334,8 @@ const EditScheduleModal=({evt,onSave,onClose})=>{
         <Inp value={s.activity} onChange={e=>upd(i,"activity",e.target.value)} placeholder="Activity"/>
         <div style={{display:"flex",gap:4,flexShrink:0}}>
           <button onClick={()=>upd(i,"secret",!s.secret)} title={s.secret?"Secret — klik om te openbaren":"Publiek — klik om te verbergen"} style={{width:32,height:32,background:s.secret?"rgba(224,85,85,.12)":"rgba(76,175,125,.1)",border:`1px solid ${s.secret?"rgba(224,85,85,.4)":"rgba(76,175,125,.3)"}`,borderRadius:7,cursor:"pointer",fontSize:"15px",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s"}}>{s.secret?"🔒":"👁"}</button>
-          <Btn onClick={()=>move(i,-1)} variant="ghost" size="sm" disabled={i===0} style={{padding:"6px 9px"}}>↑</Btn>
-          <Btn onClick={()=>move(i,1)} variant="ghost" size="sm" disabled={i===sched.length-1} style={{padding:"6px 9px"}}>↓</Btn>
+          <Btn onClick={()=>moveInDay(i,-1)} variant="ghost" size="sm" disabled={pos===0} style={{padding:"6px 9px"}}>↑</Btn>
+          <Btn onClick={()=>moveInDay(i,1)} variant="ghost" size="sm" disabled={pos===group.length-1} style={{padding:"6px 9px"}}>↓</Btn>
           <Btn onClick={()=>setSched(s=>s.filter((_,j)=>j!==i))} variant="danger" size="sm" style={{padding:"6px 9px"}}>✕</Btn>
         </div>
       </div>
@@ -4399,8 +5343,35 @@ const EditScheduleModal=({evt,onSave,onClose})=>{
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:7}}><div><Lbl>Location</Lbl><Inp value={s.location} onChange={e=>upd(i,"location",e.target.value)} placeholder="Café de Kroeg"/></div><div><Lbl>Maps URL</Lbl><Inp value={s.locationUrl} onChange={e=>upd(i,"locationUrl",e.target.value)} placeholder="https://maps.google.com/…"/></div></div>
       <Lbl>Note</Lbl><Inp value={s.note} onChange={e=>upd(i,"note",e.target.value)} placeholder="e.g. reservation under Joris"/>
       <div style={{marginTop:7}}><Lbl>Slide Image / Video URL</Lbl><Inp value={s.image||""} onChange={e=>upd(i,"image",e.target.value)} placeholder="https://… (background in presentation mode)"/></div>
+      {showDayPicker&&<div style={{marginTop:7}}><Lbl>Dag</Lbl><select value={stopDay(s)} onChange={e=>upd(i,"day",Number(e.target.value))} style={{width:"100%",background:"var(--bg2)",color:"var(--cream)",border:"1px solid var(--border)",borderRadius:7,padding:"7px 9px",fontSize:".8rem",cursor:"pointer",fontFamily:"var(--font-b)"}}>
+        {groups.map(g=><option key={g.day} value={g.day}>{dayHeadingLabel(evt.date,g.day)}</option>)}
+        {!inRange(stopDay(s))&&<option value={stopDay(s)}>Dag {stopDay(s)+1} (buiten bereik)</option>}
+      </select></div>}
     </div>
-  ))}<Btn onClick={()=>setSched(s=>[...s,{...blankStop}])} variant="subtle" size="sm">+ Add Stop</Btn><div style={{display:"flex",gap:8}}><Btn onClick={()=>onSave(sched)}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div></div></Modal>);
+    );
+  };
+  return(<Modal onClose={onClose} onBackdropClose={()=>onSave(sched)} maxWidth={640}><H>Edit Schedule</H><div style={{display:"grid",gap:".9rem"}}>
+    {!isMultiDay&&overflowIdxs.length===0
+      ? <>{sched.map((s,i)=>renderStop(i))}<Btn onClick={()=>setSched(s=>[...s,{...blankStop}])} variant="subtle" size="sm">+ Add Stop</Btn></>
+      : <>
+        {groups.map(g=>(
+          <div key={g.day} style={{display:"grid",gap:".9rem",paddingBottom:6,borderBottom:"1px solid var(--border)"}}>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--amber2)",fontWeight:700}}>{dayHeadingLabel(evt.date,g.day)}</div>
+            {g.idxs.map(i=>renderStop(i))}
+            <Btn onClick={()=>addStopOnDay(g.day)} variant="subtle" size="sm">+ Add Stop — Dag {g.day+1}</Btn>
+          </div>
+        ))}
+        {overflowIdxs.length>0&&(
+          <div style={{display:"grid",gap:".9rem"}}>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--red)",fontWeight:700}}>⚠️ Overige / niet ingepland</div>
+            <div style={{fontSize:".76rem",color:"var(--muted)",marginTop:-6}}>Deze stops vallen buiten de huidige datums van dit event. Kies bij een stop een dag om ‘m weer in te plannen — ze worden nooit automatisch verwijderd.</div>
+            {overflowIdxs.map(i=>renderStop(i))}
+          </div>
+        )}
+      </>
+    }
+    <div style={{display:"flex",gap:8,alignItems:"center"}}><Btn onClick={()=>onSave(sched)}>Save</Btn><Btn onClick={onClose} variant="ghost">Discard changes</Btn><span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span></div>
+  </div></Modal>);
 };
 
 const AttendeeInput=({attendees,setAttendees,users=[]})=>{
@@ -4436,40 +5407,155 @@ const AttendeeInput=({attendees,setAttendees,users=[]})=>{
   );
 };
 
+// Trailer video field, shared by EditEventModal/NewEventModal: a pasted
+// link OR an upload, either populating `trailer_video_url`. Follows the
+// existing upload pattern (profile-photos at EditProfileModal, "Quiz
+// images", event-photos at PhotosTab) -- storage bucket "event-videos".
+// URL validation reuses `isSafeVideoUrl` (safeUrl.js): http(s) only, and
+// must look like a video file (.mp4/.webm/.mov/.ogg) -- the same extension
+// set `PresentationMode` already treats as a video at its own
+// video-vs-image branch.
+const TrailerVideoField=({value,onChange,error})=>{
+  const [uploading,setUploading]=useState(false);
+  const [uploadErr,setUploadErr]=useState("");
+  const fileRef=useRef();
+  const handleUpload=async e=>{
+    const file=e.target.files[0];if(!file)return;
+    setUploading(true);setUploadErr("");
+    const path=`${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
+    const{data,error:upErr}=await supabase.storage.from("event-videos").upload(path,file);
+    if(upErr){setUploadErr("Upload mislukt: "+upErr.message);setUploading(false);e.target.value="";return;}
+    const{data:{publicUrl}}=supabase.storage.from("event-videos").getPublicUrl(data.path);
+    onChange(publicUrl);setUploading(false);e.target.value="";
+  };
+  return(
+    <div>
+      <Lbl>Trailer video</Lbl>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <Inp value={value||""} onChange={e=>onChange(e.target.value)} placeholder="https://…video.mp4 (of upload)" style={{flex:1,minWidth:180}}/>
+        <Btn onClick={()=>fileRef.current.click()} variant="ghost" size="sm" disabled={uploading}>{uploading?"Uploaden…":"📹 Upload"}</Btn>
+        {value&&<Btn onClick={()=>onChange("")} variant="ghost" size="sm" style={{color:"var(--red)"}}>Verwijderen</Btn>}
+      </div>
+      <input ref={fileRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/ogg" style={{display:"none"}} onChange={handleUpload}/>
+      {error&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:4}}>⚠ {error}</div>}
+      {uploadErr&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:4}}>{uploadErr}</div>}
+      <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:4}}>Plak een link of upload een bestand (.mp4, .webm, .mov, .ogg).</div>
+    </div>
+  );
+};
+
 const EditEventModal=({evt,onSave,onClose,users=[]})=>{
   const [d,setD]=useState({...evt});
+  // If this event already arrives with an end_date, its saved `type` is by
+  // definition a deliberate decision (possibly correcting an earlier
+  // auto-suggestion) -- start "touched" so re-editing end_date this session
+  // never silently overwrites it. A fresh event (no end_date yet) still
+  // gets the auto-suggest on its first range.
+  const typeTouched=useRef(!!evt.end_date);
+  const dateErr=d.end_date&&d.date&&d.end_date<d.date?"Einddatum ligt vóór de startdatum":"";
+  const videoUrlErr=d.trailer_video_url&&!isSafeVideoUrl(d.trailer_video_url)?"Ongeldige video-link (moet http(s) zijn en eindigen op .mp4, .webm, .mov of .ogg)":"";
+  // Admin-facing preview of the login teaser (docs: the owner's spec calls
+  // this out explicitly -- without it, the only way to see your own live
+  // teaser is to dismiss it, which permanently hides it on that device).
+  // Renders the REAL `TeaserModal`, so it's exactly what a user would see
+  // (same fallback copy included) -- but with `onWatch`/`onSkip` both wired
+  // to just closing the preview, never to `dismissTeaser`/navigation, so
+  // trying it costs nothing.
+  const [previewTeaser,setPreviewTeaser]=useState(false);
+  const setEndDate=v=>{
+    const next={...d,end_date:v};
+    if(v&&v!==d.date&&!typeTouched.current)next.type="weekend";
+    setD(next);
+  };
   return(
-    <Modal onClose={onClose} maxWidth={500}><H>Edit Event</H>
+    <>
+    <Modal onClose={onClose} onBackdropClose={()=>{if(!dateErr&&!videoUrlErr)onSave(d);}} maxWidth={500}><H>Edit Event</H>
     <div style={{display:"grid",gap:".9rem"}}>
-      {[["name","Event Name"],["date","Datum (JJJJ-MM-DD)"],["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
+      <div><Lbl>Event Name</Lbl><Inp value={d.name||""} onChange={e=>setD({...d,name:e.target.value})} placeholder="Event Name"/></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <div><Lbl>Starttijd (HH:MM)</Lbl><Inp value={d.start_time||""} onChange={e=>setD({...d,start_time:e.target.value})} placeholder="12:00"/></div>
-        <div><Lbl>Eindtijd (HH:MM)</Lbl><Inp value={d.end_time||""} onChange={e=>setD({...d,end_time:e.target.value})} placeholder="23:00"/></div>
+        <div><Lbl>Startdatum</Lbl><Inp type="date" value={d.date||""} onChange={e=>setD({...d,date:e.target.value})}/></div>
+        <div><Lbl>Starttijd</Lbl><Inp type="time" value={d.start_time||""} onChange={e=>setD({...d,start_time:e.target.value})}/></div>
       </div>
-      <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>setD({...d,type:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><Lbl>Einddatum (optioneel)</Lbl><Inp type="date" value={d.end_date||""} onChange={e=>setEndDate(e.target.value)}/></div>
+        <div><Lbl>Eindtijd</Lbl><Inp type="time" value={d.end_time||""} onChange={e=>setD({...d,end_time:e.target.value})}/></div>
+      </div>
+      {dateErr&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:-6}}>⚠ {dateErr}</div>}
+      {[["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
+      <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>{typeTouched.current=true;setD({...d,type:e.target.value});}} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
+      <TrailerVideoField value={d.trailer_video_url} onChange={v=>setD({...d,trailer_video_url:v})} error={videoUrlErr}/>
+      <div style={{border:"1px dashed var(--border2)",borderRadius:"var(--radius-sm)",padding:"1rem",display:"grid",gap:".7rem"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+          <Lbl>🎬 Login teaser</Lbl>
+          <Btn onClick={()=>setPreviewTeaser(true)} variant="ghost" size="sm">👀 Preview</Btn>
+        </div>
+        <Switch checked={!!d.teaser_active} onChange={v=>setD({...d,teaser_active:v})} label="Show this teaser on login" id="teaser-active-edit"/>
+        {d.teaser_active&&<>
+          <div><Lbl>Teaser title</Lbl><Inp value={d.teaser_title||""} onChange={e=>setD({...d,teaser_title:e.target.value})} placeholder="🎬 A new trailer just dropped"/></div>
+          <div><Lbl>Teaser text</Lbl><Inp value={d.teaser_text||""} onChange={e=>setD({...d,teaser_text:e.target.value})} placeholder="Get hyped -- the trailer is ready." multiline rows={2}/></div>
+          <div><Lbl>Button label</Lbl><Inp value={d.teaser_button_label||""} onChange={e=>setD({...d,teaser_button_label:e.target.value})} placeholder="🎬 Watch the trailer"/></div>
+          {!isSafeVideoUrl(d.trailer_video_url)&&<div style={{fontSize:".72rem",color:"var(--red)"}}>⚠ No trailer video set above yet -- this teaser will not show to anyone until one is added.</div>}
+        </>}
+      </div>
       <div><Lbl>Description</Lbl><RichTextInput value={d.description||""} onChange={v=>setD({...d,description:v})} placeholder="Beschrijving… **bold**, *italic*, - lijstje" rows={3}/></div>
       <div><Lbl>Attendees</Lbl><AttendeeInput attendees={d.attendees} setAttendees={v=>setD({...d,attendees:v})} users={users}/></div>
-      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave(d)}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
+      <div style={{display:"flex",gap:8,marginTop:4,alignItems:"center",flexWrap:"wrap"}}><Btn onClick={()=>onSave(d)} disabled={!!dateErr||!!videoUrlErr}>Save</Btn><Btn onClick={onClose} variant="ghost">Discard changes</Btn><span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span></div>
     </div></Modal>
+    {previewTeaser&&<TeaserModal evt={d} onWatch={()=>setPreviewTeaser(false)} onSkip={()=>setPreviewTeaser(false)}/>}
+    </>
   );
 };
 
 const NewEventModal=({onSave,onClose,users=[]})=>{
   const yr=new Date().getFullYear();
-  const [d,setD]=useState({name:`Mensday ${yr}`,type:"day",date:`${yr}-09-13`,start_time:"12:00",end_time:"",location:"TBD",description:"",theme:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false,kretjes:0});
+  const [d,setD]=useState({name:"Mens",type:"day",date:`${yr}-09-13`,end_date:"",start_time:"12:00",end_time:"",location:"TBD",description:"",theme:"",trailer_video_url:"",teaser_active:false,teaser_title:"",teaser_text:"",teaser_button_label:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false,kretjes:0});
+  const typeTouched=useRef(false);
+  const dateErr=d.end_date&&d.date&&d.end_date<d.date?"Einddatum ligt vóór de startdatum":"";
+  const videoUrlErr=d.trailer_video_url&&!isSafeVideoUrl(d.trailer_video_url)?"Ongeldige video-link (moet http(s) zijn en eindigen op .mp4, .webm, .mov of .ogg)":"";
+  // See EditEventModal's identical comment above -- same preview affordance,
+  // same reasoning.
+  const [previewTeaser,setPreviewTeaser]=useState(false);
+  const setEndDate=v=>{
+    const next={...d,end_date:v};
+    if(v&&v!==d.date&&!typeTouched.current)next.type="weekend";
+    setD(next);
+  };
   return(
-    <Modal onClose={onClose} maxWidth={500}><H>New Event</H>
+    <>
+    <Modal onClose={onClose} onBackdropClose={()=>{}} maxWidth={500}><H>New Event</H>
     <div style={{display:"grid",gap:".85rem"}}>
-      {[["name","Event Name"],["date","Datum (JJJJ-MM-DD)"],["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
+      <div><Lbl>Event Name</Lbl><Inp value={d.name||""} onChange={e=>setD({...d,name:e.target.value})} placeholder="Event Name"/></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <div><Lbl>Starttijd (HH:MM)</Lbl><Inp value={d.start_time||""} onChange={e=>setD({...d,start_time:e.target.value})} placeholder="12:00"/></div>
-        <div><Lbl>Eindtijd (HH:MM)</Lbl><Inp value={d.end_time||""} onChange={e=>setD({...d,end_time:e.target.value})} placeholder="23:00"/></div>
+        <div><Lbl>Startdatum</Lbl><Inp type="date" value={d.date||""} onChange={e=>setD({...d,date:e.target.value})}/></div>
+        <div><Lbl>Starttijd</Lbl><Inp type="time" value={d.start_time||""} onChange={e=>setD({...d,start_time:e.target.value})}/></div>
       </div>
-      <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>setD({...d,type:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div><Lbl>Einddatum (optioneel)</Lbl><Inp type="date" value={d.end_date||""} onChange={e=>setEndDate(e.target.value)}/></div>
+        <div><Lbl>Eindtijd</Lbl><Inp type="time" value={d.end_time||""} onChange={e=>setD({...d,end_time:e.target.value})}/></div>
+      </div>
+      {dateErr&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:-6}}>⚠ {dateErr}</div>}
+      {[["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
+      <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>{typeTouched.current=true;setD({...d,type:e.target.value});}} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
+      <TrailerVideoField value={d.trailer_video_url} onChange={v=>setD({...d,trailer_video_url:v})} error={videoUrlErr}/>
+      <div style={{border:"1px dashed var(--border2)",borderRadius:"var(--radius-sm)",padding:"1rem",display:"grid",gap:".7rem"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+          <Lbl>🎬 Login teaser</Lbl>
+          <Btn onClick={()=>setPreviewTeaser(true)} variant="ghost" size="sm">👀 Preview</Btn>
+        </div>
+        <Switch checked={!!d.teaser_active} onChange={v=>setD({...d,teaser_active:v})} label="Show this teaser on login" id="teaser-active-new"/>
+        {d.teaser_active&&<>
+          <div><Lbl>Teaser title</Lbl><Inp value={d.teaser_title||""} onChange={e=>setD({...d,teaser_title:e.target.value})} placeholder="🎬 A new trailer just dropped"/></div>
+          <div><Lbl>Teaser text</Lbl><Inp value={d.teaser_text||""} onChange={e=>setD({...d,teaser_text:e.target.value})} placeholder="Get hyped -- the trailer is ready." multiline rows={2}/></div>
+          <div><Lbl>Button label</Lbl><Inp value={d.teaser_button_label||""} onChange={e=>setD({...d,teaser_button_label:e.target.value})} placeholder="🎬 Watch the trailer"/></div>
+          {!isSafeVideoUrl(d.trailer_video_url)&&<div style={{fontSize:".72rem",color:"var(--red)"}}>⚠ No trailer video set above yet -- this teaser will not show to anyone until one is added.</div>}
+        </>}
+      </div>
       <div><Lbl>Description</Lbl><RichTextInput value={d.description||""} onChange={v=>setD({...d,description:v})} placeholder="Beschrijving… **bold**, *italic*, - lijstje" rows={3}/></div>
       <div><Lbl>Attendees</Lbl><AttendeeInput attendees={d.attendees} setAttendees={v=>setD({...d,attendees:v})} users={users}/></div>
-      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave({...d,id:`evt-${Date.now()}`})}>Create</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
+      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave({...d,id:`evt-${Date.now()}`})} disabled={!!dateErr||!!videoUrlErr}>Create</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
     </div></Modal>
+    {previewTeaser&&<TeaserModal evt={d} onWatch={()=>setPreviewTeaser(false)} onSkip={()=>setPreviewTeaser(false)}/>}
+    </>
   );
 };
 
@@ -4486,55 +5572,56 @@ const diffEvents=(prev,next)=>{
     // FAQs
     (evt.faqs||[]).forEach(faq=>{
       if(!(old.faqs||[]).find(f=>f.id===faq.id))
-        acts.push({id:faq.id,type:"faq",message:`${faq.askedBy} stelde een vraag`,event:en,eventId:eid,timestamp:faq.askedAt});
+        acts.push({id:faq.id,type:"faq",message:`${faq.askedBy} stelde een vraag`,event:en,eventId:eid,timestamp:faq.askedAt,tab:"FAQ",targetId:`faq-${faq.id}`});
     });
     (evt.faqs||[]).forEach(faq=>{
       const of=(old.faqs||[]).find(f=>f.id===faq.id);
       if(of&&!of.answer&&faq.answer)
-        acts.push({id:`ans-${faq.id}`,type:"answer",message:`Vraag beantwoord door ${faq.answeredBy}`,event:en,eventId:eid,timestamp:faq.answeredAt});
+        acts.push({id:`ans-${faq.id}`,type:"answer",message:`Vraag beantwoord door ${faq.answeredBy}`,event:en,eventId:eid,timestamp:faq.answeredAt,tab:"FAQ",targetId:`faq-${faq.id}`});
     });
     // RSVP
     (evt.attendees||[]).forEach(att=>{
       const oa=(old.attendees||[]).find(a=>a.name===att.name);
       if(oa&&oa.status!==att.status)
-        acts.push({id:`rsvp-${att.name}-${eid}-${att.status}`,type:"rsvp",message:`${att.name}: ${statusMap[att.status]?.label||att.status}`,event:en,eventId:eid,timestamp:now});
+        acts.push({id:`rsvp-${att.name}-${eid}-${att.status}`,type:"rsvp",message:`${att.name}: ${statusMap[att.status]?.label||att.status}`,event:en,eventId:eid,timestamp:now,tab:"Overview"});
     });
     // Photos
     const oldPhotoIds=new Set((old.photos||[]).map(p=>p.id));
     (evt.photos||[]).forEach(photo=>{
       if(!oldPhotoIds.has(photo.id))
-        acts.push({id:photo.id,type:"photo",message:`${photo.uploader} uploadde een foto`,event:en,eventId:eid,timestamp:photo.uploadedAt});
+        acts.push({id:photo.id,type:"photo",message:`${photo.uploader} uploadde een foto`,event:en,eventId:eid,timestamp:photo.uploadedAt,tab:"Photos",targetId:`photo-${photo.id}`});
     });
-    // Polls — new poll
+    // Polls — new poll (skip secret ones)
     (evt.polls||[]).forEach(poll=>{
-      if(!(old.polls||[]).find(p=>p.id===poll.id))
-        acts.push({id:`poll-new-${poll.id}`,type:"poll",message:`Nieuwe poll: "${poll.title}"`,event:en,eventId:eid,timestamp:now});
+      if(!poll.secret&&!(old.polls||[]).find(p=>p.id===poll.id))
+        acts.push({id:`poll-new-${poll.id}`,type:"poll",message:`Nieuwe poll: "${poll.title}"`,event:en,eventId:eid,timestamp:now,tab:"Polls",targetId:`poll-${poll.id}`});
     });
-    // Polls — poll closed
+    // Polls — poll closed (skip secret ones)
     (evt.polls||[]).forEach(poll=>{
       const op=(old.polls||[]).find(p=>p.id===poll.id);
-      if(op&&!op.closed&&poll.closed)
-        acts.push({id:`poll-close-${poll.id}`,type:"poll",message:`Poll resultaten: "${poll.title}"`,event:en,eventId:eid,timestamp:now});
+      if(op&&!op.closed&&poll.closed&&!poll.secret)
+        acts.push({id:`poll-close-${poll.id}`,type:"poll",message:`Poll resultaten: "${poll.title}"`,event:en,eventId:eid,timestamp:now,tab:"Polls",targetId:`poll-${poll.id}`});
     });
-    // Schedule — new stops added
-    const oldLen=(old.schedule||[]).length,newLen=(evt.schedule||[]).length;
-    if(newLen>oldLen)
-      acts.push({id:`sched-${eid}-${newLen}`,type:"schedule",message:`${newLen-oldLen} activiteit${newLen-oldLen>1?"en":""} toegevoegd aan het programma`,event:en,eventId:eid,timestamp:now});
+    // Schedule — only notify for genuinely new stops, not reveals of existing secret stops
+    const oldActivities=new Set((old.schedule||[]).map(s=>s.activity));
+    const trulyNew=(evt.schedule||[]).filter(s=>!s.secret&&!oldActivities.has(s.activity));
+    if(trulyNew.length>0)
+      acts.push({id:`sched-${eid}-${trulyNew.map(s=>s.activity).join("")}`,type:"schedule",message:`${trulyNew.length} activiteit${trulyNew.length>1?"en":""} toegevoegd aan het programma`,event:en,eventId:eid,timestamp:now,tab:"Overview"});
     // Location changed
     if(old.location&&evt.location&&old.location!==evt.location)
-      acts.push({id:`loc-${eid}-${evt.location}`,type:"schedule",message:`Locatie gewijzigd: ${evt.location}`,event:en,eventId:eid,timestamp:now});
+      acts.push({id:`loc-${eid}-${evt.location}`,type:"schedule",message:`Locatie gewijzigd: ${evt.location}`,event:en,eventId:eid,timestamp:now,tab:"Overview"});
     // Start time changed
     if(old.start_time&&evt.start_time&&old.start_time!==evt.start_time)
-      acts.push({id:`time-${eid}-${evt.start_time}`,type:"schedule",message:`Starttijd gewijzigd: ${evt.start_time}`,event:en,eventId:eid,timestamp:now});
+      acts.push({id:`time-${eid}-${evt.start_time}`,type:"schedule",message:`Starttijd gewijzigd: ${evt.start_time}`,event:en,eventId:eid,timestamp:now,tab:"Overview"});
     // Quizzes
     (evt.quizzes||[]).forEach(quiz=>{
       if(!(old.quizzes||[]).find(q=>q.id===quiz.id))
-        acts.push({id:`quiz-new-${quiz.id}`,type:"quiz",message:`Nieuwe quiz beschikbaar: "${quiz.title}"`,event:en,eventId:eid,timestamp:now});
+        acts.push({id:`quiz-new-${quiz.id}`,type:"quiz",message:`Nieuwe quiz beschikbaar: "${quiz.title}"`,event:en,eventId:eid,timestamp:now,tab:"Quiz"});
     });
     // Winners announced
     const ow=(old.winners||[]).length,nw=(evt.winners||[]).length;
     if(nw>ow)
-      acts.push({id:`win-${eid}-${nw}`,type:"winners",message:`Winnaars bekendgemaakt!`,event:en,eventId:eid,timestamp:now});
+      acts.push({id:`win-${eid}-${nw}`,type:"winners",message:`Winnaars bekendgemaakt!`,event:en,eventId:eid,timestamp:now,tab:"Winners & Highlights"});
   });
   return acts;
 };
@@ -4542,30 +5629,42 @@ const diffEvents=(prev,next)=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // UPDATES PAGE
 // ─────────────────────────────────────────────────────────────────────────────
-const UpdatesPage=({notifications,notifLastRead,onMarkAllRead,onOpenEvent})=>{
+const UpdatesPage=({notifications,notifLastRead,onMarkAllRead,onOpenEvent,currentUser,onClearUpdates,onClearSelf,onDeleteNotif,onDeleteSelf})=>{
   const typeIcon={rsvp:"📅",faq:"❓",answer:"💬",photo:"📷",poll:"📊",schedule:"🗓",quiz:"🧠",winners:"🏆"};
   const typeLabel={rsvp:"RSVP",faq:"Nieuwe vraag",answer:"Vraag beantwoord",photo:"Foto",poll:"Poll",schedule:"Programma",quiz:"Quiz",winners:"Winnaars"};
   const typeColor={rsvp:"var(--amber)",faq:"#7c6cfc",answer:"#56b4a0",photo:"#e08050",poll:"var(--amber2)",schedule:"var(--gold)",quiz:"#c46eff",winners:"var(--gold)"};
   const timeAgo=ts=>{const d=Date.now()-new Date(ts);if(d<60000)return"zojuist";if(d<3600000)return`${Math.floor(d/60000)}m geleden`;if(d<86400000)return`${Math.floor(d/3600000)}u geleden`;return`${Math.floor(d/86400000)}d geleden`;};
   const unread=notifications.filter(n=>n.timestamp>notifLastRead);
   const read=notifications.filter(n=>n.timestamp<=notifLastRead);
+  const isAdmin=can.closePoll(currentUser);
   const Item=({n,isNew})=>(
-    <div onClick={()=>n.eventId&&onOpenEvent(n.eventId)}
+    <div style={{display:"flex",gap:"1rem",alignItems:"flex-start",padding:".9rem 1.1rem",borderRadius:"var(--radius-sm)",border:`1px solid ${isNew?"rgba(232,148,58,.2)":"var(--border)"}`,background:isNew?"rgba(232,148,58,.04)":"var(--bg2)",transition:"background .15s,border-color .15s",marginBottom:".5rem",position:"relative"}}
       onMouseEnter={e=>{e.currentTarget.style.background="var(--bg3)";e.currentTarget.style.borderColor="var(--border2)";}}
-      onMouseLeave={e=>{e.currentTarget.style.background=isNew?"rgba(232,148,58,.04)":"var(--bg2)";e.currentTarget.style.borderColor="var(--border)";}}
-      style={{display:"flex",gap:"1rem",alignItems:"flex-start",padding:".9rem 1.1rem",borderRadius:"var(--radius-sm)",border:`1px solid ${isNew?"rgba(232,148,58,.2)":"var(--border)"}`,background:isNew?"rgba(232,148,58,.04)":"var(--bg2)",cursor:n.eventId?"pointer":"default",transition:"background .15s,border-color .15s",marginBottom:".5rem"}}>
-      <div style={{flexShrink:0,width:36,height:36,borderRadius:"50%",background:`${typeColor[n.type]||"var(--muted)"}22`,border:`1px solid ${typeColor[n.type]||"var(--muted)"}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1rem",marginTop:1}}>
-        {typeIcon[n.type]||"•"}
-      </div>
-      <div style={{flex:1,minWidth:0}}>
-        <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3,flexWrap:"wrap"}}>
-          <span style={{fontSize:".68rem",fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:typeColor[n.type]||"var(--muted)"}}>{typeLabel[n.type]||n.type}</span>
-          {isNew&&<span style={{width:6,height:6,borderRadius:"50%",background:"var(--amber)",display:"inline-block",flexShrink:0}}/>}
+      onMouseLeave={e=>{e.currentTarget.style.background=isNew?"rgba(232,148,58,.04)":"var(--bg2)";e.currentTarget.style.borderColor=isNew?"rgba(232,148,58,.2)":"var(--border)";}}>
+      <div onClick={()=>n.eventId&&onOpenEvent(n.eventId,n.tab,n.targetId)} style={{display:"flex",gap:"1rem",alignItems:"flex-start",flex:1,minWidth:0,cursor:n.eventId?"pointer":"default"}}>
+        <div style={{flexShrink:0,width:36,height:36,borderRadius:"50%",background:`${typeColor[n.type]||"var(--muted)"}22`,border:`1px solid ${typeColor[n.type]||"var(--muted)"}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1rem",marginTop:1}}>
+          {typeIcon[n.type]||"•"}
         </div>
-        <div style={{fontSize:".88rem",color:"var(--cream)",lineHeight:1.4}}>{n.message}</div>
-        <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:3}}>{n.event} · {timeAgo(n.timestamp)}</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3,flexWrap:"wrap"}}>
+            <span style={{fontSize:".68rem",fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:typeColor[n.type]||"var(--muted)"}}>{typeLabel[n.type]||n.type}</span>
+            {isNew&&<span style={{width:6,height:6,borderRadius:"50%",background:"var(--amber)",display:"inline-block",flexShrink:0}}/>}
+          </div>
+          <div style={{fontSize:".88rem",color:"var(--cream)",lineHeight:1.4}}>{n.message}</div>
+          <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:3}}>{n.event} · {timeAgo(n.timestamp)}</div>
+        </div>
+        {n.eventId&&<div style={{color:"var(--muted)",fontSize:".8rem",alignSelf:"center",flexShrink:0,opacity:.5}}>›</div>}
       </div>
-      {n.eventId&&<div style={{color:"var(--muted)",fontSize:".8rem",alignSelf:"center",flexShrink:0,opacity:.5}}>›</div>}
+      <div style={{display:"flex",flexDirection:"column",gap:3,flexShrink:0,alignSelf:"flex-start",marginTop:1}} onClick={e=>e.stopPropagation()}>
+        <button onClick={()=>onDeleteSelf(n.id)}
+          style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:".72rem",padding:"2px 5px",opacity:.45,lineHeight:1,transition:"opacity .15s",whiteSpace:"nowrap"}}
+          onMouseEnter={e=>e.currentTarget.style.opacity=1} onMouseLeave={e=>e.currentTarget.style.opacity=".45"}
+          title="Delete for me">✕</button>
+        {isAdmin&&<button onClick={()=>onDeleteNotif(n.id)}
+          style={{background:"none",border:"1px solid rgba(255,100,100,.25)",borderRadius:4,color:"rgba(255,120,120,.7)",cursor:"pointer",fontSize:".62rem",padding:"2px 5px",opacity:.6,lineHeight:1,transition:"opacity .15s",whiteSpace:"nowrap"}}
+          onMouseEnter={e=>e.currentTarget.style.opacity=1} onMouseLeave={e=>e.currentTarget.style.opacity=".6"}
+          title="Delete for everyone">✕ all</button>}
+      </div>
     </div>
   );
   return(
@@ -4575,8 +5674,20 @@ const UpdatesPage=({notifications,notifLastRead,onMarkAllRead,onOpenEvent})=>{
           <H style={{marginBottom:2}}>📬 Updates</H>
           <div style={{fontSize:".78rem",color:"var(--muted)"}}>{unread.length>0?`${unread.length} nieuw`:"Alles bijgewerkt"}</div>
         </div>
-        {unread.length>0&&<Btn onClick={onMarkAllRead} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"rgba(232,148,58,.3)"}}>✓ Alles gelezen</Btn>}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          {unread.length>0&&<Btn onClick={onMarkAllRead} variant="ghost" size="sm" style={{color:"var(--amber)",borderColor:"rgba(232,148,58,.3)"}}>✓ Alles gelezen</Btn>}
+          {notifications.length>0&&<Btn onClick={onClearSelf} variant="ghost" size="sm" style={{color:"var(--muted)",borderColor:"var(--border)"}}>🗑 Wis voor mij</Btn>}
+        </div>
       </div>
+      {isAdmin&&(
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"rgba(255,100,100,.06)",border:"1px solid rgba(255,100,100,.18)",borderRadius:10,padding:"10px 14px",marginBottom:"1.2rem"}}>
+          <div>
+            <div style={{fontSize:".78rem",fontWeight:600,color:"rgba(255,120,120,.9)"}}>Admin</div>
+            <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:1}}>Wis alle meldingen voor iedereen</div>
+          </div>
+          <Btn onClick={onClearUpdates} variant="ghost" size="sm" style={{color:"rgba(255,120,120,.85)",borderColor:"rgba(255,100,100,.3)"}}>🗑 Wis voor iedereen</Btn>
+        </div>
+      )}
       {notifications.length===0&&(
         <div style={{textAlign:"center",padding:"4rem 1rem",color:"var(--muted)"}}>
           <div style={{fontSize:"2.5rem",marginBottom:"1rem"}}>📭</div>
@@ -5000,7 +6111,7 @@ const TeamCreatorPage=({users,events=[],onUpdateEvent})=>{
                 style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"9px 10px",color:selectedEvtId?"var(--cream)":"var(--muted)",fontFamily:"var(--font-b)",fontSize:".88rem",outline:"none",width:"100%"}}>
                 <option value="">— Kies een event —</option>
                 {activeEvents.map(e=>(
-                  <option key={e.id} value={e.id}>{e.name} · {new Date(e.date).toLocaleDateString("nl-NL",{day:"numeric",month:"short",year:"numeric"})}</option>
+                  <option key={e.id} value={e.id}>{e.name} · {formatEventDateRange(e.date,e.end_date,{weekday:false,month:"short"})}</option>
                 ))}
               </select>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -5183,6 +6294,8 @@ export default function App(){
   const [editingProfile,setEditingProfile]=useState(false);
   const [notifications,setNotifications]=useState([]);
   const [notifLastRead,setNotifLastRead]=useState(()=>localStorage.getItem("notif-read")||"");
+  const [deletedNotifIds,setDeletedNotifIds]=useState(new Set());
+  const [clearedBefore,setClearedBefore]=useState("");
   useEffect(()=>{
     if(!currentUser)return;
     try{const s=JSON.parse(localStorage.getItem(`md-notifs-${currentUser.id}`)||"[]");setNotifications(s);}catch{}
@@ -5191,8 +6304,24 @@ export default function App(){
   const [saraJayUnlocked,setSaraJayUnlocked]=useState(()=>{try{return JSON.parse(localStorage.getItem("md-sj-unlocked")||"false");}catch{return false;}});
   const [showAnnounce,setShowAnnounce]=useState(false);
   const [editingAnn,setEditingAnn]=useState(null);
+  // Login teaser (src/features/teaser/dismissed.js + `selectTeaserEvent`/
+  // `TeaserModal` above): `teaserEvent` is the currently-shown teaser, or
+  // null. `teaserEvalRef` makes the "show on every app entry" check fire
+  // exactly once per entry -- not on every unrelated re-render, and not on
+  // the 30s events poll re-running `selectTeaserEvent` against a fresh
+  // array identity. Reset on `logout` below so a different lad logging in
+  // on the same device/tab (or the same one logging back in) is a fresh
+  // "entry" too, not silently skipped because this tab happened to show it
+  // to someone else earlier.
+  const [teaserEvent,setTeaserEvent]=useState(null);
+  const teaserEvalRef=useRef(false);
+  // Id of the event whose trailer the teaser's primary button should
+  // auto-open, once `openEvent` has navigated there -- consumed (reset to
+  // null) by EventPage the instant it acts on it, so it never re-fires.
+  const [autoTrailerId,setAutoTrailerId]=useState(null);
   const eventsRef=useRef([]);
   useEffect(()=>{eventsRef.current=events;},[events]);
+  const diffBaseRef=useRef([]);
   const currentUserRef=useRef(null);
   useEffect(()=>{currentUserRef.current=currentUser;},[currentUser]);
 
@@ -5206,7 +6335,10 @@ export default function App(){
       if(anns&&anns.length){
         const sjRow=anns.find(r=>r.id==="__sara_jay__");
         if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}
-        const mapped=anns.filter(r=>r.id!=="__sara_jay__").map(fromDbAnn);
+        const delRow=anns.find(r=>r.id==="__deleted_notifs__");
+        if(delRow){try{const raw=JSON.parse(delRow.body||"null");if(raw){const ids=Array.isArray(raw)?raw:(raw.ids||[]);const cb=Array.isArray(raw)?"":( raw.cleared_before||"");setDeletedNotifIds(new Set(ids));if(cb)setClearedBefore(cb);}}catch{}}
+        const SYSTEM_IDS=new Set(["__sara_jay__","__deleted_notifs__"]);
+        const mapped=anns.filter(r=>!SYSTEM_IDS.has(r.id)).map(fromDbAnn);
         setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));
       }
       // Seed DB on first run if empty
@@ -5220,6 +6352,7 @@ export default function App(){
         await supabase.from("users").insert(seeded);
         allUsers=seeded;
       }
+      diffBaseRef.current=allEvents;
       setEvents(allEvents);
       setUsers(allUsers);
       const sessId=localStorage.getItem("md-session");
@@ -5228,7 +6361,7 @@ export default function App(){
     });
 
     const poll=setInterval(()=>{
-      supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data&&data.length){const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});const sjRow=data.find(r=>r.id==="__sara_jay__");if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}const mapped=data.filter(r=>r.id!=="__sara_jay__").map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}});
+      supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data&&data.length){const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});const sjRow=data.find(r=>r.id==="__sara_jay__");if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}const delRow=data.find(r=>r.id==="__deleted_notifs__");if(delRow){try{const raw=JSON.parse(delRow.body||"null");if(raw){const ids=new Set(Array.isArray(raw)?raw:(raw.ids||[]));const cb=Array.isArray(raw)?"": (raw.cleared_before||"");setDeletedNotifIds(ids);if(cb)setClearedBefore(cb);setNotifications(prev=>{const next=prev.filter(n=>!ids.has(n.id)&&(!cb||n.timestamp>cb));const cu=currentUserRef.current;if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));return next;});}}catch{}}const SYSTEM_IDS=new Set(["__sara_jay__","__deleted_notifs__"]);const mapped=data.filter(r=>!SYSTEM_IDS.has(r.id)).map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}});
       supabase.from("users").select("*").then(({data})=>{
         if(data){
           setUsers(data);
@@ -5244,7 +6377,8 @@ export default function App(){
       });
       supabase.from("events").select("*").order("date").then(({data})=>{
         if(data){
-          const newActs=diffEvents(eventsRef.current,data);
+          const newActs=diffEvents(diffBaseRef.current,data);
+          diffBaseRef.current=data;
           if(newActs.length){
             setNotifications(prev=>{
               const ids=new Set(prev.map(n=>n.id));
@@ -5256,19 +6390,131 @@ export default function App(){
               return next;
             });
           }
-          setEvents(data);
+          setEvents(prev=>{
+              const byId=new Map(data.map(e=>[e.id,e]));
+              prev.forEach(e=>{if(!byId.has(e.id))byId.set(e.id,e);});
+              return [...byId.values()].sort((a,b)=>new Date(a.date)-new Date(b.date));
+            });
         }
       });
     },30000);
-    return()=>clearInterval(poll);
+
+    // Real-time notification deletion broadcast
+    const notifCtrl=supabase.channel("notif-ctrl")
+      .on("broadcast",{event:"del-notif"},({payload})=>{
+        if(!payload?.id)return;
+        setDeletedNotifIds(s=>new Set([...s,payload.id]));
+        setNotifications(prev=>{
+          const next=prev.filter(n=>n.id!==payload.id);
+          const cu=currentUserRef.current;
+          if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));
+          return next;
+        });
+      })
+      .on("broadcast",{event:"clear-notifs"},({payload})=>{
+        const ids=new Set(payload?.ids||[]);
+        const cb=payload?.cleared_before||"";
+        setDeletedNotifIds(s=>new Set([...s,...ids]));
+        if(cb)setClearedBefore(cb);
+        setNotifications(prev=>{
+          const next=prev.filter(n=>!ids.has(n.id)&&(!cb||n.timestamp>cb));
+          const cu=currentUserRef.current;
+          if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));
+          return next;
+        });
+      })
+      .on("broadcast",{event:"push-notif"},({payload})=>{
+        if(!payload?.notif)return;
+        const n=payload.notif;
+        setNotifications(prev=>{
+          const ids=new Set(prev.map(x=>x.id));
+          if(ids.has(n.id))return prev;
+          const next=[n,...prev].slice(0,100);
+          const cu=currentUserRef.current;
+          if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));
+          return next;
+        });
+      })
+      .subscribe();
+
+    // Realtime notification generation for all event changes
+    const evtNotifCh=supabase.channel("evt-notif-realtime")
+      .on("postgres_changes",{event:"UPDATE",schema:"public",table:"events"},({new:updated})=>{
+        if(!updated)return;
+        const old=diffBaseRef.current.find(e=>e.id===updated.id);
+        if(old){
+          const acts=diffEvents([old],[updated]);
+          if(acts.length){
+            setNotifications(prev=>{
+              const ids=new Set(prev.map(n=>n.id));
+              const fresh=acts.filter(a=>!ids.has(a.id));
+              if(!fresh.length)return prev;
+              const next=[...fresh,...prev].slice(0,100);
+              const cu=currentUserRef.current;
+              if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));
+              return next;
+            });
+          }
+        }
+        diffBaseRef.current=diffBaseRef.current.map(e=>e.id===updated.id?updated:e);
+      })
+      .subscribe();
+
+    return()=>{clearInterval(poll);supabase.removeChannel(notifCtrl);supabase.removeChannel(evtNotifCh);};
   },[]);
+
+  // Decide once per "app entry" (loaded + a resolved, active `currentUser`
+  // -- covers both a fresh credential login AND the `md-session` resume
+  // shortcut, deliberately not just the literal login flow, since sessions
+  // persist and almost nobody would ever see it otherwise) whether the
+  // login teaser should show. `ACTIVE_ROLES` check is redundant with the
+  // `role==="pending"` early return below (this effect never runs before
+  // that render happens, since `loaded`+`currentUser` are the same gate) --
+  // kept explicit anyway per the spec's own call-out, and as a defensive
+  // guard against any future role that isn't "pending" but also isn't meant
+  // to be a full member.
+  useEffect(()=>{
+    if(teaserEvalRef.current)return;
+    if(!loaded||!currentUser)return;
+    if(!ACTIVE_ROLES.includes(currentUser.role))return;
+    teaserEvalRef.current=true;
+    const candidate=selectTeaserEvent(events);
+    if(!candidate)return;
+    if(hasDismissedTeaser(candidate.id)||hasSeenTrailer(candidate.id))return;
+    setTeaserEvent(candidate);
+  },[loaded,currentUser,events]);
+
+  const deleteNotifForAll=async(notifId)=>{
+    const newSet=new Set([...deletedNotifIds,notifId]);
+    setDeletedNotifIds(newSet);
+    setNotifications(prev=>{
+      const next=prev.filter(n=>n.id!==notifId);
+      if(currentUser)localStorage.setItem(`md-notifs-${currentUser.id}`,JSON.stringify(next));
+      return next;
+    });
+    const body=JSON.stringify({ids:[...newSet],cleared_before:clearedBefore});
+    await supabase.from("announcements").upsert({id:"__deleted_notifs__",title:"__deleted_notifs__",body,created_by:"system",created_at:new Date().toISOString(),active:false});
+    supabase.channel("notif-ctrl").send({type:"broadcast",event:"del-notif",payload:{id:notifId}});
+  };
+
+  const sendNotifToAll=(notif)=>{
+    const n={id:`manual-${Date.now()}`,timestamp:new Date().toISOString(),...notif};
+    setNotifications(prev=>{
+      const ids=new Set(prev.map(x=>x.id));
+      if(ids.has(n.id))return prev;
+      const next=[n,...prev].slice(0,100);
+      if(currentUser)localStorage.setItem(`md-notifs-${currentUser.id}`,JSON.stringify(next));
+      return next;
+    });
+    supabase.channel("notif-ctrl").send({type:"broadcast",event:"push-notif",payload:{notif:n}});
+  };
 
   const saveUsers=async u=>{
     setUsers(u);
     await supabase.from("users").upsert(u);
   };
   const login=u=>{setCurrentUser(u);localStorage.setItem("md-session",u.id);};
-  const logout=()=>{setCurrentUser(null);localStorage.removeItem("md-session");setActiveId(null);setPageView("home");};
+  const logout=()=>{setCurrentUser(null);localStorage.removeItem("md-session");setActiveId(null);setPageView("home");teaserEvalRef.current=false;setTeaserEvent(null);};
   const register=async u=>{
     const {error}=await supabase.from("users").insert([u]);
     if(error){console.error("Register error:",error);return error.message||"Onbekende fout";}
@@ -5284,7 +6530,8 @@ export default function App(){
     if(typeof updated==="function"){
       setEvents(prev=>{
         const next=prev.map(e=>e.id===activeId?updated(e):e);
-        supabase.from("events").upsert(next);
+        const changed=next.find(e=>e.id===activeId);
+        if(changed)supabase.from("events").upsert([changed]);
         return next;
       });
     } else {
@@ -5319,8 +6566,7 @@ export default function App(){
       localStorage.setItem("md-announcements",JSON.stringify(next));
       return next;
     });
-    // best-effort; only works if 'active' column exists
-    supabase.from("announcements").update({active:false}).eq("id",id);
+    await supabase.from("announcements").update({active:false}).eq("id",id);
   };
   const reactivateAnnouncement=async id=>{
     setAnnouncements(prev=>{
@@ -5338,7 +6584,8 @@ export default function App(){
     });
     await supabase.from("announcements").delete().eq("id",id);
   };
-  const openEvent=id=>{setActiveId(id);setPageView("event");};
+  const [notifNav,setNotifNav]=useState(null);
+  const openEvent=(id,tab,targetId)=>{setActiveId(id);setNotifNav(tab?{tab,targetId:targetId||null}:null);setPageView("event");};
   const goHome=()=>{setPageView("home");setActiveId(null);setActiveMemberId(null);};
   const goBack=()=>{
     if(pageView==="member")setPageView("members");
@@ -5362,6 +6609,27 @@ export default function App(){
       setUsers(prev=>prev.map(u=>u.id===currentUser.id?updated:u));
     }
   };
+  // Primary button: navigate to that event's page (same destination the
+  // page's own "🎬 Watch the trailer" button lives on) and flag its trailer
+  // to auto-open there -- see EventPage's `autoOpenTrailerId` effect above.
+  // Deliberately does NOT call `dismissTeaser` -- "watched" is earned by
+  // actually finishing the video (`markTrailerSeen`, inside EventTrailer's
+  // `onEnded`), not by merely tapping this button. Closing the overlay here
+  // is enough either way: re-showing on the *next* app entry is gated on
+  // hasDismissedTeaser/hasSeenTrailer, not on whether this modal is mounted.
+  const teaserWatch=()=>{
+    if(!teaserEvent)return;
+    setAutoTrailerId(teaserEvent.id);
+    openEvent(teaserEvent.id);
+    setTeaserEvent(null);
+  };
+  // Secondary button: an explicit, deliberate choice (never the backdrop --
+  // see TeaserModal's `onBackdropClose={()=>{}}`) -- never shows again for
+  // this event on this device.
+  const teaserSkip=()=>{
+    if(teaserEvent)dismissTeaser(teaserEvent.id);
+    setTeaserEvent(null);
+  };
   const activeEvent=events.find(e=>e.id===activeId);
   const activeMember=users.find(u=>u.id===activeMemberId);
 
@@ -5382,8 +6650,8 @@ export default function App(){
         {pageView==="hof"&&<HallOfFame events={events} users={users}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
-        {pageView==="event"&&activeEvent&&<EventPage evt={activeEvent} onUpdate={updateEvent} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users}/>}
-        {pageView==="updates"&&<UpdatesPage notifications={notifications} notifLastRead={notifLastRead} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={id=>{openEvent(id);}}/>}
+        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)}/>}
+        {pageView==="updates"&&<UpdatesPage notifications={notifications.filter(n=>!deletedNotifIds.has(n.id)&&(!clearedBefore||n.timestamp>clearedBefore))} notifLastRead={notifLastRead} currentUser={currentUser} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={openEvent} onClearSelf={()=>{setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);}} onDeleteSelf={id=>{setNotifications(prev=>{const next=prev.filter(n=>n.id!==id);if(currentUser)localStorage.setItem(`md-notifs-${currentUser.id}`,JSON.stringify(next));return next;});}} onClearUpdates={async()=>{const cb=new Date().toISOString();const allIds=[...new Set([...deletedNotifIds,...notifications.map(n=>n.id)])];const newSet=new Set(allIds);setDeletedNotifIds(newSet);setClearedBefore(cb);setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);const body=JSON.stringify({ids:allIds,cleared_before:cb});await supabase.from("announcements").upsert({id:"__deleted_notifs__",title:"__deleted_notifs__",body,created_by:"system",created_at:new Date().toISOString(),active:false});supabase.channel("notif-ctrl").send({type:"broadcast",event:"clear-notifs",payload:{ids:allIds,cleared_before:cb}});}} onDeleteNotif={deleteNotifForAll}/>}
         {pageView==="teams"&&<TeamCreatorPage users={users} events={events} onUpdateEvent={updateEvent}/>}
         {pageView==="timer"&&<TimerPage/>}
         {pageView==="sarajay"&&<SaraJayOrJAI/>}
@@ -5391,8 +6659,9 @@ export default function App(){
       <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted2)",fontSize:".72rem",borderTop:"1px solid var(--border)",letterSpacing:".1em"}}>🍺 MensApp · Built for the lads</div>
       {showAdmin&&<AdminPanel users={users} onUpdateUsers={updateUsers} onDeleteUser={deleteUser} onClose={()=>setShowAdmin(false)} saraJayUnlocked={saraJayUnlocked} onToggleSaraJay={toggleSaraJay}/>}
       {showAnnounce&&can.announce(currentUser)&&<AnnouncementModal onSave={saveAnnouncement} onClose={()=>{setShowAnnounce(false);setEditingAnn(null);}} existing={editingAnn} currentUser={currentUser}/>}
-      {newEvent&&can.editEvent(currentUser)&&<NewEventModal users={users} onSave={async evt=>{await saveEvents([...events,evt]);setNewEvent(false);openEvent(evt.id)}} onClose={()=>setNewEvent(false)}/>}
+      {newEvent&&can.editEvent(currentUser)&&<NewEventModal users={users} onSave={async evt=>{setEvents(prev=>[...prev,evt]);setNewEvent(false);openEvent(evt.id);await supabase.from("events").upsert([evt]);}} onClose={()=>setNewEvent(false)}/>}
       {editingProfile&&<EditProfileModal user={currentUser} onSave={async u=>{await saveProfile(u);setEditingProfile(false);}} onClose={()=>setEditingProfile(false)}/>}
+      {teaserEvent&&<TeaserModal evt={teaserEvent} onWatch={teaserWatch} onSkip={teaserSkip}/>}
     </div>
   );
 }
