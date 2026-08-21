@@ -441,7 +441,7 @@ const AuthShell = ({children}) => (
     <GS/><div style={{width:"100%",maxWidth:420}}>
       <div style={{textAlign:"center",marginBottom:"2rem"}}>
         <div style={{fontSize:"3.2rem",marginBottom:".4rem"}}>🍺</div>
-        <div style={{fontFamily:"var(--font-h)",fontSize:"2.2rem",color:"var(--amber2)"}}>MensDay</div>
+        <div style={{fontFamily:"var(--font-h)",fontSize:"2.2rem",color:"var(--amber2)"}}>MensApp</div>
         <div style={{color:"var(--muted)",fontSize:".8rem",letterSpacing:".08em",marginTop:4}}>THE ANNUAL GATHERING</div>
       </div>
       {children}
@@ -565,7 +565,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
         <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}}>
           {view!=="home"&&<button onClick={onBack} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Terug</button>}
           <div onClick={onHome} onMouseEnter={e=>e.currentTarget.style.opacity=".72"} onMouseLeave={e=>e.currentTarget.style.opacity=""} style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer",transition:"opacity .15s"}}>
-            {view==="home"?"🍺 Mensday":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":view==="teams"?"🎲 Team Creator":view==="timer"?"⏱ Timer":view==="sarajay"?"🤖 Sara Jay":eventName}
+            {view==="home"?"🍺 MensApp":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":view==="teams"?"🎲 Team Creator":view==="timer"?"⏱ Timer":view==="sarajay"?"🤖 Sara Jay":eventName}
           </div>
         </div>
         {!isMobile&&(
@@ -1069,7 +1069,7 @@ const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onSaraJa
       <div className="fu" style={{textAlign:"center",padding:isMobile?"1.2rem 0 .3rem":"3rem 0 .5rem",position:"relative"}}>
         <div style={{position:"absolute",inset:0,background:"var(--hero-glow)",pointerEvents:"none"}}/>
         <div className="float" style={{fontSize:isMobile?"2.8rem":"4.5rem",marginBottom:isMobile?".2rem":".5rem",display:"inline-block"}}>🍺</div>
-        <h1 style={{fontFamily:"var(--font-h)",fontStyle:"italic",fontSize:isMobile?"2.6rem":"clamp(3rem,10vw,6rem)",color:"var(--amber2)",lineHeight:.9,letterSpacing:"-.02em",marginBottom:isMobile?".4rem":".6rem"}}>MENSDAY</h1>
+        <h1 style={{fontFamily:"var(--font-h)",fontStyle:"italic",fontSize:isMobile?"2.6rem":"clamp(3rem,10vw,6rem)",color:"var(--amber2)",lineHeight:.9,letterSpacing:"-.02em",marginBottom:isMobile?".4rem":".6rem"}}>MENSAPP</h1>
         <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:12,marginBottom:isMobile?".8rem":"1.2rem"}}>
           <div style={{height:1,flex:1,maxWidth:60,background:"linear-gradient(to right,transparent,var(--border2))"}}/>
           <span style={{color:"var(--muted)",fontSize:".72rem",letterSpacing:".25em",textTransform:"uppercase"}}>{hype}</span>

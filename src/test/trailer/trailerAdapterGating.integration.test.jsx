@@ -113,7 +113,7 @@ describe('trailer adapter gating (toTrailerInput only validates roster photos wh
     // Auto-logged-in via the session shortcut -- straight past the login
     // screen to Home once the mount-time fetch resolves.
     await waitFor(() => {
-      expect(screen.getByText('MENSDAY')).toBeInTheDocument()
+      expect(screen.getByText('MENSAPP')).toBeInTheDocument()
     })
 
     fireEvent.click(screen.getByText('Mensdag XL'))
