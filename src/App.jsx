@@ -10,6 +10,11 @@ import { blankTeamSet, setCaptain, removeMember, teamSetSummary, namesFromUsers,
 // §3): keeps the trailer's weight out of the main chunk, loaded only when an
 // event page's "🎬 Watch the trailer" button is actually clicked.
 const EventTrailer = lazy(() => import("./features/trailer/EventTrailer.jsx"));
+// Mens-games (docs/mensgames-spec.md §5.3): lazy like the trailer -- must
+// not add to the main chunk. App.jsx never fetches tournaments itself; the
+// feature owns its own Supabase I/O once either of these actually mounts.
+const MensGamesPage = lazy(() => import("./features/mensgames/MensGamesPage.jsx"));
+const MensGamesTab  = lazy(() => import("./features/mensgames/MensGamesTab.jsx"));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GLOBAL STYLES
@@ -223,6 +228,11 @@ const can = {
   uploadPhoto:  u=>ACTIVE_ROLES.includes(u?.role),
   reactPhoto:   u=>ACTIVE_ROLES.includes(u?.role),
   updateRsvp:   u=>ACTIVE_ROLES.includes(u?.role),
+  // Mens-games (docs/mensgames-spec.md §13 Q6 proposed default: admin/org
+  // only can score/manage a tournament for now). The feature dir can't
+  // import `can` (it's lazy, App.jsx-local, unexported per §5.4) -- App.jsx
+  // computes this once and passes the boolean down as `canManage`.
+  runTournament:u=>hasAdmin(u)||hasOrg(u),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -640,7 +650,7 @@ const PendingScreen = ({user,onLogout}) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // NAV
 // ─────────────────────────────────────────────────────────────────────────────
-const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onUpdates,onProfile,onTeams,onTimer,onSaraJay,saraJayUnlocked}) => {
+const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onUpdates,onProfile,onTeams,onTimer,onMensGames,onSaraJay,saraJayUnlocked}) => {
   const [menuOpen,setMenuOpen]=useState(false);
   const isMobile=useIsMobile();
   const unread=notifications.filter(n=>n.timestamp>notifLastRead).length;
@@ -661,7 +671,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
         <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}}>
           {view!=="home"&&<button onClick={onBack} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Terug</button>}
           <div onClick={onHome} onMouseEnter={e=>e.currentTarget.style.opacity=".72"} onMouseLeave={e=>e.currentTarget.style.opacity=""} style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer",transition:"opacity .15s"}}>
-            {view==="home"?"🍺 MensApp":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":view==="teams"?"🎲 Team Creator":view==="timer"?"⏱ Timer":view==="sarajay"?"🤖 Sara Jay":eventName}
+            {view==="home"?"🍺 MensApp":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":view==="teams"?"🎲 Team Creator":view==="timer"?"⏱ Timer":view==="mensgames"?"🏆 Mens-Games":view==="sarajay"?"🤖 Sara Jay":eventName}
           </div>
         </div>
         {!isMobile&&(
@@ -670,6 +680,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
             <button onClick={onHof} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
             <button onClick={onTeams} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🎲 Teams</button>
             <button onClick={onTimer} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⏱ Timer</button>
+            <button onClick={onMensGames} className="nav-btn" style={{background:view==="mensgames"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏆 Mens-Games</button>
             <button onClick={saraJayUnlocked?onSaraJay:undefined} className="nav-btn" style={{background:view==="sarajay"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:saraJayUnlocked?"var(--amber2)":"var(--muted)",padding:"5px 12px",cursor:saraJayUnlocked?"pointer":"not-allowed",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,opacity:saraJayUnlocked?1:.55}}>{saraJayUnlocked?"🤖 Sara Jay":"🔒 ???"}</button>
             {can.announce(currentUser)&&<button onClick={onAnnounce} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>📢 Announce</button>}
             {can.manageUsers(currentUser)&&<button onClick={onAdmin} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
@@ -697,6 +708,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
           <button onClick={()=>{onHof();setMenuOpen(false);}} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
           <button onClick={()=>{onTeams();setMenuOpen(false);}} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🎲 Team Creator</button>
           <button onClick={()=>{onTimer();setMenuOpen(false);}} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>⏱ Timer</button>
+          <button onClick={()=>{onMensGames();setMenuOpen(false);}} className="nav-btn" style={{background:view==="mensgames"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏆 Mens-Games</button>
           <button onClick={saraJayUnlocked?()=>{onSaraJay();setMenuOpen(false);}:undefined} className="nav-btn" style={{background:view==="sarajay"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:saraJayUnlocked?"var(--amber2)":"var(--muted)",padding:"10px 14px",cursor:saraJayUnlocked?"pointer":"not-allowed",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",opacity:saraJayUnlocked?1:.55}}>{saraJayUnlocked?"🤖 Sara Jay or JAI":"🔒 ???"}</button>
           {can.announce(currentUser)&&<button onClick={()=>{onAnnounce();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>📢 Announce</button>}
           {can.manageUsers(currentUser)&&<button onClick={()=>{onAdmin();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:".7rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{pendingCount}</span>}</button>}
@@ -1148,7 +1160,7 @@ const EditProfileModal=({user,onSave,onClose})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────────────────────────────────────
-const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onSaraJay,saraJayUnlocked}) => {
+const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onMensGames,onSaraJay,saraJayUnlocked}) => {
   const isMobile=useIsMobile();
   const isOver=e=>e.archived||new Date(`${e.end_date||e.date}T${e.end_time||"23:59"}:00`)<new Date();
   const upcoming=events.filter(e=>!isOver(e)).sort((a,b)=>new Date(a.date)-new Date(b.date));
@@ -1223,6 +1235,7 @@ const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onSaraJa
           {[
             {icon:"🎲",title:"Team Creator",desc:"Schud willekeurige teams voor je activiteiten",onClick:onTeams,color:"var(--amber)"},
             {icon:"⏱",title:"Timer",desc:"Afteltimer voor spelletjes en activiteiten",onClick:onTimer,color:"var(--blue)"},
+            {icon:"🏆",title:"Mens-Games",desc:"Bouw een toernooi, scoor live, houd de stand bij",onClick:onMensGames,color:"var(--gold)"},
             {icon:saraJayUnlocked?"🤖":"🔒",title:"Sara Jay or JAI",desc:saraJayUnlocked?"Echt of AI? Één fout = game over. Bouw je streak.":"Binnenkort beschikbaar... 👀",onClick:saraJayUnlocked?onSaraJay:undefined,color:saraJayUnlocked?"var(--purple)":"var(--muted)",isLocked:!saraJayUnlocked},
           ].map(({icon,title,desc,onClick,color,isLocked})=>(
             <div key={title} onClick={onClick}
@@ -1398,7 +1411,7 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // EVENT PAGE
 // ─────────────────────────────────────────────────────────────────────────────
-const TABS=["Overview","Polls","Quiz","Teams","Photos","Winners & Highlights","FAQ","Kretjes 🍺"];
+const TABS=["Overview","Polls","Quiz","Teams","Photos","Winners & Highlights","FAQ","Kretjes 🍺","Mens-Games 🏆"];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEAMS TAB
@@ -1678,6 +1691,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
         {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast}/>}
         {tab==="FAQ"                  &&<FAQTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Kretjes 🍺"           &&<KretjesTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
+        {tab==="Mens-Games 🏆"        &&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesTab evt={evt} events={events} teamSets={teamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)}/></Suspense>}
       </div>
 
       {/* Live presentation banner — fixed at top of screen */}
@@ -6610,7 +6624,7 @@ export default function App(){
   const [currentUser,setCurrentUser]=useState(null);
   const [authView,setAuthView]=useState("login");
   const [activeId,setActiveId]=useState(null);
-  const [pageView,setPageView]=useState("home"); // home | event | hof | members | member | updates | teams | timer
+  const [pageView,setPageView]=useState("home"); // home | event | hof | members | member | updates | teams | timer | mensgames
   const [showAdmin,setShowAdmin]=useState(false);
   const [newEvent,setNewEvent]=useState(false);
   const [loaded,setLoaded]=useState(false);
@@ -6958,6 +6972,7 @@ export default function App(){
   const openMember=id=>{setActiveMemberId(id);setPageView("member");};
   const openTeams=()=>setPageView("teams");
   const openTimer=()=>setPageView("timer");
+  const openMensGames=()=>setPageView("mensgames");
   const openSaraJay=()=>setPageView("sarajay");
   const toggleSaraJay=async()=>{
     const newVal=!saraJayUnlocked;
@@ -7020,10 +7035,10 @@ export default function App(){
           <button onClick={()=>setWriteError(null)} style={{background:"rgba(255,255,255,.14)",border:"1px solid rgba(255,255,255,.3)",borderRadius:8,color:"#fff",padding:"6px 14px",cursor:"pointer",fontSize:".75rem",fontWeight:700,fontFamily:"var(--font-b)",minHeight:32}}>Dismiss</button>
         </div>
       )}
-      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onUpdates={()=>setPageView("updates")} onProfile={()=>openMember(currentUser.id)} onTeams={openTeams} onTimer={openTimer} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>
+      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onUpdates={()=>setPageView("updates")} onProfile={()=>openMember(currentUser.id)} onTeams={openTeams} onTimer={openTimer} onMensGames={openMensGames} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
         <AnnouncementBanner announcements={announcements} currentUser={currentUser} onArchive={archiveAnnouncement} onHardDelete={hardDeleteAnnouncement} onReactivate={reactivateAnnouncement} onEdit={ann=>{setEditingAnn(ann);setShowAnnounce(true);}} onNew={()=>{setEditingAnn(null);setShowAnnounce(true);}}/>
-        {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users} onTeams={openTeams} onTimer={openTimer} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>}
+        {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users} onTeams={openTeams} onTimer={openTimer} onMensGames={openMensGames} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>}
         {pageView==="hof"&&<HallOfFame events={events} users={users}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
@@ -7031,6 +7046,7 @@ export default function App(){
         {pageView==="updates"&&<UpdatesPage notifications={notifications.filter(n=>!deletedNotifIds.has(n.id)&&(!clearedBefore||n.timestamp>clearedBefore))} notifLastRead={notifLastRead} currentUser={currentUser} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={openEvent} onClearSelf={()=>{setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);}} onDeleteSelf={id=>{setNotifications(prev=>{const next=prev.filter(n=>n.id!==id);if(currentUser)localStorage.setItem(`md-notifs-${currentUser.id}`,JSON.stringify(next));return next;});}} onClearUpdates={async()=>{const cb=new Date().toISOString();const allIds=[...new Set([...deletedNotifIds,...notifications.map(n=>n.id)])];const newSet=new Set(allIds);setDeletedNotifIds(newSet);setClearedBefore(cb);setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);const body=JSON.stringify({ids:allIds,cleared_before:cb});await supabase.from("announcements").upsert({id:"__deleted_notifs__",title:"__deleted_notifs__",body,created_by:"system",created_at:new Date().toISOString(),active:false});supabase.channel("notif-ctrl").send({type:"broadcast",event:"clear-notifs",payload:{ids:allIds,cleared_before:cb}});}} onDeleteNotif={deleteNotifForAll}/>}
         {pageView==="teams"&&<TeamCreatorPage users={users} events={events} currentUser={currentUser} teamSets={teamSets} onTeamSetsChanged={setTeamSets}/>}
         {pageView==="timer"&&<TimerPage/>}
+        {pageView==="mensgames"&&<Suspense fallback={<div style={{padding:"3rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesPage events={events} teamSets={teamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)}/></Suspense>}
         {pageView==="sarajay"&&<SaraJayOrJAI/>}
       </main>
       <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted2)",fontSize:".72rem",borderTop:"1px solid var(--border)",letterSpacing:".1em"}}>🍺 MensApp · Built for the lads</div>
