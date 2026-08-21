@@ -23,7 +23,7 @@ vi.mock('../../supabase.js', async () => {
   };
 });
 
-import { deleteTournament, fetchTournament, fetchTournaments, saveTournament, subscribeTournament } from '../../features/mensgames/api.js';
+import { deleteTournament, fetchTournament, fetchTournaments, isMissingTableError, saveTournament, subscribeTournament } from '../../features/mensgames/api.js';
 
 beforeEach(() => {
   mockTableData = {};
@@ -86,6 +86,35 @@ describe('mensgames/api row mapping', () => {
     mockTableData.tournaments = { data: null, error: { message: 'nope' } };
     const res = await deleteTournament('trn_1');
     expect(res.ok).toBe(false);
+  });
+
+  // REGRESSION (owner-reported, 2026-08-21g): a missing `tournaments` table
+  // (unrun migration) was surfacing as "Controleer je verbinding" -- the UI
+  // had no way to distinguish it from a real network failure because
+  // MensGamesShell.jsx used to discard the actual error and keep only a
+  // boolean. `isMissingTableError` is that distinction, at the one place
+  // that already has the real Supabase error object.
+  describe('isMissingTableError', () => {
+    it('is true for PostgREST’s PGRST205 ("table not in schema cache")', () => {
+      expect(isMissingTableError({ code: 'PGRST205', message: "Could not find the table 'public.tournaments' in the schema cache" })).toBe(true);
+    });
+
+    it('is true for the underlying Postgres 42P01 (undefined_table) SQLSTATE', () => {
+      expect(isMissingTableError({ code: '42P01', message: 'relation "tournaments" does not exist' })).toBe(true);
+    });
+
+    it('is false for a generic/network error', () => {
+      expect(isMissingTableError({ message: 'Failed to fetch' })).toBe(false);
+    });
+
+    it('is false for null/undefined (no error at all)', () => {
+      expect(isMissingTableError(null)).toBe(false);
+      expect(isMissingTableError(undefined)).toBe(false);
+    });
+
+    it('is false for an unrelated Postgres error code', () => {
+      expect(isMissingTableError({ code: '23505', message: 'duplicate key value' })).toBe(false);
+    });
   });
 
   it('subscribeTournament registers UPDATE and DELETE postgres_changes handlers scoped to the tournament id, and returns an idempotent unsubscribe', () => {

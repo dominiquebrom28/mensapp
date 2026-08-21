@@ -318,9 +318,11 @@ function NewRoundModal({ onCreate, onClose, entrantCount }) {
         </div>
         <div>
           <Lbl>Icoon</Lbl>
+          {/* 2026-08-21g fix: same 40x40px-below-44px-minimum tap-target
+              issue as RoundEditor.jsx's identical icon picker. */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {ICON_PRESETS.map((ic) => (
-              <button key={ic} type="button" onClick={() => setIcon(ic)} aria-pressed={icon === ic} aria-label={`Kies icoon ${ic}`} style={{ width: 40, height: 40, borderRadius: 8, background: icon === ic ? 'rgba(232,148,58,.18)' : 'var(--bg3)', border: `1px solid ${icon === ic ? 'var(--amber)' : 'var(--border)'}`, fontSize: '1.1rem', cursor: 'pointer' }}>{ic}</button>
+              <button key={ic} type="button" onClick={() => setIcon(ic)} aria-pressed={icon === ic} aria-label={`Kies icoon ${ic}`} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: icon === ic ? 'rgba(232,148,58,.18)' : 'var(--bg3)', border: `1px solid ${icon === ic ? 'var(--amber)' : 'var(--border)'}`, fontSize: '1.1rem', cursor: 'pointer' }}>{ic}</button>
             ))}
           </div>
         </div>

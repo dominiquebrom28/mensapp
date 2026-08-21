@@ -63,6 +63,21 @@ export default function TrailerStyles() {
       .tr-endcard-inner{position:relative;z-index:1;min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.9rem;padding:calc(3.6rem + env(safe-area-inset-top,0px)) 1.4rem 3rem;text-align:center}
       @media(min-width:768px){.tr-endcard-inner{padding:5rem 2rem 3.5rem}}
 
+      /* ── FIX (2026-08-21g, mobile roster overflow): every direct child of
+         this flex column is a flex item, and flex items default to
+         min-width:auto -- i.e. they refuse to shrink below their content's
+         own intrinsic (max-content) width. The roster grid below is a wide
+         auto-fit grid; without this, its wrapping section couldn't shrink to
+         the viewport, so the grid rendered at its full intrinsic width
+         (~684px measured on a 375px viewport) and bled off both edges with
+         no scrollbar (.tr-root clips overflow -- see its rule above). Both
+         .tr-roster-section (BeatRoster.jsx/EmptyRoster) and .tr-outro
+         (BeatOutro.jsx) opt into shrinking here; any future sibling added to
+         .tr-endcard-inner needs the same min-width:0 discipline. NOTE: no
+         backticks anywhere in this file -- see the module docblock's
+         SECURITY note, this whole sheet is one JS template literal. ────── */
+      .tr-roster-section,.tr-outro{width:100%;min-width:0}
+
       .tr-error-banner{display:flex;align-items:center;gap:8px;background:rgba(224,85,85,.12);border:1px solid rgba(224,85,85,.35);border-radius:var(--radius-sm);padding:10px 16px;color:#ffb3b3;font-size:.82rem;max-width:520px}
 
       /* ── Type ─────────────────────────────────────────────────────────── */
@@ -74,7 +89,21 @@ export default function TrailerStyles() {
       .tr-title{font-family:var(--font-h);font-weight:900;text-transform:uppercase;line-height:1.03;color:#fff;text-shadow:0 2px 30px rgba(0,0,0,.6);font-size:clamp(2rem,8vw,4.2rem)}
       .tr-kicker{font-family:var(--font-b);font-weight:700;font-size:.76rem;letter-spacing:.24em;text-transform:uppercase;color:var(--amber)}
       .tr-note{font-family:var(--font-b);font-weight:400;font-style:italic;font-size:.92rem;color:rgba(255,255,255,.72);line-height:1.6}
-      .tr-name{font-family:var(--font-h);font-weight:700;font-size:1.12rem;color:#fff}
+      .tr-name{font-family:var(--font-h);font-weight:700;font-size:1.12rem;color:#fff;word-break:break-word}
+
+      /* ── FIX (2026-08-21g, HIGH: event name overlapped "Kretjes so far"):
+         BeatOutro.jsx's outer wrapper used to be a plain block div -- the
+         name (.tr-title, line-height 1.03) and the kretjes block right
+         below it had NO explicit spacing between them at all, only relying
+         on the title's own line-height/font metrics to leave enough visual
+         room. That's exactly what silently broke: the kretjes heading was
+         resized twice (see .tr-kretjes-title below) and eventually ate the
+         margin that used to exist by accident. .tr-outro makes that
+         wrapper a flex column with a real, explicit gap instead -- spacing
+         driven by layout, not by hoping a font's glyph metrics leave enough
+         room. This can't collide at any font size, name length, or heading
+         resize, because it no longer depends on any of those. ───────────── */
+      .tr-outro{display:flex;flex-direction:column;align-items:center;gap:1.5rem}
 
       /* ── Kretjes callout ──────────────────────────────────────────────── */
       .tr-kretjes{display:flex;flex-direction:column;align-items:center;gap:.5rem;max-width:440px}
@@ -95,13 +124,36 @@ export default function TrailerStyles() {
       /* ── Avatar stamp-in (roster) ────────────────────────────────────── */
       .tr-stamp{animation:tr-stamp .32s cubic-bezier(.34,1.56,.64,1) both}
       @keyframes tr-stamp{0%{opacity:0;transform:scale(.6) rotate(-6deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
-      .tr-avatar{border-radius:50%;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;border:2px solid rgba(255,255,255,.18);background:linear-gradient(135deg,var(--gold),var(--amber))}
+      /* Sized responsively (2026-08-21g) rather than a fixed 72px raster --
+         TrailerAvatar (BeatRoster.jsx) only sets an inline width/height
+         when a caller passes an explicit size prop; the default (no size,
+         the only case actually in use) falls all the way through to this
+         clamp, so avatars genuinely shrink on narrow screens instead of
+         forcing their grid track wider than the viewport can hold. */
+      .tr-avatar{border-radius:50%;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;border:2px solid rgba(255,255,255,.18);background:linear-gradient(135deg,var(--gold),var(--amber));width:clamp(56px,18vw,72px);height:clamp(56px,18vw,72px)}
       .tr-avatar img{width:100%;height:100%;object-fit:cover;display:block}
-      .tr-avatar-mono{font-family:var(--font-h);font-weight:900;color:#1a1008}
+      .tr-avatar-mono{font-family:var(--font-h);font-weight:900;color:#1a1008;font-size:clamp(23px,7.6vw,30px)}
+      .tr-roster-more .tr-avatar-mono{font-size:clamp(16px,5vw,22px)}
 
-      .tr-roster-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:1.1rem 1rem;width:100%;max-width:760px}
-      .tr-roster-person{display:flex;flex-direction:column;align-items:center;gap:.5rem;text-align:center}
-      .tr-roster-more{display:flex;flex-direction:column;align-items:center;gap:.5rem;text-align:center;color:rgba(255,255,255,.7)}
+      /* ── FIX (2026-08-21g, HIGH: roster grid overflowed a 375px viewport
+         by ~684px, both edges bled off with no way to scroll to the missing
+         lads -- see .tr-roster-section above for the actual root cause,
+         this half of the fix). minmax(min(84px,100%),1fr) (rather than a
+         bare minmax(84px,1fr)) means a column's minimum can never exceed
+         100% of the available track space either -- belt-and-braces against
+         the same overflow even if some future ancestor reintroduces an
+         indeterminate-width context. margin-inline:auto replaces the
+         centering .tr-endcard-inner's align-items:center used to give it
+         for free -- now that this grid actually stretches to fill its
+         (min-width:0) wrapper, it needs its own centering once max-width
+         caps it below that on wide desktop viewports. The 420px breakpoint
+         tightens the column minimum and gap to match the avatar clamp above,
+         fitting more per row on the phone this beat is actually watched on
+         rather than just avoiding overflow. */
+      .tr-roster-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(84px,100%),1fr));gap:1.1rem 1rem;width:100%;max-width:760px;margin-inline:auto}
+      @media(max-width:420px){.tr-roster-grid{grid-template-columns:repeat(auto-fit,minmax(min(68px,100%),1fr));gap:.9rem .7rem}}
+      .tr-roster-person{display:flex;flex-direction:column;align-items:center;gap:.5rem;text-align:center;min-width:0}
+      .tr-roster-more{display:flex;flex-direction:column;align-items:center;gap:.5rem;text-align:center;color:rgba(255,255,255,.7);min-width:0}
 
       /* ── Chrome: exit control only (native <video controls> owns
          play/pause/mute/seek/fullscreen -- nothing to hand-roll here) ──── */

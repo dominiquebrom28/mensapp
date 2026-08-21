@@ -212,9 +212,13 @@ export default function RoundEditor({ round, allEntrants, entrantsById, events, 
           </div>
           <div>
             <Lbl>Icoon</Lbl>
+            {/* 2026-08-21g fix: presets were 40x40px, below the 44px minimum
+                tap target -- the container is `flexWrap: 'wrap'` already, so
+                the larger size just wraps one preset earlier rather than
+                overflowing. */}
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {ICON_PRESETS.map((ic) => (
-                <button key={ic} type="button" disabled={disabled} onClick={() => setRound({ icon: ic })} aria-pressed={round.icon === ic} aria-label={`Kies icoon ${ic}`} style={{ width: 40, height: 40, borderRadius: 8, background: round.icon === ic ? 'rgba(232,148,58,.18)' : 'var(--bg3)', border: `1px solid ${round.icon === ic ? 'var(--amber)' : 'var(--border)'}`, fontSize: '1.1rem', cursor: disabled ? 'default' : 'pointer' }}>{ic}</button>
+                <button key={ic} type="button" disabled={disabled} onClick={() => setRound({ icon: ic })} aria-pressed={round.icon === ic} aria-label={`Kies icoon ${ic}`} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: round.icon === ic ? 'rgba(232,148,58,.18)' : 'var(--bg3)', border: `1px solid ${round.icon === ic ? 'var(--amber)' : 'var(--border)'}`, fontSize: '1.1rem', cursor: disabled ? 'default' : 'pointer' }}>{ic}</button>
               ))}
             </div>
           </div>

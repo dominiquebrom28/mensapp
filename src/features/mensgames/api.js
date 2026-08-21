@@ -47,6 +47,22 @@ function toRow(t) {
   };
 }
 
+// Distinguishes "this feature's database tables haven't been created yet"
+// from a genuine connectivity failure (2026-08-21g fix -- the owner saw
+// "Kon de toernooien niet laden. Controleer je verbinding." for a missing
+// migration, which sent him looking for a network problem that didn't
+// exist). PostgREST returns `PGRST205` ("Could not find the table ... in the
+// schema cache") when the `tournaments` table itself is absent; if a query
+// ever reaches Postgres directly instead, the equivalent SQLSTATE is
+// `42P01` (undefined_table). Both mean the same thing here: run the
+// migration in docs/mensgames-spec.md §9.1-§9.2. Exported so the UI layer
+// (MensGamesShell.jsx) can pick a true, actionable message instead of the
+// generic connectivity one -- never by inspecting/forwarding the raw error
+// text into the DOM, just this one boolean classification.
+export function isMissingTableError(error) {
+  return error?.code === 'PGRST205' || error?.code === '42P01';
+}
+
 export async function fetchTournaments() {
   const { data, error } = await supabase
     .from('tournaments')

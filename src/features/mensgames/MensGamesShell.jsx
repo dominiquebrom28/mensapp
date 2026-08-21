@@ -11,7 +11,7 @@ import MensGamesStyles from './ui/styles.jsx';
 import { Btn, EmptyState, ErrorState, H, Inp, LoadingBlock, Modal, Tag } from './ui/Kit.jsx';
 import TournamentEditor from './TournamentEditor.jsx';
 import { blankTournament } from './model.js';
-import { fetchTournaments, saveTournament } from './api.js';
+import { fetchTournaments, isMissingTableError, saveTournament } from './api.js';
 
 const STATUS_LABEL = { draft: 'Concept', live: 'Bezig', finished: 'Afgerond' };
 const STATUS_COLOR = { draft: 'var(--muted2)', live: 'var(--red)', finished: 'var(--green)' };
@@ -69,7 +69,14 @@ function NewTournamentModal({ onClose, onCreate, error, events, fixedEventId }) 
 export default function MensGamesShell({ scope = 'page', evt, events = [], teamSets = [], teamSetsError = null, onRetryTeamSets, currentUser, canManage = false, onUpdateEvent, onTeamSetsChanged }) {
   const [tournaments, setTournaments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  // 2026-08-21g fix: was a plain boolean, which could only ever drive the
+  // generic "check your connection" message -- by the time it was set, the
+  // actual Supabase error (e.g. PGRST205, a missing migration) had already
+  // been discarded. Now `null | 'missing-table' | 'network'`, so the render
+  // below can say something true. Still never renders the raw error itself
+  // (security review flagged that pattern elsewhere) -- just this one
+  // classification, computed by `isMissingTableError` in api.js.
+  const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [showNew, setShowNew] = useState(false);
   // Separate from the list-load `error` above: reusing that flag for a
@@ -81,10 +88,10 @@ export default function MensGamesShell({ scope = 'page', evt, events = [], teamS
 
   const load = () => {
     setLoading(true);
-    setError(false);
+    setError(null);
     fetchTournaments().then((res) => {
       setLoading(false);
-      if (!res.ok) { setError(true); return; }
+      if (!res.ok) { setError(isMissingTableError(res.error) ? 'missing-table' : 'network'); return; }
       setTournaments(res.tournaments);
     });
   };
@@ -143,17 +150,23 @@ export default function MensGamesShell({ scope = 'page', evt, events = [], teamS
               {/* Disabled while the list itself couldn't load -- a backend
                   already known to be down is not worth inviting a retry
                   against for a create too. */}
-              {canManage && <Btn onClick={() => { setCreateError(false); setShowNew(true); }} disabled={error} title={error ? 'Toernooien konden niet geladen worden -- probeer eerst opnieuw te laden.' : undefined}>+ Nieuw toernooi</Btn>}
+              {canManage && <Btn onClick={() => { setCreateError(false); setShowNew(true); }} disabled={!!error} title={error ? 'Toernooien konden niet geladen worden -- probeer eerst opnieuw te laden.' : undefined}>+ Nieuw toernooi</Btn>}
             </div>
           )}
           {scope === 'event' && canManage && (
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <Btn size="sm" onClick={() => { setCreateError(false); setShowNew(true); }} disabled={error} title={error ? 'Toernooien konden niet geladen worden -- probeer eerst opnieuw te laden.' : undefined}>+ Nieuw toernooi voor dit event</Btn>
+              <Btn size="sm" onClick={() => { setCreateError(false); setShowNew(true); }} disabled={!!error} title={error ? 'Toernooien konden niet geladen worden -- probeer eerst opnieuw te laden.' : undefined}>+ Nieuw toernooi voor dit event</Btn>
             </div>
           )}
 
           {loading && <LoadingBlock label="Toernooien laden…" />}
-          {!loading && error && <ErrorState message="Kon de toernooien niet laden. Controleer je verbinding." onRetry={load} />}
+          {!loading && error === 'missing-table' && (
+            <ErrorState
+              message="Mens-Games staat nog niet klaar aan de databasekant: de tabellen ontbreken. Dit is geen verbindingsprobleem -- vraag de beheerder om de mens-games migratie uit te voeren (docs/mensgames-spec.md §9.1-§9.2)."
+              onRetry={load}
+            />
+          )}
+          {!loading && error === 'network' && <ErrorState message="Kon de toernooien niet laden. Controleer je verbinding." onRetry={load} />}
 
           {!loading && !error && (
             <>

@@ -37,8 +37,13 @@ export default function ScoreboardPanel({ tournament, entrantsById, onClose }) {
           </div>
           <div style={{ display: 'grid', gap: 6 }}>
             {liveRanking.map((r) => (
-              <div key={r.entrantId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg3)', borderRadius: 10, padding: '.5rem .8rem' }}>
-                <span className="mg-scoreboard-name" style={{ fontSize: '1.15rem' }}>{entrantsById?.[r.entrantId]?.name || '—'}</span>
+              <div key={r.entrantId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, background: 'var(--bg3)', borderRadius: 10, padding: '.5rem .8rem' }}>
+                {/* 2026-08-21g: same "read across a room" legibility fix as
+                    StandingsTable's compact rows -- `minWidth: 0` lets this
+                    flex item actually shrink instead of pushing the row wide,
+                    `wordBreak` lets a long name wrap onto a second line
+                    rather than being squeezed against the live-round Tag. */}
+                <span className="mg-scoreboard-name" style={{ fontSize: '1.15rem', minWidth: 0, wordBreak: 'break-word' }}>{entrantsById?.[r.entrantId]?.name || '—'}</span>
                 <Tag color="var(--amber)">{r.label}</Tag>
               </div>
             ))}

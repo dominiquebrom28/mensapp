@@ -33,9 +33,22 @@ export default function StandingsTable({ tournament, entrantsById, roundsCount, 
                 {MEDALS[row.rank] || row.rank}
               </span>
               <span role="cell" style={{ minWidth: 0 }}>
-                <div className={compact ? 'mg-scoreboard-name' : undefined} style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
+                {/* 2026-08-21g fix: the compact (scoreboard) row used to force
+                    a single-line ellipsis on the name at 1.5rem
+                    (`.mg-scoreboard-name`) -- exactly the view whose whole
+                    point is legibility across a room, silently clipping
+                    "De Gouden Kroeg" down to "De Gouden …". Compact now lets
+                    the name wrap across lines instead; the row is a grid row
+                    (`StandingsTable`'s own `role="row"` above) so it simply
+                    grows to fit. Non-compact (the tournament editor's plain
+                    list) keeps the original single-line ellipsis -- that's a
+                    much smaller UI and wasn't reported as broken. */}
+                <div className={compact ? 'mg-scoreboard-name' : undefined} style={{ display: 'flex', alignItems: compact ? 'flex-start' : 'center', gap: 8, overflow: compact ? 'visible' : 'hidden' }}>
                   <span aria-hidden="true">{entrant?.avatar || '🎯'}</span>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: compact ? undefined : 600 }}>{entrant?.name || 'Onbekende deelnemer'}</span>
+                  <span style={compact
+                    ? { overflow: 'hidden', wordBreak: 'break-word', lineHeight: 1.15 }
+                    : { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600 }}
+                  >{entrant?.name || 'Onbekende deelnemer'}</span>
                 </div>
                 {!compact && (
                   <div style={{ fontSize: '.72rem', color: 'var(--muted)', marginTop: 2 }}>

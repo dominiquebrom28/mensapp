@@ -27,21 +27,30 @@ const MONO_GRADIENTS = [
   'linear-gradient(135deg,var(--gold),#f5b866)',
 ];
 
-export function TrailerAvatar({ name, photoUrl, avatarIndex = 0, size = 72, style = {} }) {
+// `size` is deliberately NOT defaulted to a pixel number any more (2026-08-21g,
+// HIGH: the roster grid overflowed a 375px viewport by ~684px). With no
+// `size` passed (the only case this component is actually invoked with),
+// width/height/monogram-font-size all fall through untouched to
+// `.tr-avatar`/`.tr-avatar-mono` in TrailerStyles.jsx, which size themselves
+// with `clamp()` -- genuinely responsive, shrinking on narrow screens instead
+// of forcing a fixed-width grid track. Passing an explicit `size` still works
+// exactly as before (pixel-perfect override, e.g. for a future non-responsive
+// use) -- it's opt-in now rather than the only path.
+export function TrailerAvatar({ name, photoUrl, avatarIndex = 0, size, style = {} }) {
   const initial = (name || '?').trim().charAt(0).toUpperCase() || '?';
+  const sizeStyle = size ? { width: size, height: size } : undefined;
   return (
     <div
       className="tr-avatar tr-stamp"
       style={{
-        width: size,
-        height: size,
+        ...sizeStyle,
         background: photoUrl ? undefined : MONO_GRADIENTS[avatarIndex % MONO_GRADIENTS.length],
         ...style,
       }}
     >
       {photoUrl
         ? <img src={photoUrl} alt="" />
-        : <span className="tr-avatar-mono" style={{ fontSize: size * 0.42 }} aria-hidden="true">{initial}</span>}
+        : <span className="tr-avatar-mono" style={size ? { fontSize: size * 0.42 } : undefined} aria-hidden="true">{initial}</span>}
     </div>
   );
 }
@@ -51,7 +60,7 @@ export function TrailerAvatar({ name, photoUrl, avatarIndex = 0, size = 72, styl
 // place rather than mounting BeatRoster with nothing to show.
 export function EmptyRoster() {
   return (
-    <div style={{ textAlign: 'center' }}>
+    <div className="tr-roster-section" style={{ textAlign: 'center' }}>
       <div className="tr-kicker" style={{ marginBottom: '.4rem' }}>🍺 The lads showing up</div>
       <div className="tr-title tr-slam" style={{ fontSize: 'clamp(1.3rem,5vw,2rem)' }}>Nobody&apos;s locked in yet</div>
       <div className="tr-note" style={{ marginTop: '.5rem' }}>We need YOU to RSVP. Now. Be the first name on this list — not the last lad wondering what he missed.</div>
@@ -62,7 +71,7 @@ export function EmptyRoster() {
 export default function BeatRoster({ data }) {
   const { going, goingCount, moreCount } = data;
   return (
-    <div style={{ textAlign: 'center' }}>
+    <div className="tr-roster-section" style={{ textAlign: 'center' }}>
       <div className="tr-kicker" style={{ marginBottom: '.3rem' }}>🍺 The lads showing up</div>
       <h2 className="tr-title tr-slam" style={{ fontSize: 'clamp(1.6rem,6vw,2.6rem)', marginBottom: '1.6rem' }}>
         {goingCount} confirmed
@@ -76,11 +85,15 @@ export default function BeatRoster({ data }) {
         ))}
         {moreCount > 0 && (
           <div className="tr-roster-more">
+            {/* No fixed width/height here either (2026-08-21g) -- same
+                `.tr-avatar` clamp() as every named avatar, so the "+N" tile
+                shrinks in step with the rest of the row instead of being the
+                one fixed-size item forcing its column wide. */}
             <div
               className="tr-avatar tr-stamp"
-              style={{ width: 72, height: 72, background: 'rgba(255,255,255,.1)', border: '2px dashed rgba(255,255,255,.3)', animationDelay: `${going.length * 70}ms` }}
+              style={{ background: 'rgba(255,255,255,.1)', border: '2px dashed rgba(255,255,255,.3)', animationDelay: `${going.length * 70}ms` }}
             >
-              <span className="tr-avatar-mono" style={{ fontSize: 22, color: '#fff' }}>+{moreCount}</span>
+              <span className="tr-avatar-mono" style={{ color: '#fff' }}>+{moreCount}</span>
             </div>
             <span className="tr-name">more legends</span>
           </div>

@@ -37,9 +37,15 @@ export default function RoundCard({ round, index, roundCount, expanded, onToggle
           {pointsAwarded !== null && <Tag color="var(--gold, var(--amber))">{pointsAwarded} pt verdeeld</Tag>}
         </div>
         {!disabled && (
+          // 2026-08-21g fix: these were 32x32px, below the 44px minimum tap
+          // target this spec explicitly calls for ("one-handed, in a bar,
+          // several beers in"). The row above already wraps
+          // (`flexWrap: 'wrap'`), so bumping these to 44px just costs a
+          // little more vertical space on the narrowest screens rather than
+          // causing any overflow.
           <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-            <button type="button" onClick={onMoveUp} disabled={index === 0} aria-label={`Verplaats "${round.name}" omhoog`} style={{ minWidth: 32, minHeight: 32, background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--cream)', cursor: index === 0 ? 'not-allowed' : 'pointer', opacity: index === 0 ? .4 : 1 }}>↑</button>
-            <button type="button" onClick={onMoveDown} disabled={index === roundCount - 1} aria-label={`Verplaats "${round.name}" omlaag`} style={{ minWidth: 32, minHeight: 32, background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--cream)', cursor: index === roundCount - 1 ? 'not-allowed' : 'pointer', opacity: index === roundCount - 1 ? .4 : 1 }}>↓</button>
+            <button type="button" onClick={onMoveUp} disabled={index === 0} aria-label={`Verplaats "${round.name}" omhoog`} style={{ minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--cream)', cursor: index === 0 ? 'not-allowed' : 'pointer', opacity: index === 0 ? .4 : 1 }}>↑</button>
+            <button type="button" onClick={onMoveDown} disabled={index === roundCount - 1} aria-label={`Verplaats "${round.name}" omlaag`} style={{ minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--cream)', cursor: index === roundCount - 1 ? 'not-allowed' : 'pointer', opacity: index === roundCount - 1 ? .4 : 1 }}>↓</button>
             <Btn size="sm" variant="danger" onClick={() => { if (window.confirm(`Ronde "${round.name}" verwijderen? Dit kan niet ongedaan gemaakt worden.`)) onDelete(); }}>Verwijder</Btn>
           </div>
         )}

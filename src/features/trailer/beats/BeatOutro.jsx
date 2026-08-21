@@ -28,10 +28,20 @@
 // than leaving a gap above it. The `.tr-wordmark`/`.tr-wordmark-settled`
 // classes had no other consumer and were pruned from TrailerStyles.jsx in
 // the same change.
+// Layout note (2026-08-21g, HIGH regression fix): the wrapper below is
+// `.tr-outro` (a flex column with an explicit `gap`, see TrailerStyles.jsx)
+// rather than a plain block div. It used to be plain block flow, spacing the
+// name from "Kretjes so far" with nothing but the name's own line-height --
+// which silently stopped being enough room once the kretjes heading was
+// resized (see `.tr-kretjes-title`'s own history) and the two collided.
+// `gap` is layout-driven and can't be eaten by a font-metrics change the way
+// margin-via-line-height could -- don't reintroduce spacing here via a
+// one-off margin on a single child; add it to `.tr-outro`'s `gap` instead so
+// every child of this block stays protected, not just this one pairing.
 export default function BeatOutro({ data, onReplay, onRsvp }) {
   const { name, kretjes } = data;
   return (
-    <div style={{ textAlign: 'center' }}>
+    <div className="tr-outro" style={{ textAlign: 'center' }}>
       <div className="tr-title fu" style={{ fontSize: 'clamp(1.8rem,7vw,3rem)' }}>{name}</div>
 
       <div className="tr-kretjes fu1">
@@ -42,7 +52,7 @@ export default function BeatOutro({ data, onReplay, onRsvp }) {
         </div>
       </div>
 
-      <div className="fu2" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center', marginTop: '1.6rem' }}>
+      <div className="fu2" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
         <button type="button" className="tr-cta tr-cta-ghost" onClick={onReplay}>↻ Watch again</button>
         <button type="button" className="tr-cta tr-cta-gold" onClick={onRsvp}>RSVP now →</button>
       </div>
