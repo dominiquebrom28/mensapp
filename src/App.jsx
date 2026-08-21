@@ -650,7 +650,7 @@ const PendingScreen = ({user,onLogout}) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // NAV
 // ─────────────────────────────────────────────────────────────────────────────
-const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onUpdates,onProfile,onTeams,onTimer,onMensGames,onSaraJay,saraJayUnlocked}) => {
+const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onUpdates,onProfile,onTeams,onTimer,onMensGames,mensGamesUnlocked,onSaraJay,saraJayUnlocked}) => {
   const [menuOpen,setMenuOpen]=useState(false);
   const isMobile=useIsMobile();
   const unread=notifications.filter(n=>n.timestamp>notifLastRead).length;
@@ -680,7 +680,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
             <button onClick={onHof} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
             <button onClick={onTeams} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🎲 Teams</button>
             <button onClick={onTimer} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⏱ Timer</button>
-            <button onClick={onMensGames} className="nav-btn" style={{background:view==="mensgames"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏆 Mens-Games</button>
+            <button onClick={mensGamesUnlocked?onMensGames:undefined} className="nav-btn" style={{background:view==="mensgames"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:mensGamesUnlocked?"var(--amber2)":"var(--muted)",padding:"5px 12px",cursor:mensGamesUnlocked?"pointer":"not-allowed",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,opacity:mensGamesUnlocked?1:.55}}>{mensGamesUnlocked?"🏆 Mens-Games":"🔒 ???"}</button>
             <button onClick={saraJayUnlocked?onSaraJay:undefined} className="nav-btn" style={{background:view==="sarajay"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:saraJayUnlocked?"var(--amber2)":"var(--muted)",padding:"5px 12px",cursor:saraJayUnlocked?"pointer":"not-allowed",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,opacity:saraJayUnlocked?1:.55}}>{saraJayUnlocked?"🤖 Sara Jay":"🔒 ???"}</button>
             {can.announce(currentUser)&&<button onClick={onAnnounce} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>📢 Announce</button>}
             {can.manageUsers(currentUser)&&<button onClick={onAdmin} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
@@ -708,7 +708,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
           <button onClick={()=>{onHof();setMenuOpen(false);}} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
           <button onClick={()=>{onTeams();setMenuOpen(false);}} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🎲 Team Creator</button>
           <button onClick={()=>{onTimer();setMenuOpen(false);}} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>⏱ Timer</button>
-          <button onClick={()=>{onMensGames();setMenuOpen(false);}} className="nav-btn" style={{background:view==="mensgames"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏆 Mens-Games</button>
+          <button onClick={mensGamesUnlocked?()=>{onMensGames();setMenuOpen(false);}:undefined} className="nav-btn" style={{background:view==="mensgames"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:mensGamesUnlocked?"var(--amber2)":"var(--muted)",padding:"10px 14px",cursor:mensGamesUnlocked?"pointer":"not-allowed",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",opacity:mensGamesUnlocked?1:.55}}>{mensGamesUnlocked?"🏆 Mens-Games":"🔒 ???"}</button>
           <button onClick={saraJayUnlocked?()=>{onSaraJay();setMenuOpen(false);}:undefined} className="nav-btn" style={{background:view==="sarajay"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:saraJayUnlocked?"var(--amber2)":"var(--muted)",padding:"10px 14px",cursor:saraJayUnlocked?"pointer":"not-allowed",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",opacity:saraJayUnlocked?1:.55}}>{saraJayUnlocked?"🤖 Sara Jay or JAI":"🔒 ???"}</button>
           {can.announce(currentUser)&&<button onClick={()=>{onAnnounce();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>📢 Announce</button>}
           {can.manageUsers(currentUser)&&<button onClick={()=>{onAdmin();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:".7rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{pendingCount}</span>}</button>}
@@ -725,7 +725,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
 // ─────────────────────────────────────────────────────────────────────────────
 // ADMIN PANEL
 // ─────────────────────────────────────────────────────────────────────────────
-const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose,saraJayUnlocked,onToggleSaraJay}) => {
+const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose,saraJayUnlocked,onToggleSaraJay,mensGamesUnlocked,onToggleMensGames}) => {
   const [tab,setTab]=useState("pending");
   const pending=users.filter(u=>u.role==="pending");
   const approved=users.filter(u=>u.role!=="pending");
@@ -792,6 +792,20 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose,saraJayUnlocked,on
               color:saraJayUnlocked?"var(--green)":"var(--amber)",
               boxShadow:saraJayUnlocked?"0 0 0 1.5px rgba(76,175,125,.4)":"0 0 0 1.5px rgba(232,148,58,.3)"}}>
             {saraJayUnlocked?"🔓 Live":"🔒 Locked"}
+          </button>
+        </div>
+        <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"1rem 1.2rem",display:"flex",alignItems:"center",gap:"1rem"}}>
+          <div style={{fontSize:"2rem"}}>🏆</div>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:600,fontSize:".95rem",color:"var(--cream)"}}>Mens-Games</div>
+            <div style={{fontSize:".75rem",color:"var(--muted)",marginTop:2}}>Toernooien bouwen, live scoren, klassement bijhouden</div>
+          </div>
+          <button onClick={onToggleMensGames}
+            style={{padding:"8px 18px",borderRadius:50,border:"none",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:700,fontSize:".82rem",transition:"all .18s ease",
+              background:mensGamesUnlocked?"rgba(76,175,125,.18)":"rgba(232,148,58,.12)",
+              color:mensGamesUnlocked?"var(--green)":"var(--amber)",
+              boxShadow:mensGamesUnlocked?"0 0 0 1.5px rgba(76,175,125,.4)":"0 0 0 1.5px rgba(232,148,58,.3)"}}>
+            {mensGamesUnlocked?"🔓 Live":"🔒 Locked"}
           </button>
         </div>
       </div>}
@@ -1315,7 +1329,7 @@ const EditProfileModal=({user,onSave,onClose})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────────────────────────────────────
-const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onMensGames,onSaraJay,saraJayUnlocked}) => {
+const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onMensGames,mensGamesUnlocked,onSaraJay,saraJayUnlocked}) => {
   const isMobile=useIsMobile();
   const isOver=e=>e.archived||new Date(`${e.end_date||e.date}T${e.end_time||"23:59"}:00`)<new Date();
   const upcoming=events.filter(e=>!isOver(e)).sort((a,b)=>new Date(a.date)-new Date(b.date));
@@ -1390,7 +1404,7 @@ const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onMensGa
           {[
             {icon:"🎲",title:"Team Creator",desc:"Schud willekeurige teams voor je activiteiten",onClick:onTeams,color:"var(--amber)"},
             {icon:"⏱",title:"Timer",desc:"Afteltimer voor spelletjes en activiteiten",onClick:onTimer,color:"var(--blue)"},
-            {icon:"🏆",title:"Mens-Games",desc:"Bouw een toernooi, scoor live, houd de stand bij",onClick:onMensGames,color:"var(--gold)"},
+            {icon:mensGamesUnlocked?"🏆":"🔒",title:"Mens-Games",desc:mensGamesUnlocked?"Bouw een toernooi, scoor live, houd de stand bij":"Binnenkort beschikbaar... 👀",onClick:mensGamesUnlocked?onMensGames:undefined,color:mensGamesUnlocked?"var(--gold)":"var(--muted)",isLocked:!mensGamesUnlocked},
             {icon:saraJayUnlocked?"🤖":"🔒",title:"Sara Jay or JAI",desc:saraJayUnlocked?"Echt of AI? Één fout = game over. Bouw je streak.":"Binnenkort beschikbaar... 👀",onClick:saraJayUnlocked?onSaraJay:undefined,color:saraJayUnlocked?"var(--purple)":"var(--muted)",isLocked:!saraJayUnlocked},
           ].map(({icon,title,desc,onClick,color,isLocked})=>(
             <div key={title} onClick={onClick}
@@ -1670,8 +1684,22 @@ const TeamsTab=({evt,teamSets=[],teamSetsError=null,onRetryTeamSets,onTeamSetsCh
   );
 };
 
-const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif,autoOpenTrailerId,onAutoTrailerConsumed,teamSets=[],teamSetsError=null,onRetryTeamSets,onTeamSetsChanged})=>{
-  const [tab,setTab]=useState(initialTab||"Overview");
+const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif,autoOpenTrailerId,onAutoTrailerConsumed,teamSets=[],teamSetsError=null,onRetryTeamSets,onTeamSetsChanged,mensGamesUnlocked})=>{
+  // Locked mens-games has no equivalent in the Sara Jay pattern (that
+  // feature lives outside events entirely) -- per spec, a visible tab
+  // leading to a locked page is worse than no tab, so it's dropped from the
+  // tab bar rather than shown disabled. If a stale initialTab (e.g. from a
+  // notification deep link) still points at it while locked, fall back to
+  // Overview instead of opening on a tab that no longer exists.
+  const [tab,setTab]=useState((initialTab==="Mens-Games 🏆"&&!mensGamesUnlocked)?"Overview":(initialTab||"Overview"));
+  const visibleTabs=mensGamesUnlocked?TABS:TABS.filter(t=>t!=="Mens-Games 🏆");
+  // Same "no slipping through on stale state" guard as the top-level
+  // pageView==="mensgames" route: if an admin locks the feature while
+  // someone is already sat on this tab, bounce them to Overview rather than
+  // leaving the (now content-less, per the render guard below) tab selected.
+  useEffect(()=>{
+    if(!mensGamesUnlocked&&tab==="Mens-Games 🏆")setTab("Overview");
+  },[mensGamesUnlocked,tab]);
   useEffect(()=>{
     if(!scrollToId)return;
     const t=setTimeout(()=>{
@@ -1852,7 +1880,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
       </div>
 
       <div className="fu1" style={{display:"flex",gap:".2rem",borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
-        {TABS.map(t=>(
+        {visibleTabs.map(t=>(
           <button key={t} onClick={()=>setTab(t)}
             onMouseEnter={e=>{if(tab!==t){const el=e.currentTarget;el._sc=el.style.color;el._sb=el.style.background;el.style.color="var(--amber)";el.style.background="rgba(232,148,58,.06)";}}}
             onMouseLeave={e=>{const el=e.currentTarget;el.style.color=el._sc??"";el.style.background=el._sb??"";}}
@@ -1869,7 +1897,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
         {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast}/>}
         {tab==="FAQ"                  &&<FAQTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Kretjes 🍺"           &&<KretjesTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
-        {tab==="Mens-Games 🏆"        &&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesTab evt={evt} events={events} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={onUpdate} onTeamSetsChanged={onTeamSetsChanged}/></Suspense>}
+        {tab==="Mens-Games 🏆"&&mensGamesUnlocked&&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesTab evt={evt} events={events} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={onUpdate} onTeamSetsChanged={onTeamSetsChanged}/></Suspense>}
       </div>
 
       {/* Live presentation banner — fixed at top of screen */}
@@ -7043,6 +7071,20 @@ export default function App(){
   },[currentUser?.id]);
   const [announcements,setAnnouncements]=useState(()=>{try{return JSON.parse(localStorage.getItem("md-announcements")||"[]");}catch{return[];}});
   const [saraJayUnlocked,setSaraJayUnlocked]=useState(()=>{try{return JSON.parse(localStorage.getItem("md-sj-unlocked")||"false");}catch{return false;}});
+  // Mens-games admin on/off switch -- exact mirror of saraJayUnlocked above
+  // (system row `__mens_games__` in `announcements`, no dedicated table/
+  // migration). Defaults false: the tournaments/team_sets tables this
+  // feature needs don't exist until the owner runs that migration, so a
+  // fresh install must start locked.
+  const [mensGamesUnlocked,setMensGamesUnlocked]=useState(()=>{try{return JSON.parse(localStorage.getItem("md-mg-unlocked")||"false");}catch{return false;}});
+  // If mens-games gets locked while a lad is already sat on that page (admin
+  // toggles it off in another tab, or the 30s poll above lands an "off" row
+  // from elsewhere), bounce back home rather than leaving the lazy chunk
+  // mounted -- "locked" has to mean the chunk never loads, not just that the
+  // entry points into it are hidden.
+  useEffect(()=>{
+    if(!mensGamesUnlocked&&pageView==="mensgames")setPageView("home");
+  },[mensGamesUnlocked,pageView]);
   const [showAnnounce,setShowAnnounce]=useState(false);
   const [editingAnn,setEditingAnn]=useState(null);
   // Login teaser (src/features/teaser/dismissed.js + `selectTeaserEvent`/
@@ -7080,9 +7122,11 @@ export default function App(){
       if(anns&&anns.length){
         const sjRow=anns.find(r=>r.id==="__sara_jay__");
         if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}
+        const mgRow=anns.find(r=>r.id==="__mens_games__");
+        if(mgRow){const v=mgRow.active!==false;setMensGamesUnlocked(v);localStorage.setItem("md-mg-unlocked",JSON.stringify(v));}
         const delRow=anns.find(r=>r.id==="__deleted_notifs__");
         if(delRow){try{const raw=JSON.parse(delRow.body||"null");if(raw){const ids=Array.isArray(raw)?raw:(raw.ids||[]);const cb=Array.isArray(raw)?"":( raw.cleared_before||"");setDeletedNotifIds(new Set(ids));if(cb)setClearedBefore(cb);}}catch{/* ignore malformed announcement JSON from Supabase */}}
-        const SYSTEM_IDS=new Set(["__sara_jay__","__deleted_notifs__"]);
+        const SYSTEM_IDS=new Set(["__sara_jay__","__mens_games__","__deleted_notifs__"]);
         const mapped=anns.filter(r=>!SYSTEM_IDS.has(r.id)).map(fromDbAnn);
         setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));
       }
@@ -7130,7 +7174,7 @@ export default function App(){
 
     const poll=setInterval(()=>{
       reloadTeamSets();
-      supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data&&data.length){const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});const sjRow=data.find(r=>r.id==="__sara_jay__");if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}const delRow=data.find(r=>r.id==="__deleted_notifs__");if(delRow){try{const raw=JSON.parse(delRow.body||"null");if(raw){const ids=new Set(Array.isArray(raw)?raw:(raw.ids||[]));const cb=Array.isArray(raw)?"": (raw.cleared_before||"");setDeletedNotifIds(ids);if(cb)setClearedBefore(cb);setNotifications(prev=>{const next=prev.filter(n=>!ids.has(n.id)&&(!cb||n.timestamp>cb));const cu=currentUserRef.current;if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));return next;});}}catch{/* ignore malformed announcement JSON from Supabase */}}const SYSTEM_IDS=new Set(["__sara_jay__","__deleted_notifs__"]);const mapped=data.filter(r=>!SYSTEM_IDS.has(r.id)).map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}});
+      supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data&&data.length){const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});const sjRow=data.find(r=>r.id==="__sara_jay__");if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}const mgRow=data.find(r=>r.id==="__mens_games__");if(mgRow){const v=mgRow.active!==false;setMensGamesUnlocked(v);localStorage.setItem("md-mg-unlocked",JSON.stringify(v));}const delRow=data.find(r=>r.id==="__deleted_notifs__");if(delRow){try{const raw=JSON.parse(delRow.body||"null");if(raw){const ids=new Set(Array.isArray(raw)?raw:(raw.ids||[]));const cb=Array.isArray(raw)?"": (raw.cleared_before||"");setDeletedNotifIds(ids);if(cb)setClearedBefore(cb);setNotifications(prev=>{const next=prev.filter(n=>!ids.has(n.id)&&(!cb||n.timestamp>cb));const cu=currentUserRef.current;if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));return next;});}}catch{/* ignore malformed announcement JSON from Supabase */}}const SYSTEM_IDS=new Set(["__sara_jay__","__mens_games__","__deleted_notifs__"]);const mapped=data.filter(r=>!SYSTEM_IDS.has(r.id)).map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}});
       supabase.from("users").select("*").then(({data})=>{
         if(data){
           setUsers(data);
@@ -7388,13 +7432,22 @@ export default function App(){
   const openMember=id=>{setActiveMemberId(id);setPageView("member");};
   const openTeams=()=>setPageView("teams");
   const openTimer=()=>setPageView("timer");
-  const openMensGames=()=>setPageView("mensgames");
+  // Locked means the lazy chunk never loads, not merely that the buttons
+  // are hidden -- guards anyone with the URL or stale state (e.g. a tab
+  // left open across an admin toggling it off) from slipping through.
+  const openMensGames=()=>{if(mensGamesUnlocked)setPageView("mensgames");};
   const openSaraJay=()=>setPageView("sarajay");
   const toggleSaraJay=async()=>{
     const newVal=!saraJayUnlocked;
     setSaraJayUnlocked(newVal);
     localStorage.setItem("md-sj-unlocked",JSON.stringify(newVal));
     await supabase.from("announcements").upsert({id:"__sara_jay__",title:"__sara_jay__",body:"",created_by:"system",created_at:new Date().toISOString(),active:newVal});
+  };
+  const toggleMensGames=async()=>{
+    const newVal=!mensGamesUnlocked;
+    setMensGamesUnlocked(newVal);
+    localStorage.setItem("md-mg-unlocked",JSON.stringify(newVal));
+    await supabase.from("announcements").upsert({id:"__mens_games__",title:"__mens_games__",body:"",created_by:"system",created_at:new Date().toISOString(),active:newVal});
   };
   const saveProfile=async updates=>{
     const{error}=await supabase.from("users").update(updates).eq("id",currentUser.id);
@@ -7473,22 +7526,22 @@ export default function App(){
           <button onClick={()=>setWriteError(null)} style={{background:"rgba(255,255,255,.14)",border:"1px solid rgba(255,255,255,.3)",borderRadius:8,color:"#fff",padding:"6px 14px",cursor:"pointer",fontSize:".75rem",fontWeight:700,fontFamily:"var(--font-b)",minHeight:44,display:"flex",alignItems:"center"}}>Dismiss</button>
         </div>
       )}
-      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onUpdates={()=>setPageView("updates")} onProfile={()=>openMember(currentUser.id)} onTeams={openTeams} onTimer={openTimer} onMensGames={openMensGames} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>
+      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onUpdates={()=>setPageView("updates")} onProfile={()=>openMember(currentUser.id)} onTeams={openTeams} onTimer={openTimer} onMensGames={openMensGames} mensGamesUnlocked={mensGamesUnlocked} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
         <AnnouncementBanner announcements={announcements} currentUser={currentUser} onArchive={archiveAnnouncement} onHardDelete={hardDeleteAnnouncement} onReactivate={reactivateAnnouncement} onEdit={ann=>{setEditingAnn(ann);setShowAnnounce(true);}} onNew={()=>{setEditingAnn(null);setShowAnnounce(true);}}/>
-        {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users} onTeams={openTeams} onTimer={openTimer} onMensGames={openMensGames} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>}
+        {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users} onTeams={openTeams} onTimer={openTimer} onMensGames={openMensGames} mensGamesUnlocked={mensGamesUnlocked} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>}
         {pageView==="hof"&&<HallOfFame events={events} users={users} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
-        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} onTeamSetsChanged={setTeamSets}/>}
+        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} onTeamSetsChanged={setTeamSets} mensGamesUnlocked={mensGamesUnlocked}/>}
         {pageView==="updates"&&<UpdatesPage notifications={notifications.filter(n=>!deletedNotifIds.has(n.id)&&(!clearedBefore||n.timestamp>clearedBefore))} notifLastRead={notifLastRead} currentUser={currentUser} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={openEvent} onClearSelf={()=>{setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);}} onDeleteSelf={id=>{setNotifications(prev=>{const next=prev.filter(n=>n.id!==id);if(currentUser)localStorage.setItem(`md-notifs-${currentUser.id}`,JSON.stringify(next));return next;});}} onClearUpdates={async()=>{const cb=new Date().toISOString();const allIds=[...new Set([...deletedNotifIds,...notifications.map(n=>n.id)])];const newSet=new Set(allIds);setDeletedNotifIds(newSet);setClearedBefore(cb);setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);const body=JSON.stringify({ids:allIds,cleared_before:cb});await supabase.from("announcements").upsert({id:"__deleted_notifs__",title:"__deleted_notifs__",body,created_by:"system",created_at:new Date().toISOString(),active:false});supabase.channel("notif-ctrl").send({type:"broadcast",event:"clear-notifs",payload:{ids:allIds,cleared_before:cb}});}} onDeleteNotif={deleteNotifForAll}/>}
         {pageView==="teams"&&<TeamCreatorPage users={users} events={events} currentUser={currentUser} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} onTeamSetsChanged={setTeamSets}/>}
         {pageView==="timer"&&<TimerPage/>}
-        {pageView==="mensgames"&&<Suspense fallback={<div style={{padding:"3rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesPage events={events} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={updateEvent} onTeamSetsChanged={setTeamSets}/></Suspense>}
+        {pageView==="mensgames"&&mensGamesUnlocked&&<Suspense fallback={<div style={{padding:"3rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesPage events={events} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={updateEvent} onTeamSetsChanged={setTeamSets}/></Suspense>}
         {pageView==="sarajay"&&<SaraJayOrJAI/>}
       </main>
       <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted2)",fontSize:".72rem",borderTop:"1px solid var(--border)",letterSpacing:".1em"}}>🍺 MensApp · Built for the lads</div>
-      {showAdmin&&<AdminPanel users={users} onUpdateUsers={updateUsers} onDeleteUser={deleteUser} onClose={()=>setShowAdmin(false)} saraJayUnlocked={saraJayUnlocked} onToggleSaraJay={toggleSaraJay}/>}
+      {showAdmin&&<AdminPanel users={users} onUpdateUsers={updateUsers} onDeleteUser={deleteUser} onClose={()=>setShowAdmin(false)} saraJayUnlocked={saraJayUnlocked} onToggleSaraJay={toggleSaraJay} mensGamesUnlocked={mensGamesUnlocked} onToggleMensGames={toggleMensGames}/>}
       {showAnnounce&&can.announce(currentUser)&&<AnnouncementModal onSave={saveAnnouncement} onClose={()=>{setShowAnnounce(false);setEditingAnn(null);}} existing={editingAnn} currentUser={currentUser}/>}
       {newEvent&&can.editEvent(currentUser)&&<NewEventModal users={users} onSave={async evt=>{
         // Unlike updateEvent's optimistic-then-rollback pattern, a brand
