@@ -15,7 +15,8 @@ import { extractFromApp } from './extractFromAppSource.js'
 const eventDayCount = extractFromApp('eventDayCount')
 const dateForEventDay = extractFromApp('dateForEventDay')
 const dayHeadingLabel = extractFromApp('dateForEventDay', 'dayHeadingLabel')
-const scheduleDayTimeOrder = extractFromApp('scheduleDayTimeOrder')
+const scheduleDayTimeOrder = extractFromApp('padTimeForSort', 'scheduleDayTimeOrder')
+const padTimeForSort = extractFromApp('padTimeForSort')
 
 describe('eventDayCount', () => {
   it('no end_date -> single day', () => {
@@ -151,38 +152,40 @@ describe('scheduleDayTimeOrder', () => {
     expect(sorted(stops).map((s) => s.activity)).toEqual(['blank', 'timed'])
   })
 
-  // CHARACTERIZATION TEST, not a spec of desired behavior -- see QA priority
-  // area #3. `.localeCompare` on raw "H:MM" vs "HH:MM" strings does a
-  // lexicographic (character-by-character) comparison, not a numeric one:
-  // "9:00" > "10:00" because '9' > '1' as the very first character. Every
-  // *current* write path (the modals' `<Inp type="time">`) always emits a
-  // zero-padded "HH:MM", so this can't be produced by the app today -- but
-  // any legacy stop written before that field was plain free text (or any
-  // hand-edited/imported JSONB row) could still hold an unpadded value, and
-  // this pins down exactly what happens if it does: it sorts to the WRONG
-  // place, silently, with no error. This is a real (if currently dormant)
-  // risk for existing production data, not a hypothetical -- flagging here
-  // rather than "fixing" it, since a defensive pad-aware comparator is a
-  // product decision (do we trust all rows are already padded?), not a QA
-  // call. If/when the comparator is made pad-aware, this specific
-  // assertion should flip to `['9:00 stop', '10:00 stop']` and this test
-  // updated accordingly -- until then, this is the current, real behavior.
-  it('CHARACTERIZATION: an unpadded legacy time ("9:00") sorts AFTER a later zero-padded time ("10:00") on the same day -- lexicographic, not numeric, comparison', () => {
+  // FIX, formerly a CHARACTERIZATION TEST pinning the wrong behavior -- see
+  // QA priority area #3. Plain `.localeCompare` on raw "H:MM" vs "HH:MM"
+  // strings did a lexicographic (character-by-character) comparison, not a
+  // numeric one: "9:00" > "10:00" because '9' > '1' as the very first
+  // character. Every *current* write path (the modals' `<Inp type="time">`)
+  // always emits a zero-padded "HH:MM", so this couldn't be produced by the
+  // app today -- but `time` has been free text historically and `schedule`
+  // is hand-editable JSONB, so a legacy/imported unpadded value was a real
+  // (if dormant) risk for existing production data. `scheduleDayTimeOrder`
+  // now pads through `padTimeForSort` before comparing, so this sorts
+  // correctly regardless of padding.
+  it('an unpadded legacy time ("9:00") sorts BEFORE a later zero-padded time ("10:00") on the same day -- numeric, not lexicographic, comparison', () => {
     const stops = [
       { activity: '10:00 stop', day: 0, time: '10:00' },
       { activity: '9:00 stop', day: 0, time: '9:00' },
     ]
-    // Numerically 9:00 is earlier than 10:00 -- but the actual current
-    // behavior puts the unpadded one second, because "9:00".localeCompare("10:00") > 0.
-    expect(sorted(stops).map((s) => s.activity)).toEqual(['10:00 stop', '9:00 stop'])
+    // Numerically (and now, actually) 9:00 sorts before 10:00.
+    expect(sorted(stops).map((s) => s.activity)).toEqual(['9:00 stop', '10:00 stop'])
   })
 
-  it('CHARACTERIZATION: two unpadded single-digit-hour times still sort correctly relative to EACH OTHER ("8:00" < "9:00") -- the risk is specifically single-digit vs double-digit hours, not unpadded times in general', () => {
+  it('two unpadded single-digit-hour times still sort correctly relative to EACH OTHER ("8:00" < "9:00")', () => {
     const stops = [
       { activity: '9am', day: 0, time: '9:00' },
       { activity: '8am', day: 0, time: '8:00' },
     ]
     expect(sorted(stops).map((s) => s.activity)).toEqual(['8am', '9am'])
+  })
+
+  it('a padded and an equivalent unpadded time on the same day are treated as equal (tie), preserving original relative order', () => {
+    const stops = [
+      { activity: 'padded', day: 0, time: '09:00' },
+      { activity: 'unpadded', day: 0, time: '9:00' },
+    ]
+    expect(sorted(stops).map((s) => s.activity)).toEqual(['padded', 'unpadded'])
   })
 
   it('an empty-string time on both sides of the tie is stable (no crash, no throw) -- covers the (a.time||"") fallback for null/undefined time', () => {
@@ -195,5 +198,27 @@ describe('scheduleDayTimeOrder', () => {
     // all three are treated identically (fall back to ""), so original
     // relative order is preserved (stable sort, all keys equal).
     expect(sorted(stops).map((s) => s.activity)).toEqual(['null-time', 'undefined-time', 'empty-string-time'])
+  })
+})
+
+describe('padTimeForSort', () => {
+  it('zero-pads a single-digit hour', () => {
+    expect(padTimeForSort('9:00')).toBe('09:00')
+    expect(padTimeForSort('1:45')).toBe('01:45')
+  })
+
+  it('leaves an already-padded double-digit hour untouched', () => {
+    expect(padTimeForSort('09:00')).toBe('09:00')
+    expect(padTimeForSort('20:00')).toBe('20:00')
+  })
+
+  it('leaves falsy input as "" (never throws)', () => {
+    expect(padTimeForSort('')).toBe('')
+    expect(padTimeForSort(null)).toBe('')
+    expect(padTimeForSort(undefined)).toBe('')
+  })
+
+  it('leaves a value that does not look like "H(:...)" untouched rather than mangling it', () => {
+    expect(padTimeForSort('noon')).toBe('noon')
   })
 })

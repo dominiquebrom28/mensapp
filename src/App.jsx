@@ -343,11 +343,24 @@ const dayHeadingLabel=(dateStr,dayIndex)=>{
   const suffix=iso?` · ${new Date(iso+"T12:00:00").toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long"})}`:"";
   return`Dag ${(dayIndex||0)+1}${suffix}`;
 };
+// Zero-pads a single-digit hour ("9:00"->"09:00") so time strings compare
+// numerically, not lexicographically, in scheduleDayTimeOrder below. `time`
+// has been free text historically and `schedule` is hand-editable JSONB, so
+// an unpadded legacy/imported value is a real (if currently dormant) risk --
+// every *current* write path (the modals' `<Inp type="time">`) already
+// zero-pads. Leaves "" (and anything that doesn't look like `\d{1,2}:...`)
+// untouched so the "blank sorts before any timed stop" behavior below is
+// unaffected.
+const padTimeForSort=t=>{
+  if(!t)return"";
+  const m=/^(\d{1,2})(:.*)$/.exec(t);
+  return m&&m[1].length===1?`0${m[1]}${m[2]}`:t;
+};
 // Sort comparator for schedule stops: day first (missing/undefined treated
 // as 0, i.e. pre-multi-day stops), then time-of-day within the day. Stable
 // (ties keep their existing relative order) so manual reordering via the
 // editor's ↑/↓ still shows through whenever times are equal or blank.
-const scheduleDayTimeOrder=(a,b)=>((a.day??0)-(b.day??0))||(a.time||"").localeCompare(b.time||"");
+const scheduleDayTimeOrder=(a,b)=>((a.day??0)-(b.day??0))||padTimeForSort(a.time).localeCompare(padTimeForSort(b.time));
 // Boundary adapter for the trailer feature (src/features/trailer/). The
 // trailer now plays the event's real, owner-produced video and ends on a
 // single end-card view -- direction change from the owner, 2026-08-21. The
@@ -1514,7 +1527,13 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
         const p=Object.values(st).flat().find(x=>x.presenting);
         if(p){
           seenPresenter=true;
-          setSchedLive({idx:p.idx??0,revealedSecrets:p.revealedSecrets??[]});
+          // `realIdx` (real schedule-array index, or null for intro) rides
+          // alongside the legacy `idx` display position for backwards
+          // compat -- a presenter on a build that predates `realIdx` simply
+          // won't send it, and PresentationMode's own resolver falls back
+          // to `idx` when that's the case. See PresentationMode for the
+          // full rationale.
+          setSchedLive({idx:p.idx??0,realIdx:p.realIdx,revealedSecrets:p.revealedSecrets??[]});
           setPresenterDetected(true);
         } else if(seenPresenter){
           resetPresenter(); // presenter actually ended (we had confirmed they were there)
@@ -1523,7 +1542,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
       .on('broadcast',{event:'slide'},({payload})=>{
         // Keep schedLive current while dismissed so Rejoin shows the right slide
         seenPresenter=true;
-        setSchedLive({idx:payload.idx??0,revealedSecrets:payload.revealedSecrets??[]});
+        setSchedLive({idx:payload.idx??0,realIdx:payload.realIdx,revealedSecrets:payload.revealedSecrets??[]});
       })
       .subscribe();
     return()=>supabase.removeChannel(ch);
@@ -5049,13 +5068,41 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   // `order[n]`, so sync/secret-reveal/keyboard/fullscreen behaviour is
   // unchanged; only which index is shown at slide position n+1 changes.
   const order=allStops.map((_,i)=>i).sort((a,b)=>scheduleDayTimeOrder(allStops[a],allStops[b]));
+  // A presence/broadcast snapshot (`currentLive`, and the live payloads
+  // handled inside the channel effect below) can be stale or describe a
+  // schedule this client's own `evt.schedule` doesn't match yet -- a late
+  // joiner's own event data resolving after presence, a stop added/removed
+  // elsewhere before this client re-synced, flaky venue wifi, etc. Resolve
+  // any incoming slide reference through THIS client's own `order`, and
+  // always clamp into THIS client's own valid range, so a divergent or
+  // out-of-range snapshot can never seed (or later set) an out-of-bounds
+  // slide index -- a viewer that's briefly behind lands on the nearest
+  // valid slide instead of a dead screen. Prefers `realIdx` (a real
+  // schedule-array index identifying the stop itself, sent alongside the
+  // legacy `idx` display-position field for backwards compat -- see the
+  // channel effect below) when present; falls back to the legacy `idx`
+  // field for payloads from a build that predates `realIdx`.
+  const resolveLiveIdx=live=>{
+    if(!live)return 0;
+    let ni;
+    if(live.realIdx!==undefined){
+      if(live.realIdx===null)ni=0;
+      else{
+        const pos=order.indexOf(live.realIdx);
+        ni=pos===-1?(live.idx??0):pos+1;
+      }
+    } else {
+      ni=live.idx??0;
+    }
+    return Math.max(0,Math.min(total-1,ni));
+  };
   const isMultiDay=eventDayCount(evt.date,evt.end_date)>1;
   const isMobile=useIsMobile();
-  const [idx,setIdx]=useState(isPresenter?0:(currentLive?.idx||0));
+  const [idx,setIdx]=useState(isPresenter?0:resolveLiveIdx(currentLive));
   const [revealedSecrets,setRevealedSecrets]=useState(()=>currentLive?.revealedSecrets||[]);
   const [fading,setFading]=useState(false);
   const [locallyDismissed,setLocallyDismissed]=useState(false);
-  const idxRef=useRef(isPresenter?0:(currentLive?.idx||0));
+  const idxRef=useRef(isPresenter?0:resolveLiveIdx(currentLive));
   const revealedRef=useRef(currentLive?.revealedSecrets||[]);
   const evtRef=useRef(evt);
   const chRef=useRef(null);
@@ -5064,6 +5111,14 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   useEffect(()=>{evtRef.current=evt;},[evt]);
   useEffect(()=>{idxRef.current=idx;},[idx]);
   useEffect(()=>{revealedRef.current=revealedSecrets;},[revealedSecrets]);
+  // Belt-and-suspenders, independent of anything arriving over the channel:
+  // if THIS client's own schedule shrinks (a stop removed, a stale prop
+  // still mid-sync, etc.) such that `idx` now points past this client's own
+  // valid range, pull it back in range rather than letting the stop
+  // dereference below run on a since-removed index.
+  useEffect(()=>{
+    if(idx>total-1)setIdx(total-1);
+  },[idx,total]);
 
   // Channel setup: Presence for detection/initial-state, Broadcast for real-time slide sync.
   // Solo never runs any of this -- no channel is created at all (not
@@ -5075,18 +5130,45 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
     const ch=supabase.channel(`sched-${evtRef.current.id}`);
     chRef.current=ch;
     if(isPresenter){
-      // Presence lets late-joining viewers get the current slide on subscribe
+      // Presence lets late-joining viewers get the current slide on
+      // subscribe. `realIdx:null` because a presenter always starts at
+      // `idx===0` (the intro) on mount -- see the idx-driven broadcast
+      // effect below for how `realIdx` is computed once the presenter
+      // navigates.
       ch.subscribe(async status=>{
         if(status==='SUBSCRIBED'){
-          ch.track({presenting:true,idx:idxRef.current,revealedSecrets:revealedRef.current});
+          ch.track({presenting:true,idx:idxRef.current,realIdx:null,revealedSecrets:revealedRef.current});
         }
       });
     } else {
       let seenPresenter=false;
-      const applySlide=(ni,rs)=>{
+      // Resolves a presence/broadcast payload against THIS client's own,
+      // current `evt.schedule` (via `evtRef`, not a possibly-stale `order`
+      // closed over whenever this effect itself last ran -- deps are
+      // `[isPresenter,isSolo]`, not `evt`, on purpose, so this effect
+      // doesn't tear down and recreate the channel on every schedule edit)
+      // -- see the `resolveLiveIdx` comment above for the full rationale,
+      // and for the `realIdx`-preferred / legacy-`idx`-fallback shape.
+      // Never trusts the raw incoming number: always clamps into THIS
+      // client's own valid range.
+      const applySlide=payload=>{
         seenPresenter=true;
+        const mySchedule=evtRef.current.schedule||[];
+        const myTotal=mySchedule.length+1;
+        let ni;
+        if(payload.realIdx!==undefined){
+          if(payload.realIdx===null)ni=0;
+          else{
+            const myOrder=mySchedule.map((_,i)=>i).sort((a,b)=>scheduleDayTimeOrder(mySchedule[a],mySchedule[b]));
+            const pos=myOrder.indexOf(payload.realIdx);
+            ni=pos===-1?(payload.idx??0):pos+1;
+          }
+        } else {
+          ni=payload.idx??0;
+        }
+        ni=Math.max(0,Math.min(myTotal-1,ni));
         if(ni!==idxRef.current){setFading(true);setTimeout(()=>{setIdx(ni);setFading(false);},230);}
-        setRevealedSecrets(rs??[]);
+        setRevealedSecrets(payload.revealedSecrets??[]);
       };
       ch
         // Presence: initial state for late joiners + detect presenter left
@@ -5097,22 +5179,35 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
             if(seenPresenter){onPresenterLeftRef.current?.();setLocallyDismissed(true);}
             return;
           }
-          if(!seenPresenter) applySlide(p.idx??0,p.revealedSecrets);
+          if(!seenPresenter) applySlide(p);
         })
         // Broadcast: real-time slide changes (fires reliably for every track update)
         .on('broadcast',{event:'slide'},({payload})=>{
-          applySlide(payload.idx??0,payload.revealedSecrets);
+          applySlide(payload);
         })
         .subscribe();
     }
     return()=>{if(chRef.current){supabase.removeChannel(chRef.current);chRef.current=null;}};
   },[isPresenter,isSolo]);
 
-  // Presenter: broadcast slide change + update presence for late joiners
+  // Presenter: broadcast slide change + update presence for late joiners.
+  // `realIdx` (the actual schedule-array index the slide at `idx` displays,
+  // or null for the intro) identifies the stop itself, rather than its
+  // display position, so a viewer whose own schedule differs at all no
+  // longer resolves the same broadcast number to a different stop --
+  // computed fresh from `evtRef.current` (not the render-scope
+  // `order`/`allStops`) so it stays correct even though this effect's own
+  // deps are `[idx,isPresenter]`, not `evt`. Sent alongside the legacy
+  // `idx` display position so a viewer on a build that predates `realIdx`
+  // still works unchanged (falls back to it inside `applySlide` above /
+  // `resolveLiveIdx` above that).
   useEffect(()=>{
     if(!isPresenter||!chRef.current)return;
-    chRef.current.track({presenting:true,idx,revealedSecrets:revealedRef.current});
-    chRef.current.send({type:'broadcast',event:'slide',payload:{idx,revealedSecrets:revealedRef.current}});
+    const mySchedule=evtRef.current.schedule||[];
+    const myOrder=mySchedule.map((_,i)=>i).sort((a,b)=>scheduleDayTimeOrder(mySchedule[a],mySchedule[b]));
+    const realIdx=idx===0?null:myOrder[idx-1];
+    chRef.current.track({presenting:true,idx,realIdx,revealedSecrets:revealedRef.current});
+    chRef.current.send({type:'broadcast',event:'slide',payload:{idx,realIdx,revealedSecrets:revealedRef.current}});
   },[idx,isPresenter]);
 
   const toggleReveal=useCallback(stopIdx=>{
@@ -5121,8 +5216,11 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
     const next=revealing?[...cur,stopIdx]:cur.filter(i=>i!==stopIdx);
     setRevealedSecrets(next);
     if(chRef.current){
-      chRef.current.track({presenting:true,idx:idxRef.current,revealedSecrets:next});
-      chRef.current.send({type:'broadcast',event:'slide',payload:{idx:idxRef.current,revealedSecrets:next}});
+      // `stopIdx` here IS the real schedule index already (the caller
+      // passes `order[idx-1]`, not the display position) -- reuse it
+      // directly as `realIdx` rather than recomputing it.
+      chRef.current.track({presenting:true,idx:idxRef.current,realIdx:stopIdx,revealedSecrets:next});
+      chRef.current.send({type:'broadcast',event:'slide',payload:{idx:idxRef.current,realIdx:stopIdx,revealedSecrets:next}});
     }
     const e=evtRef.current;
     const updatedSchedule=(e.schedule||[]).map((s,i)=>i===stopIdx?{...s,secret:!revealing}:s);
@@ -5230,13 +5328,24 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
               <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.6rem,5vw,3rem)",color:"rgba(255,255,255,.25)",lineHeight:1.1}}>???</div>
               <div style={{color:"rgba(255,255,255,.2)",fontSize:".88rem",marginTop:".8rem"}}>The organisation is keeping this one a surprise…</div>
             </div>
+          ):!stop?(
+            /* ── Defensive holding state: `idx`/`stopIdx` resolved to a slot
+               this client has no actual stop for (should be unreachable now
+               that idx is clamped everywhere above, but never dereference an
+               undefined `stop` regardless -- a viewer who's briefly behind
+               sees this, never a dead screen). ── */
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:"clamp(3rem,8vw,6rem)",marginBottom:"1.2rem",filter:"blur(2px)"}}>⏳</div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.6rem,5vw,3rem)",color:"rgba(255,255,255,.25)",lineHeight:1.1}}>Catching up…</div>
+              <div style={{color:"rgba(255,255,255,.2)",fontSize:".88rem",marginTop:".8rem"}}>Syncing with the presenter…</div>
+            </div>
           ):(
             /* ── Normal stop content (visible or presenter-only view of secret) ── */
             <div style={{width:"100%",maxWidth:900}}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"1.1rem",flexWrap:"wrap"}}>
                 <span style={{background:"rgba(232,148,58,.2)",border:"1px solid rgba(232,148,58,.4)",borderRadius:20,padding:"4px 14px",fontSize:".7rem",color:"var(--amber)",fontWeight:700,letterSpacing:".12em",textTransform:"uppercase"}}>Stop {idx} / {allStops.length}</span>
-                {isMultiDay&&<span style={{background:"rgba(255,255,255,.1)",border:"1px solid rgba(255,255,255,.22)",borderRadius:20,padding:"4px 14px",fontSize:".7rem",color:"rgba(255,255,255,.85)",fontWeight:700,letterSpacing:".08em",textTransform:"uppercase"}}>{dayHeadingLabel(evt.date,stop.day??0)}</span>}
-                {stop.time&&<span style={{fontSize:".95rem",color:"rgba(255,255,255,.8)",fontWeight:600,letterSpacing:".04em"}}>{stop.time}</span>}
+                {isMultiDay&&<span style={{background:"rgba(255,255,255,.1)",border:"1px solid rgba(255,255,255,.22)",borderRadius:20,padding:"4px 14px",fontSize:".7rem",color:"rgba(255,255,255,.85)",fontWeight:700,letterSpacing:".08em",textTransform:"uppercase"}}>{dayHeadingLabel(evt.date,stop?.day??0)}</span>}
+                {stop?.time&&<span style={{fontSize:".95rem",color:"rgba(255,255,255,.8)",fontWeight:600,letterSpacing:".04em"}}>{stop.time}</span>}
                 {/* Reveal/hide toggle — presenter only, for secret stops */}
                 {isPresenter&&isSecret&&(
                   <button onClick={()=>toggleReveal(stopIdx)}
@@ -5248,14 +5357,14 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
                 )}
               </div>
               <div style={{display:"flex",alignItems:"center",gap:"1.3rem",marginBottom:"1rem",flexWrap:"wrap"}}>
-                {stop.icon&&<span style={{fontSize:"clamp(2rem,5vw,3.5rem)",lineHeight:1,filter:"drop-shadow(0 4px 24px rgba(232,148,58,.35))"}}>{stop.icon}</span>}
-                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.9rem,5.5vw,4rem)",color:"#fff",lineHeight:1.08,textShadow:"0 2px 30px rgba(0,0,0,.55)"}}>{stop.activity}</div>
+                {stop?.icon&&<span style={{fontSize:"clamp(2rem,5vw,3.5rem)",lineHeight:1,filter:"drop-shadow(0 4px 24px rgba(232,148,58,.35))"}}>{stop.icon}</span>}
+                <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.9rem,5.5vw,4rem)",color:"#fff",lineHeight:1.08,textShadow:"0 2px 30px rgba(0,0,0,.55)"}}>{stop?.activity}</div>
               </div>
-              {stop.location&&<div style={{fontSize:"1rem",color:"rgba(255,255,255,.82)",marginBottom:".5rem",display:"flex",alignItems:"center",gap:7}}>
+              {stop?.location&&<div style={{fontSize:"1rem",color:"rgba(255,255,255,.82)",marginBottom:".5rem",display:"flex",alignItems:"center",gap:7}}>
                 <span>📍</span>
                 {stop.locationUrl?<a href={stop.locationUrl} target="_blank" rel="noreferrer" style={{color:"var(--amber2)",textDecoration:"none"}}>{stop.location}</a>:<span>{stop.location}</span>}
               </div>}
-              {stop.note&&<div style={{fontSize:".95rem",color:"rgba(255,255,255,.72)",fontStyle:"italic",lineHeight:1.6,maxWidth:640,marginTop:4}}>{stop.note}</div>}
+              {stop?.note&&<div style={{fontSize:".95rem",color:"rgba(255,255,255,.72)",fontStyle:"italic",lineHeight:1.6,maxWidth:640,marginTop:4}}>{stop.note}</div>}
             </div>
           )
         )}
@@ -6296,6 +6405,14 @@ export default function App(){
   const [notifLastRead,setNotifLastRead]=useState(()=>localStorage.getItem("notif-read")||"");
   const [deletedNotifIds,setDeletedNotifIds]=useState(new Set());
   const [clearedBefore,setClearedBefore]=useState("");
+  // Surfaced whenever a write this app treats as "must not silently lose
+  // user work" (event create/update, the schedule editor's save) comes back
+  // with a Supabase error -- see `updateEvent` below. A single global,
+  // manually-dismissed banner rather than a per-field message: the write
+  // that failed can originate from many different places deep in the tree
+  // (any tab, any modal), so there's no one local spot to put it that's
+  // guaranteed visible regardless of which one triggered it.
+  const [writeError,setWriteError]=useState(null);
   useEffect(()=>{
     if(!currentUser)return;
     try{const s=JSON.parse(localStorage.getItem(`md-notifs-${currentUser.id}`)||"[]");setNotifications(s);}catch{}
@@ -6526,17 +6643,46 @@ export default function App(){
     setUsers(u=>u.filter(x=>x.id!==id));
     await supabase.from("users").delete().eq("id",id);
   };
+  // The one write path virtually every event mutation in this app funnels
+  // through as `onUpdate` -- event edit, the schedule editor's save
+  // (including its backdrop-click save), kretjes, polls, quizzes, teams,
+  // photos, winners, FAQs, presentation-mode secret reveals. Applies
+  // optimistically (as before), but now actually checks the write's result:
+  // on a Supabase error, rolls the local state back to what it was before
+  // this call (never leaves the UI showing a change that isn't really
+  // saved) and surfaces `writeError` so it's impossible to miss.
   const updateEvent=async updated=>{
     if(typeof updated==="function"){
+      let before=null,changed=null;
       setEvents(prev=>{
+        before=prev.find(e=>e.id===activeId)||null;
         const next=prev.map(e=>e.id===activeId?updated(e):e);
-        const changed=next.find(e=>e.id===activeId);
-        if(changed)supabase.from("events").upsert([changed]);
+        changed=next.find(e=>e.id===activeId)||null;
         return next;
       });
+      if(!changed)return;
+      const{error}=await supabase.from("events").upsert([changed]);
+      if(error){
+        console.error("Event update failed:",error);
+        setEvents(prev=>prev.map(e=>e.id===activeId?(before??e):e));
+        setWriteError("Save failed — your change wasn't saved. Please try again.");
+        return;
+      }
+      setWriteError(null);
     } else {
-      setEvents(prev=>prev.map(e=>e.id===updated.id?updated:e));
-      await supabase.from("events").upsert([updated]);
+      let before=null;
+      setEvents(prev=>{
+        before=prev.find(e=>e.id===updated.id)||null;
+        return prev.map(e=>e.id===updated.id?updated:e);
+      });
+      const{error}=await supabase.from("events").upsert([updated]);
+      if(error){
+        console.error("Event update failed:",error);
+        setEvents(prev=>prev.map(e=>e.id===updated.id?(before??e):e));
+        setWriteError("Save failed — your change wasn't saved. Please try again.");
+        return;
+      }
+      setWriteError(null);
     }
   };
   const saveEvents=async e=>{
@@ -6643,6 +6789,19 @@ export default function App(){
   return(
     <div style={{minHeight:"100vh",background:"var(--bg)"}}>
       <GS/>
+      {/* Write-failure banner: a hard-to-miss, manually-dismissed alert for
+          any event write this app treats as "must not silently lose user
+          work" (see `updateEvent`/NewEventModal's onSave). Fixed above
+          everything else in the app (Nav is z-index 200, PresentationMode
+          is the highest normal overlay at 1000) so it's visible no matter
+          which modal or overlay was open when the write failed. */}
+      {writeError&&(
+        <div role="alert" aria-live="assertive" style={{position:"fixed",top:0,left:0,right:0,zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",gap:12,flexWrap:"wrap",background:"linear-gradient(90deg,rgba(45,10,10,.97),rgba(64,14,14,.97))",borderBottom:"1px solid rgba(224,85,85,.55)",padding:".7rem 1.4rem",backdropFilter:"blur(12px)"}}>
+          <span aria-hidden="true" style={{fontSize:"1rem"}}>⚠️</span>
+          <span style={{color:"#fff",fontSize:".85rem",fontWeight:600}}>{writeError}</span>
+          <button onClick={()=>setWriteError(null)} style={{background:"rgba(255,255,255,.14)",border:"1px solid rgba(255,255,255,.3)",borderRadius:8,color:"#fff",padding:"6px 14px",cursor:"pointer",fontSize:".75rem",fontWeight:700,fontFamily:"var(--font-b)",minHeight:32}}>Dismiss</button>
+        </div>
+      )}
       <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onUpdates={()=>setPageView("updates")} onProfile={()=>openMember(currentUser.id)} onTeams={openTeams} onTimer={openTimer} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
         <AnnouncementBanner announcements={announcements} currentUser={currentUser} onArchive={archiveAnnouncement} onHardDelete={hardDeleteAnnouncement} onReactivate={reactivateAnnouncement} onEdit={ann=>{setEditingAnn(ann);setShowAnnounce(true);}} onNew={()=>{setEditingAnn(null);setShowAnnounce(true);}}/>
@@ -6659,7 +6818,24 @@ export default function App(){
       <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted2)",fontSize:".72rem",borderTop:"1px solid var(--border)",letterSpacing:".1em"}}>🍺 MensApp · Built for the lads</div>
       {showAdmin&&<AdminPanel users={users} onUpdateUsers={updateUsers} onDeleteUser={deleteUser} onClose={()=>setShowAdmin(false)} saraJayUnlocked={saraJayUnlocked} onToggleSaraJay={toggleSaraJay}/>}
       {showAnnounce&&can.announce(currentUser)&&<AnnouncementModal onSave={saveAnnouncement} onClose={()=>{setShowAnnounce(false);setEditingAnn(null);}} existing={editingAnn} currentUser={currentUser}/>}
-      {newEvent&&can.editEvent(currentUser)&&<NewEventModal users={users} onSave={async evt=>{setEvents(prev=>[...prev,evt]);setNewEvent(false);openEvent(evt.id);await supabase.from("events").upsert([evt]);}} onClose={()=>setNewEvent(false)}/>}
+      {newEvent&&can.editEvent(currentUser)&&<NewEventModal users={users} onSave={async evt=>{
+        // Unlike updateEvent's optimistic-then-rollback pattern, a brand
+        // new event has no "before" state to roll back TO -- so this waits
+        // for the write to actually succeed before touching local state or
+        // navigating away, rather than showing (and then un-showing) a
+        // phantom event. On failure the modal stays open with the form's
+        // data intact so the lad doesn't have to redo it.
+        const{error}=await supabase.from("events").upsert([evt]);
+        if(error){
+          console.error("Event create failed:",error);
+          setWriteError("Could not create the event — nothing was saved. Please try again.");
+          return;
+        }
+        setWriteError(null);
+        setEvents(prev=>[...prev,evt]);
+        setNewEvent(false);
+        openEvent(evt.id);
+      }} onClose={()=>setNewEvent(false)}/>}
       {editingProfile&&<EditProfileModal user={currentUser} onSave={async u=>{await saveProfile(u);setEditingProfile(false);}} onClose={()=>setEditingProfile(false)}/>}
       {teaserEvent&&<TeaserModal evt={teaserEvent} onWatch={teaserWatch} onSkip={teaserSkip}/>}
     </div>

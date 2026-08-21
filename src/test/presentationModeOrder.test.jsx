@@ -184,6 +184,7 @@ function extractPresentationMode() {
     'eventDayCount',
     'dateForEventDay',
     'dayHeadingLabel',
+    'padTimeForSort',
     'scheduleDayTimeOrder',
     'useIsMobile',
   ]

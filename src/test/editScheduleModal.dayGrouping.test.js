@@ -228,10 +228,22 @@ describe('Editor manual order vs (day,time) display order -- consequence charact
   // scheduleDayTimeOrder is already unit-tested directly in
   // scheduleDays.test.js; this describes its *consequence* for the editor
   // workflow specifically, using the same extracted comparator, so the
-  // characterization stays pinned to real source behavior.
+  // characterization stays pinned to real source behavior. It now depends
+  // on the module-scope `padTimeForSort` helper (declared well before
+  // EditScheduleModal, so outside `scopedLines` above) -- extracted
+  // separately, from the full `sourceLines`, and prepended.
+  const padTimeForSortStart = sourceLines.findIndex((l) => l.trim().startsWith('const padTimeForSort='))
+  if (padTimeForSortStart === -1) {
+    throw new Error('editScheduleModal.dayGrouping.test.js: could not find "const padTimeForSort=" in App.jsx.')
+  }
+  const padTimeForSortEnd = sourceLines.findIndex((l, i) => i > padTimeForSortStart && l.trim() === '};')
+  if (padTimeForSortEnd === -1) {
+    throw new Error('editScheduleModal.dayGrouping.test.js: no closing "};" found for "const padTimeForSort=".')
+  }
+  const padTimeForSortBlock = sourceLines.slice(padTimeForSortStart, padTimeForSortEnd + 1).join('\n')
   const marker = 'const scheduleDayTimeOrder='
   const line = sourceLines.find((l) => l.trim().startsWith(marker))
-  const scheduleDayTimeOrder = new Function(`${line}\nreturn scheduleDayTimeOrder;`)()
+  const scheduleDayTimeOrder = new Function(`${padTimeForSortBlock}\n${line}\nreturn scheduleDayTimeOrder;`)()
   const displayOrder = (sched) => [...sched].sort(scheduleDayTimeOrder).map((s) => s.activity)
 
   it('moving a stop ABOVE an earlier-timed stop in the editor array has NO effect on display order -- (day,time) always wins', () => {
