@@ -343,13 +343,21 @@ const scheduleDayTimeOrder=(a,b)=>((a.day??0)-(b.day??0))||(a.time||"").localeCo
 // exactly what the end card needs: roster, kretjes, event identity, the
 // video URL. Keep the `const NAME=(...)=>{ ... };` shape: the
 // source-extraction test helpers in src/test/ match on it.
-const toTrailerInput=(evt,users=[])=>{
+// `kretjes` is the all-time total across every event, not this one's --
+// 2026-08-21 owner direction change (matches `Home`'s own
+// `events.reduce((s,e)=>s+(e.kretjes||0),0)` total at the top of the app).
+// Needs the full `events` list for that, hence the third param. Guarded with
+// the same `Number.isFinite` check `Home` doesn't bother with but this file
+// already applies elsewhere below -- `kretjes` is hand-editable JSONB-
+// adjacent data, so a stray string/null on any one event must not corrupt
+// the sum via string concatenation.
+const toTrailerInput=(evt,users=[],events=[])=>{
   const going=(evt.attendees||[]).filter(a=>a.status==="going")
     .slice(0,12).map(a=>({name:getDisplayName(a.name,users),...getUA(a.name,users)}));
   return{
     eventId:evt.id,name:evt.name||"",
     videoUrl:isSafeVideoUrl(evt.trailer_video_url)?evt.trailer_video_url:"",
-    kretjes:Number.isFinite(evt.kretjes)?evt.kretjes:0,
+    kretjes:events.reduce((s,e)=>s+(Number.isFinite(e.kretjes)?e.kretjes:0),0),
     goingCount:(evt.attendees||[]).filter(a=>a.status==="going").length,
     going:going.map(g=>({name:g.name,photoUrl:isSafeImageUrl(g.photoUrl)?g.photoUrl:"",avatarIndex:g.index??0})),
   };
@@ -1010,7 +1018,7 @@ const EditProfileModal=({user,onSave,onClose})=>{
   };
   const save=()=>onSave({display_name:displayName.trim()||null,age:age?parseInt(age):null,bio:bio.trim()||null,animal_avatar:animalAvatar,photo_url:photoUrl||null});
   return(
-    <Modal onClose={onClose} maxWidth={460}>
+    <Modal onClose={onClose} onBackdropClose={save} maxWidth={460}>
       <H>Profiel bewerken</H>
       <div style={{display:"grid",gap:"1.1rem"}}>
         <div style={{textAlign:"center"}}>
@@ -1039,9 +1047,10 @@ const EditProfileModal=({user,onSave,onClose})=>{
         <div><Lbl>Weergavenaam</Lbl><Inp value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder={user.username}/></div>
         <div><Lbl>Leeftijd</Lbl><Inp value={age} onChange={e=>setAge(e.target.value.replace(/\D/g,""))} placeholder="bijv. 28"/></div>
         <div><Lbl>Bio / tagline</Lbl><Inp value={bio} onChange={e=>setBio(e.target.value)} placeholder="Korte beschrijving…" multiline rows={2}/></div>
-        <div style={{display:"flex",gap:8,marginTop:4}}>
+        <div style={{display:"flex",gap:8,marginTop:4,alignItems:"center",flexWrap:"wrap"}}>
           <Btn onClick={save}>Opslaan</Btn>
-          <Btn onClick={onClose} variant="ghost">Annuleren</Btn>
+          <Btn onClick={onClose} variant="ghost">Discard changes</Btn>
+          <span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span>
         </div>
       </div>
     </Modal>
@@ -1361,7 +1370,7 @@ const TeamsTab=({evt,onUpdate,currentUser,users=[]})=>{
   );
 };
 
-const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],initialTab,scrollToId,onSendNotif})=>{
+const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif})=>{
   const [tab,setTab]=useState(initialTab||"Overview");
   useEffect(()=>{
     if(!scrollToId)return;
@@ -1392,9 +1401,9 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],initialTa
   // every EventPage render regardless of whether anyone ever opens the
   // trailer. `null` while closed; the `<EventTrailer>` mount below is gated
   // on the same flag, so it never sees the `null`. Still memoized on
-  // evt/users identity so an unrelated realtime sync elsewhere doesn't
-  // rebuild the view model while the trailer IS open.
-  const trailerInput=useMemo(()=>(trailerOpen?toTrailerInput(evt,users):null),[trailerOpen,evt,users]);
+  // evt/users/events identity so an unrelated realtime sync elsewhere
+  // doesn't rebuild the view model while the trailer IS open.
+  const trailerInput=useMemo(()=>(trailerOpen?toTrailerInput(evt,users,events):null),[trailerOpen,evt,users,events]);
 
   const resetPresenter=useCallback(()=>{setPresenterDetected(false);setViewerDismissed(false);setSchedLive(null);},[]);
 
@@ -4379,7 +4388,7 @@ const PollsTab=({evt,onUpdate,currentUser,isPast,users=[],onSendNotif})=>{
       })()}
 
       {creating&&(
-        <Modal onClose={()=>{setCreating(false);setNewPoll(blankPoll);setShowLink(false);}} maxWidth={460}>
+        <Modal onClose={()=>{setCreating(false);setNewPoll(blankPoll);setShowLink(false);}} onBackdropClose={()=>{}} maxWidth={460}>
           <H>New Poll</H>
           <div style={{display:"grid",gap:"1rem"}}>
             {/* Title + emoji */}
@@ -4559,21 +4568,35 @@ const WinnersTab=({evt,onUpdate,currentUser,isPast})=>{
           ))}
         </div>
       </div>
-      {(addingW||editW)&&<Modal onClose={()=>{setAddingW(false);setEditW(null)}} maxWidth={440}><WinnerForm initial={editW} attendees={evt.attendees.map(a=>a.name)} onSave={w=>{editW?saveW(winners.map(x=>x.id===w.id?w:x)):saveW([...winners,{...w,id:`w${Date.now()}`}]);setAddingW(false);setEditW(null)}} onClose={()=>{setAddingW(false);setEditW(null)}}/></Modal>}
-      {(addingH||editH)&&<Modal onClose={()=>{setAddingH(false);setEditH(null)}} maxWidth={440}><HighlightForm initial={editH} onSave={h=>{editH?saveH(highlights.map(x=>x.id===h.id?h:x)):saveH([...highlights,{...h,id:`h${Date.now()}`}]);setAddingH(false);setEditH(null)}} onClose={()=>{setAddingH(false);setEditH(null)}}/></Modal>}
+      {(addingW||editW)&&<WinnerForm initial={editW} attendees={evt.attendees.map(a=>a.name)} onSave={w=>{editW?saveW(winners.map(x=>x.id===w.id?w:x)):saveW([...winners,{...w,id:`w${Date.now()}`}]);setAddingW(false);setEditW(null)}} onClose={()=>{setAddingW(false);setEditW(null)}}/>}
+      {(addingH||editH)&&<HighlightForm initial={editH} onSave={h=>{editH?saveH(highlights.map(x=>x.id===h.id?h:x)):saveH([...highlights,{...h,id:`h${Date.now()}`}]);setAddingH(false);setEditH(null)}} onClose={()=>{setAddingH(false);setEditH(null)}}/>}
     </div>
   );
 };
 
+// WinnerForm/HighlightForm own their `<Modal>` directly (rather than being
+// wrapped by one at the call site) specifically so the backdrop-click
+// wiring below can reach each form's own local draft state (`d`) -- same
+// reason EditScheduleModal owns its Modal inline. Both forms serve dual
+// duty (create a new award/highlight, or edit an existing one, selected by
+// whether `initial` is passed) -- per the owner's backdrop-click fix
+// direction: editing an existing item saves on backdrop click (nothing
+// lost, same disabled-Save gate as the button itself), creating a new one
+// ignores backdrop clicks entirely (ellipsis onBackdropClose -- a half-
+// filled award/highlight would otherwise litter the event with junk).
 const WinnerForm=({initial,attendees,onSave,onClose})=>{
   const [d,setD]=useState(initial||{category:"",winner:"",detail:"",icon:"🏆"});
   const [ip,setIp]=useState(false);
-  return(<><H>{initial?"Edit Award":"New Award"}</H><div style={{display:"grid",gap:".85rem"}}><div><Lbl>Icon</Lbl><div style={{position:"relative",display:"inline-block"}}><button onClick={()=>setIp(!ip)} style={{width:44,height:44,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",cursor:"pointer",fontSize:"22px"}}>{d.icon}</button>{ip&&<div style={{position:"absolute",top:48,left:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:10,padding:8,display:"flex",flexWrap:"wrap",gap:4,width:228,zIndex:10}}>{TROPHY_ICONS.map(ic=><button key={ic} onClick={()=>{setD({...d,icon:ic});setIp(false)}} style={{background:d.icon===ic?"rgba(232,148,58,.2)":"transparent",border:"none",borderRadius:6,cursor:"pointer",fontSize:"19px",width:34,height:34}}>{ic}</button>)}</div>}</div></div><div><Lbl>Category</Lbl><Inp value={d.category} onChange={e=>setD({...d,category:e.target.value})} placeholder="🏎️ Go-Kart Winner"/></div><div><Lbl>Winner</Lbl><select value={d.winner} onChange={e=>setD({...d,winner:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:d.winner?"var(--cream)":"var(--muted)",fontSize:".88rem",width:"100%"}}><option value="">Select…</option>{attendees.map(n=><option key={n} value={n}>{n}</option>)}<option value="Everyone">Everyone 🎉</option><option value="Nobody">Nobody 💀</option></select></div><div><Lbl>Story</Lbl><Inp value={d.detail} onChange={e=>setD({...d,detail:e.target.value})} placeholder="What happened?" multiline/></div><div style={{display:"flex",gap:8}}><Btn onClick={()=>onSave(d)} disabled={!d.category.trim()||!d.winner}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div></div></>);
+  const isEdit=!!initial;
+  const canSave=d.category.trim()&&d.winner;
+  return(<Modal onClose={onClose} onBackdropClose={isEdit?(()=>{if(canSave)onSave(d);}):(()=>{})} maxWidth={440}><H>{initial?"Edit Award":"New Award"}</H><div style={{display:"grid",gap:".85rem"}}><div><Lbl>Icon</Lbl><div style={{position:"relative",display:"inline-block"}}><button onClick={()=>setIp(!ip)} style={{width:44,height:44,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",cursor:"pointer",fontSize:"22px"}}>{d.icon}</button>{ip&&<div style={{position:"absolute",top:48,left:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:10,padding:8,display:"flex",flexWrap:"wrap",gap:4,width:228,zIndex:10}}>{TROPHY_ICONS.map(ic=><button key={ic} onClick={()=>{setD({...d,icon:ic});setIp(false)}} style={{background:d.icon===ic?"rgba(232,148,58,.2)":"transparent",border:"none",borderRadius:6,cursor:"pointer",fontSize:"19px",width:34,height:34}}>{ic}</button>)}</div>}</div></div><div><Lbl>Category</Lbl><Inp value={d.category} onChange={e=>setD({...d,category:e.target.value})} placeholder="🏎️ Go-Kart Winner"/></div><div><Lbl>Winner</Lbl><select value={d.winner} onChange={e=>setD({...d,winner:e.target.value})} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:d.winner?"var(--cream)":"var(--muted)",fontSize:".88rem",width:"100%"}}><option value="">Select…</option>{attendees.map(n=><option key={n} value={n}>{n}</option>)}<option value="Everyone">Everyone 🎉</option><option value="Nobody">Nobody 💀</option></select></div><div><Lbl>Story</Lbl><Inp value={d.detail} onChange={e=>setD({...d,detail:e.target.value})} placeholder="What happened?" multiline/></div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><Btn onClick={()=>onSave(d)} disabled={!canSave}>Save</Btn><Btn onClick={onClose} variant="ghost">{isEdit?"Discard changes":"Cancel"}</Btn>{isEdit&&<span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span>}</div></div></Modal>);
 };
 
 const HighlightForm=({initial,onSave,onClose})=>{
   const [d,setD]=useState(initial||{text:"",emoji:"✨"});
-  return(<><H>{initial?"Edit":"New Highlight"}</H><div style={{display:"grid",gap:".85rem"}}><div><Lbl>Emoji</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{HIGHLIGHT_EMOJIS.map(e=><button key={e} onClick={()=>setD({...d,emoji:e})} style={{width:36,height:36,background:d.emoji===e?"rgba(232,148,58,.25)":"var(--bg3)",border:d.emoji===e?"1px solid var(--amber)":"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontSize:"18px"}}>{e}</button>)}</div></div><div><Lbl>The story</Lbl><Inp value={d.text} onChange={e=>setD({...d,text:e.target.value})} placeholder="What happened?" multiline style={{minHeight:90}}/></div><div style={{display:"flex",gap:8}}><Btn onClick={()=>onSave(d)} disabled={!d.text.trim()}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div></div></>);
+  const isEdit=!!initial;
+  const canSave=d.text.trim();
+  return(<Modal onClose={onClose} onBackdropClose={isEdit?(()=>{if(canSave)onSave(d);}):(()=>{})} maxWidth={440}><H>{initial?"Edit":"New Highlight"}</H><div style={{display:"grid",gap:".85rem"}}><div><Lbl>Emoji</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{HIGHLIGHT_EMOJIS.map(e=><button key={e} onClick={()=>setD({...d,emoji:e})} style={{width:36,height:36,background:d.emoji===e?"rgba(232,148,58,.25)":"var(--bg3)",border:d.emoji===e?"1px solid var(--amber)":"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontSize:"18px"}}>{e}</button>)}</div></div><div><Lbl>The story</Lbl><Inp value={d.text} onChange={e=>setD({...d,text:e.target.value})} placeholder="What happened?" multiline style={{minHeight:90}}/></div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><Btn onClick={()=>onSave(d)} disabled={!canSave}>Save</Btn><Btn onClick={onClose} variant="ghost">{isEdit?"Discard changes":"Cancel"}</Btn>{isEdit&&<span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span>}</div></div></Modal>);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4698,7 +4721,7 @@ const FAQTab=({evt,onUpdate,currentUser})=>{
       </div>
 
       {asking&&(
-        <Modal onClose={()=>setAsking(false)} maxWidth={480}>
+        <Modal onClose={()=>setAsking(false)} onBackdropClose={()=>{}} maxWidth={480}>
           <H>Ask a question</H>
           <div style={{display:"grid",gap:".9rem"}}>
             <div>
@@ -4839,7 +4862,7 @@ const AnnouncementModal=({onSave,onClose,existing=null,currentUser})=>{
     });
   };
   return(
-    <Modal onClose={onClose} maxWidth={560}>
+    <Modal onClose={onClose} onBackdropClose={existing?save:()=>{}} maxWidth={560}>
       <H>📢 {existing?"Edit":"New"} Announcement</H>
       <div style={{display:"grid",gap:".9rem"}}>
         <div><Lbl>Title</Lbl><Inp value={title} onChange={e=>setTitle(e.target.value)} placeholder="What's the news?" autoFocus/></div>
@@ -4853,7 +4876,7 @@ const AnnouncementModal=({onSave,onClose,existing=null,currentUser})=>{
             <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"12px 14px",fontSize:".88rem",color:"var(--cream)",lineHeight:1.65}} dangerouslySetInnerHTML={{__html:renderMd(body)}}/>
           </div>
         )}
-        <div style={{display:"flex",gap:8}}><Btn onClick={save} disabled={!title.trim()}>📢 Publiceren</Btn><Btn onClick={onClose} variant="ghost">Annuleren</Btn></div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><Btn onClick={save} disabled={!title.trim()}>📢 Publiceren</Btn><Btn onClick={onClose} variant="ghost">{existing?"Discard changes":"Annuleren"}</Btn>{existing&&<span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span>}</div>
       </div>
     </Modal>
   );
@@ -5353,7 +5376,7 @@ const EditEventModal=({evt,onSave,onClose,users=[]})=>{
     setD(next);
   };
   return(
-    <Modal onClose={onClose} maxWidth={500}><H>Edit Event</H>
+    <Modal onClose={onClose} onBackdropClose={()=>{if(!dateErr&&!videoUrlErr)onSave(d);}} maxWidth={500}><H>Edit Event</H>
     <div style={{display:"grid",gap:".9rem"}}>
       <div><Lbl>Event Name</Lbl><Inp value={d.name||""} onChange={e=>setD({...d,name:e.target.value})} placeholder="Event Name"/></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
@@ -5370,14 +5393,14 @@ const EditEventModal=({evt,onSave,onClose,users=[]})=>{
       <TrailerVideoField value={d.trailer_video_url} onChange={v=>setD({...d,trailer_video_url:v})} error={videoUrlErr}/>
       <div><Lbl>Description</Lbl><RichTextInput value={d.description||""} onChange={v=>setD({...d,description:v})} placeholder="Beschrijving… **bold**, *italic*, - lijstje" rows={3}/></div>
       <div><Lbl>Attendees</Lbl><AttendeeInput attendees={d.attendees} setAttendees={v=>setD({...d,attendees:v})} users={users}/></div>
-      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave(d)} disabled={!!dateErr||!!videoUrlErr}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
+      <div style={{display:"flex",gap:8,marginTop:4,alignItems:"center",flexWrap:"wrap"}}><Btn onClick={()=>onSave(d)} disabled={!!dateErr||!!videoUrlErr}>Save</Btn><Btn onClick={onClose} variant="ghost">Discard changes</Btn><span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span></div>
     </div></Modal>
   );
 };
 
 const NewEventModal=({onSave,onClose,users=[]})=>{
   const yr=new Date().getFullYear();
-  const [d,setD]=useState({name:`Mensday ${yr}`,type:"day",date:`${yr}-09-13`,end_date:"",start_time:"12:00",end_time:"",location:"TBD",description:"",theme:"",trailer_video_url:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false,kretjes:0});
+  const [d,setD]=useState({name:"Mens",type:"day",date:`${yr}-09-13`,end_date:"",start_time:"12:00",end_time:"",location:"TBD",description:"",theme:"",trailer_video_url:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false,kretjes:0});
   const typeTouched=useRef(false);
   const dateErr=d.end_date&&d.date&&d.end_date<d.date?"Einddatum ligt vóór de startdatum":"";
   const videoUrlErr=d.trailer_video_url&&!isSafeVideoUrl(d.trailer_video_url)?"Ongeldige video-link (moet http(s) zijn en eindigen op .mp4, .webm, .mov of .ogg)":"";
@@ -5387,7 +5410,7 @@ const NewEventModal=({onSave,onClose,users=[]})=>{
     setD(next);
   };
   return(
-    <Modal onClose={onClose} maxWidth={500}><H>New Event</H>
+    <Modal onClose={onClose} onBackdropClose={()=>{}} maxWidth={500}><H>New Event</H>
     <div style={{display:"grid",gap:".85rem"}}>
       <div><Lbl>Event Name</Lbl><Inp value={d.name||""} onChange={e=>setD({...d,name:e.target.value})} placeholder="Event Name"/></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>

@@ -13,6 +13,13 @@
 //  - Image (decode() + onload/onerror, driven manually -- jsdom never
 //    actually fetches a `src`, so nothing fires on its own)
 //  - navigator.connection (optional; only installed when `connection` is passed)
+//  - Fullscreen: Element.requestFullscreen/document.exitFullscreen/
+//    document.fullscreenElement (standard) + document.webkitExitFullscreen/
+//    document.webkitFullscreenElement (older desktop Safari/Chrome) +
+//    video.webkitExitFullscreen/video.webkitDisplayingFullscreen (iOS
+//    Safari's separate, video-element-specific API) -- jsdom implements
+//    none of it. Added for EventTrailer.jsx's fullscreen-exit bugfix (see
+//    its own module docblock's "FULLSCREEN TRAP" note).
 export function installMediaEnv({ reducedMotion = false, connection = null } = {}) {
   const originals = {};
   const registry = new Map(); // src -> mock Image instance
@@ -86,6 +93,74 @@ export function installMediaEnv({ reducedMotion = false, connection = null } = {
     });
   }
 
+  // --- Fullscreen APIs (standard + iOS Safari's video-specific webkit
+  // variant) -- jsdom implements none of this. EventTrailer.jsx's
+  // fullscreen-exit bugfix (see its own module docblock's "FULLSCREEN
+  // TRAP" note) needs both kinds, so this mock covers both:
+  //  - the standard Fullscreen API, driven realistically -- mocked
+  //    `Element.prototype.requestFullscreen` sets `document.
+  //    fullscreenElement` (and the older `webkitFullscreenElement`) to
+  //    that element, `document.exitFullscreen()`/`webkitExitFullscreen()`
+  //    clear it back to null. `setExitFullscreenMode('reject'|'throw')`
+  //    lets a test simulate a failed exit (e.g. called outside a
+  //    user-gesture context, which some browsers enforce).
+  //  - iOS's own `video.webkitExitFullscreen()` + `video.
+  //    webkitDisplayingFullscreen` -- entirely separate from the above (no
+  //    document.fullscreenElement involved at all on iOS). A real exit
+  //    flips `webkitDisplayingFullscreen` back to false and fires
+  //    `webkitendfullscreen` on the element, same as the real API;
+  //    `setVideoWebkitExitFullscreenMode('throw')` simulates a failure.
+  originals.requestFullscreen = window.Element?.prototype.requestFullscreen;
+  originals.documentExitFullscreen = document.exitFullscreen;
+  originals.documentWebkitExitFullscreen = document.webkitExitFullscreen;
+  originals.fullscreenElementDescriptor = Object.getOwnPropertyDescriptor(document, 'fullscreenElement');
+  originals.webkitFullscreenElementDescriptor = Object.getOwnPropertyDescriptor(document, 'webkitFullscreenElement');
+  originals.videoWebkitExitFullscreen = window.HTMLMediaElement?.prototype.webkitExitFullscreen;
+  originals.webkitDisplayingFullscreenDescriptor = Object.getOwnPropertyDescriptor(
+    window.HTMLMediaElement?.prototype || {},
+    'webkitDisplayingFullscreen',
+  );
+
+  let fullscreenElement = null;
+  let exitFullscreenMode = 'resolve'; // 'resolve' | 'reject' | 'throw'
+  let videoWebkitExitFullscreenMode = 'resolve'; // 'resolve' | 'throw'
+
+  Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => fullscreenElement });
+  Object.defineProperty(document, 'webkitFullscreenElement', { configurable: true, get: () => fullscreenElement });
+
+  if (window.Element) {
+    window.Element.prototype.requestFullscreen = function mockRequestFullscreen() {
+      fullscreenElement = this;
+      return Promise.resolve();
+    };
+  }
+  document.exitFullscreen = function mockExitFullscreen() {
+    if (exitFullscreenMode === 'throw') throw new Error('exitFullscreen() threw (mediaEnv mock)');
+    fullscreenElement = null;
+    return exitFullscreenMode === 'reject'
+      ? Promise.reject(new Error('exitFullscreen() rejected (mediaEnv mock)'))
+      : Promise.resolve();
+  };
+  document.webkitExitFullscreen = function mockDocumentWebkitExitFullscreen() {
+    if (exitFullscreenMode === 'throw') throw new Error('webkitExitFullscreen() threw (mediaEnv mock)');
+    fullscreenElement = null;
+  };
+
+  if (window.HTMLMediaElement) {
+    Object.defineProperty(window.HTMLMediaElement.prototype, 'webkitDisplayingFullscreen', {
+      configurable: true,
+      get() { return this._mockWebkitDisplayingFullscreen ?? false; },
+      set(v) { this._mockWebkitDisplayingFullscreen = v; },
+    });
+    window.HTMLMediaElement.prototype.webkitExitFullscreen = function mockVideoWebkitExitFullscreen() {
+      if (videoWebkitExitFullscreenMode === 'throw') {
+        throw new Error('video.webkitExitFullscreen() threw (mediaEnv mock)');
+      }
+      this._mockWebkitDisplayingFullscreen = false;
+      this.dispatchEvent(new Event('webkitendfullscreen'));
+    };
+  }
+
   // --- Image (decode / onload / onerror) ----------------------------------
   originals.Image = window.Image;
   class MockImage {
@@ -138,6 +213,38 @@ export function installMediaEnv({ reducedMotion = false, connection = null } = {
       if (originals.pausedDescriptor) {
         Object.defineProperty(window.HTMLMediaElement.prototype, 'paused', originals.pausedDescriptor);
       }
+      if (originals.videoWebkitExitFullscreen) {
+        window.HTMLMediaElement.prototype.webkitExitFullscreen = originals.videoWebkitExitFullscreen;
+      } else {
+        delete window.HTMLMediaElement.prototype.webkitExitFullscreen;
+      }
+      if (originals.webkitDisplayingFullscreenDescriptor) {
+        Object.defineProperty(
+          window.HTMLMediaElement.prototype,
+          'webkitDisplayingFullscreen',
+          originals.webkitDisplayingFullscreenDescriptor,
+        );
+      } else {
+        delete window.HTMLMediaElement.prototype.webkitDisplayingFullscreen;
+      }
+    }
+    if (window.Element) {
+      if (originals.requestFullscreen) window.Element.prototype.requestFullscreen = originals.requestFullscreen;
+      else delete window.Element.prototype.requestFullscreen;
+    }
+    if (originals.documentExitFullscreen) document.exitFullscreen = originals.documentExitFullscreen;
+    else delete document.exitFullscreen;
+    if (originals.documentWebkitExitFullscreen) document.webkitExitFullscreen = originals.documentWebkitExitFullscreen;
+    else delete document.webkitExitFullscreen;
+    if (originals.fullscreenElementDescriptor) {
+      Object.defineProperty(document, 'fullscreenElement', originals.fullscreenElementDescriptor);
+    } else {
+      delete document.fullscreenElement;
+    }
+    if (originals.webkitFullscreenElementDescriptor) {
+      Object.defineProperty(document, 'webkitFullscreenElement', originals.webkitFullscreenElementDescriptor);
+    } else {
+      delete document.webkitFullscreenElement;
     }
     window.Image = originals.Image;
     if (connInstalled) {
@@ -164,6 +271,25 @@ export function installMediaEnv({ reducedMotion = false, connection = null } = {
     rejectNextDeferredPlay(index = 0) { pendingPlays[index]?.reject(new Error('play() rejected (mediaEnv mock, deferred)')); },
     /** How many `defer`-mode play() calls are outstanding right now. */
     pendingPlayCount() { return pendingPlays.length; },
+    /**
+     * 'resolve' (default) | 'reject' | 'throw' -- controls BOTH
+     * `document.exitFullscreen()` (rejects) and `document.
+     * webkitExitFullscreen()` (throws synchronously, since the real API is
+     * void/non-Promise) when set to a failing mode.
+     */
+    setExitFullscreenMode(mode) { exitFullscreenMode = mode; },
+    /** 'resolve' (default) | 'throw' -- for iOS's `video.webkitExitFullscreen()`. */
+    setVideoWebkitExitFullscreenMode(mode) { videoWebkitExitFullscreenMode = mode; },
+    /**
+     * Direct override for `document.fullscreenElement`/
+     * `webkitFullscreenElement` -- mainly for simulating an unrelated
+     * element being fullscreened (to assert our exit logic leaves it
+     * alone). Prefer `await el.requestFullscreen()` (also mocked) for the
+     * common "our video is fullscreened" case -- more realistic, and it's
+     * what production code actually triggers via native `<video
+     * controls>`.
+     */
+    setFullscreenElement(el) { fullscreenElement = el; },
     /** Simulate a successful network load + decode for `url`. */
     resolveImage(url) {
       const img = registry.get(url);

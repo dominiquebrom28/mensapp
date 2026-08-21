@@ -409,4 +409,160 @@ describe('EventTrailer', () => {
 
     expect(screen.getByRole('button', { name: 'RSVP now →' })).toHaveClass('tr-cta')
   })
+
+  // REGRESSION (owner-reported, 2026-08-21f): native `<video controls>`'s
+  // fullscreen button fullscreens the <video> ELEMENT ITSELF, not our
+  // `.tr-root` container -- `.tr-endcard` is a sibling, so it renders
+  // invisibly behind fullscreen chrome once the video ends while still
+  // fullscreened, stranding the viewer with no reachable Watch again/RSVP.
+  // See EventTrailer.jsx's own module docblock's "FULLSCREEN TRAP" note.
+  describe('leaving native fullscreen so the end card is actually reachable', () => {
+    it('standard Fullscreen API: ending the video while it is the fullscreened element calls exitFullscreen()', async () => {
+      env = installMediaEnv()
+      render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+      await skipToPlaying()
+      const video = screen.getByLabelText('Mensdag XL trailer video')
+
+      await act(async () => { await video.requestFullscreen() })
+      expect(document.fullscreenElement).toBe(video)
+
+      fireEvent.ended(video)
+
+      expect(document.fullscreenElement).toBe(null) // exited
+      expect(screen.getByText('Kretjes so far')).toBeInTheDocument() // end card is actually reachable
+      expect(screen.getByRole('button', { name: 'RSVP now →' })).toBeInTheDocument()
+    })
+
+    it('does NOT call exitFullscreen when some OTHER, unrelated element is fullscreened -- never yanks the viewer out of it', async () => {
+      env = installMediaEnv()
+      const unrelated = document.createElement('div')
+      document.body.appendChild(unrelated)
+      render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+      await skipToPlaying()
+      env.setFullscreenElement(unrelated)
+
+      fireEvent.ended(screen.getByLabelText('Mensdag XL trailer video'))
+
+      expect(document.fullscreenElement).toBe(unrelated) // left alone
+      expect(screen.getByText('Kretjes so far')).toBeInTheDocument() // end card still shows regardless
+      unrelated.remove()
+    })
+
+    it('a rejected exitFullscreen() never blocks the end card from appearing', async () => {
+      env = installMediaEnv()
+      env.setExitFullscreenMode('reject')
+      render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+      await skipToPlaying()
+      const video = screen.getByLabelText('Mensdag XL trailer video')
+      await act(async () => { await video.requestFullscreen() })
+
+      await act(async () => {
+        fireEvent.ended(video)
+        await Promise.resolve() // flush the rejected exitFullscreen().catch()
+      })
+
+      expect(screen.getByText('Kretjes so far')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'RSVP now →' })).toBeInTheDocument()
+    })
+
+    it('a synchronously-throwing exitFullscreen() never blocks the end card from appearing', async () => {
+      env = installMediaEnv()
+      env.setExitFullscreenMode('throw')
+      render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+      await skipToPlaying()
+      const video = screen.getByLabelText('Mensdag XL trailer video')
+      await act(async () => { await video.requestFullscreen() })
+
+      expect(() => fireEvent.ended(video)).not.toThrow()
+
+      expect(screen.getByText('Kretjes so far')).toBeInTheDocument()
+    })
+
+    it('the same treatment applies on the video error path, not just ended', async () => {
+      env = installMediaEnv()
+      render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+      await skipToPlaying()
+      const video = screen.getByLabelText('Mensdag XL trailer video')
+      await act(async () => { await video.requestFullscreen() })
+
+      fireEvent.error(video)
+
+      expect(document.fullscreenElement).toBe(null)
+      expect(screen.getByRole('status')).toHaveTextContent(/couldn.t play the trailer video/i)
+      expect(screen.getByText('Kretjes so far')).toBeInTheDocument()
+    })
+
+    it('iOS Safari: ending the video while it is displaying its native fullscreen player calls video.webkitExitFullscreen()', async () => {
+      env = installMediaEnv()
+      render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+      await skipToPlaying()
+      const video = screen.getByLabelText('Mensdag XL trailer video')
+      video.webkitDisplayingFullscreen = true // no document.fullscreenElement involved on iOS at all
+
+      fireEvent.ended(video)
+
+      expect(video.webkitDisplayingFullscreen).toBe(false) // exited
+      expect(screen.getByText('Kretjes so far')).toBeInTheDocument()
+    })
+
+    it('iOS Safari: copes with fullscreen having ALREADY been left (device auto-exit on ended) without double-exiting or throwing', async () => {
+      env = installMediaEnv()
+      render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+      await skipToPlaying()
+      const video = screen.getByLabelText('Mensdag XL trailer video')
+      // iOS often auto-dismisses its native player right as the video ends,
+      // before our handler even runs -- simulate that having already
+      // happened (flag already false) by the time `ended` fires.
+      video.webkitDisplayingFullscreen = false
+
+      expect(() => fireEvent.ended(video)).not.toThrow()
+
+      expect(screen.getByText('Kretjes so far')).toBeInTheDocument()
+    })
+
+    it('iOS Safari: a throwing video.webkitExitFullscreen() never blocks the end card from appearing', async () => {
+      env = installMediaEnv()
+      env.setVideoWebkitExitFullscreenMode('throw')
+      render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+      await skipToPlaying()
+      const video = screen.getByLabelText('Mensdag XL trailer video')
+      video.webkitDisplayingFullscreen = true
+
+      expect(() => fireEvent.ended(video)).not.toThrow()
+
+      expect(screen.getByText('Kretjes so far')).toBeInTheDocument()
+    })
+
+    it('the webkitendfullscreen event (device-driven dismissal) re-focuses the end card once the exit has actually completed', async () => {
+      env = installMediaEnv()
+      render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+      await skipToPlaying()
+      const video = screen.getByLabelText('Mensdag XL trailer video')
+      video.webkitDisplayingFullscreen = true
+
+      fireEvent.ended(video) // -> phase 'ended', video.webkitExitFullscreen() fires webkitendfullscreen synchronously
+
+      const endCard = document.querySelector('.tr-endcard')
+      expect(endCard).toHaveFocus()
+    })
+
+    it('Replay works normally after ending fullscreen -- no lingering fullscreen state blocks it, and Replay itself does not try to restore fullscreen', async () => {
+      env = installMediaEnv()
+      const playSpy = vi.spyOn(window.HTMLMediaElement.prototype, 'play')
+      render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+      await skipToPlaying()
+      const video = screen.getByLabelText('Mensdag XL trailer video')
+      await act(async () => { await video.requestFullscreen() })
+      fireEvent.ended(video)
+      playSpy.mockClear()
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '↻ Watch again' }))
+      })
+
+      expect(playSpy).toHaveBeenCalledTimes(1) // playback works fine post-exit
+      expect(document.fullscreenElement).toBe(null) // Replay never re-requests fullscreen on its own
+      expect(screen.queryByRole('button', { name: '↻ Watch again' })).not.toBeInTheDocument()
+    })
+  })
 })

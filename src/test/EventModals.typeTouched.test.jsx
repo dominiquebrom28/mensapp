@@ -12,7 +12,7 @@
 // so this file does its own narrow, documented extraction rather than
 // stretching the shared utility past what it was built for).
 import React, { useState, useRef, useEffect } from 'react'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, fireEvent, screen } from '@testing-library/react'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -349,5 +349,103 @@ describe('EditEventModal / NewEventModal inline date validation (dateErr) now bl
 
     fireEvent.click(screen.getByText('Create'))
     expect(saved).toBe('UNCHANGED')
+  })
+})
+
+// Backdrop-click regression coverage (2026-08-21e fix): EditEventModal
+// always edits an existing event, so backdrop click must SAVE the current
+// draft (same as EditScheduleModal, gated the same way its own Save button
+// is: `!dateErr && !videoUrlErr`). NewEventModal only ever creates a new
+// event, so its backdrop click must be IGNORED entirely -- never falling
+// back to a silent discard, but also never persisting a half-filled event.
+// Uses the REAL, current `Modal` (extracted above via
+// extractComponentFromAppSource.js) inside `buildModal`'s real
+// EditEventModal/NewEventModal, so this exercises the actual
+// onBackdropClose wiring + Modal's real 350ms-grace-period fallback logic,
+// not a reimplementation.
+describe('EditEventModal / NewEventModal backdrop click', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function clickBackdrop(container) {
+    fireEvent.click(container.querySelector('.ov'))
+  }
+
+  const baseEvt = {
+    id: 'evt-1',
+    name: 'Original name',
+    type: 'day',
+    date: '2026-09-11',
+    end_date: '',
+    start_time: '12:00',
+    end_time: '18:00',
+    attendees: [],
+  }
+
+  it('EditEventModal: backdrop click saves the in-progress edit instead of discarding it', () => {
+    const onSave = vi.fn()
+    const onClose = vi.fn()
+    const { container } = render(<EditEventModal evt={baseEvt} onSave={onSave} onClose={onClose} users={[]} />)
+
+    fireEvent.change(screen.getByPlaceholderText('Event Name'), { target: { value: 'Renamed event' } })
+
+    vi.advanceTimersByTime(350)
+    clickBackdrop(container)
+
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave.mock.calls[0][0]).toMatchObject({ name: 'Renamed event' })
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('EditEventModal: backdrop click does nothing while the date range is invalid (same gate as the Save button)', () => {
+    const onSave = vi.fn()
+    const onClose = vi.fn()
+    const { container } = render(<EditEventModal evt={baseEvt} onSave={onSave} onClose={onClose} users={[]} />)
+    const { endDate } = getDateInputs(container)
+    fireEvent.change(endDate, { target: { value: '2026-09-01' } }) // before start -> invalid
+
+    vi.advanceTimersByTime(350)
+    clickBackdrop(container)
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('EditEventModal: the explicit Discard button still discards (calls onClose, not onSave)', () => {
+    const onSave = vi.fn()
+    const onClose = vi.fn()
+    render(<EditEventModal evt={baseEvt} onSave={onSave} onClose={onClose} users={[]} />)
+
+    fireEvent.click(screen.getByText('Discard changes'))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('NewEventModal: backdrop click is ignored entirely -- no onSave, no onClose, even with a fully valid draft', () => {
+    const onSave = vi.fn()
+    const onClose = vi.fn()
+    const { container } = render(<NewEventModal onSave={onSave} onClose={onClose} users={[]} />)
+
+    vi.advanceTimersByTime(350)
+    clickBackdrop(container)
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('NewEventModal: the explicit Cancel button still discards (calls onClose, not onSave)', () => {
+    const onSave = vi.fn()
+    const onClose = vi.fn()
+    render(<NewEventModal onSave={onSave} onClose={onClose} users={[]} />)
+
+    fireEvent.click(screen.getByText('Cancel'))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
   })
 })

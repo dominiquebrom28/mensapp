@@ -71,8 +71,6 @@ export default function TrailerStyles() {
       .tr-fade{animation:tr-fade .3s ease both}
       @keyframes tr-fade{from{opacity:0}to{opacity:1}}
 
-      .tr-wordmark{font-family:var(--font-h);font-style:italic;font-weight:900;text-transform:uppercase;color:var(--amber2);line-height:.92;letter-spacing:-.02em;text-shadow:0 2px 40px rgba(232,148,58,.35),0 2px 30px rgba(0,0,0,.6);font-size:clamp(3.2rem,14vw,7rem)}
-      .tr-wordmark-settled{font-size:clamp(2rem,8vw,3.6rem)}
       .tr-title{font-family:var(--font-h);font-weight:900;text-transform:uppercase;line-height:1.03;color:#fff;text-shadow:0 2px 30px rgba(0,0,0,.6);font-size:clamp(2rem,8vw,4.2rem)}
       .tr-kicker{font-family:var(--font-b);font-weight:700;font-size:.76rem;letter-spacing:.24em;text-transform:uppercase;color:var(--amber)}
       .tr-note{font-family:var(--font-b);font-weight:400;font-style:italic;font-size:.92rem;color:rgba(255,255,255,.72);line-height:1.6}
@@ -80,15 +78,17 @@ export default function TrailerStyles() {
 
       /* ── Kretjes callout ──────────────────────────────────────────────── */
       .tr-kretjes{display:flex;flex-direction:column;align-items:center;gap:.5rem;max-width:440px}
-      /* A real headline (2026-08-21c, Dom: "too small... it's a headline,
-         not a caption") -- same italic Playfair/amber language as the
-         wordmark, deliberately close to .tr-wordmark-settled's scale so
-         it reads as this screen's second hero moment, not a label sitting
-         above the number. NOTE: no backticks in this comment block -- this
-         whole style sheet is itself one JS template literal (see the
-         module docblock's SECURITY note); a literal backtick here would
-         close it early and start interpreting the rest as JS. */
-      .tr-kretjes-title{font-family:var(--font-h);font-weight:900;font-style:italic;text-transform:uppercase;line-height:.98;letter-spacing:-.01em;color:var(--amber2);text-shadow:0 2px 40px rgba(232,148,58,.4),0 2px 30px rgba(0,0,0,.6);font-size:clamp(2.2rem,9vw,4rem)}
+      /* Sized back down (2026-08-21d, Dom: the 2026-08-21c "too small... it's
+         a headline, not a caption" bump overshot -- it was competing with
+         the wordmark for hero billing). Now a clear heading that sits above
+         .tr-kretjes-count without rivalling it: bigger than a plain caption,
+         well under the count's own display scale. Still the same italic
+         Playfair/amber language for continuity. NOTE: no backticks in this
+         comment block -- this whole style sheet is itself one JS template
+         literal (see the module docblock's SECURITY note); a literal
+         backtick here would close it early and start interpreting the rest
+         as JS. */
+      .tr-kretjes-title{font-family:var(--font-h);font-weight:900;font-style:italic;text-transform:uppercase;line-height:.98;letter-spacing:-.01em;color:var(--amber2);text-shadow:0 2px 40px rgba(232,148,58,.4),0 2px 30px rgba(0,0,0,.6);font-size:clamp(1.4rem,5vw,2.1rem)}
       .tr-kretjes-count{font-family:var(--font-h);font-weight:900;font-size:clamp(3.4rem,13vw,5.6rem);line-height:1;color:var(--amber2);text-shadow:0 2px 30px rgba(232,148,58,.35)}
       .tr-kretjes-copy{font-size:.92rem;line-height:1.65;color:rgba(255,255,255,.82)}
 

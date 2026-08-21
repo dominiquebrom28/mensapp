@@ -55,12 +55,87 @@
 // App.jsx-adapter's redacted/formatted view model) and `onClose`. No
 // Supabase, no navigation callback, no currentUser -- see BeatOutro.jsx's
 // own docblock for the one place that constrains the RSVP CTA's copy.
+//
+// FULLSCREEN TRAP (2026-08-21f, owner-reported): there is no fullscreen
+// handling of our own anywhere in this file -- the only fullscreen comes
+// from native `<video controls>`'s own fullscreen button, which puts THE
+// <video> ELEMENT ITSELF into fullscreen, not our `.tr-root` container.
+// While an element is fullscreened, the browser composites only that
+// element and its descendants; `.tr-endcard` is a *sibling* of `<video>` in
+// the DOM (see the render below), so once the video ends while still
+// fullscreened, the end card renders into a subtree nobody can see -- the
+// viewer is stuck on the last frame or native player chrome, Watch again/
+// RSVP unreachable. Fix: `exitVideoFullscreenIfActive` leaves native
+// fullscreen the instant the video ends OR errors, before the end card
+// needs to be visible. `.tr-root` is already `position:fixed;inset:0`, so
+// exiting still reads as fullscreen to the viewer -- no jarring shrink.
+// Two unrelated APIs, easily confused by name:
+//  - Standard: `document.exitFullscreen()`, only when `document.
+//    fullscreenElement` (or the older `webkitFullscreenElement`) is
+//    actually OUR video -- never yanks the viewer out of some unrelated
+//    fullscreen element.
+//  - iOS Safari does NOT use the Fullscreen API for video at all -- it's
+//    the native player, via a *video-element* method,
+//    `video.webkitExitFullscreen()`, guarded on `video.
+//    webkitDisplayingFullscreen`. iOS also often auto-exits fullscreen on
+//    its own the instant the video ends, firing `webkitendfullscreen` --
+//    our guard means calling `webkitExitFullscreen()` again after that is
+//    a safe no-op, never a double-exit or a throw.
+// Every one of these APIs can be absent, throw synchronously, or return a
+// rejecting promise -- `exitVideoFullscreenIfActive` wraps all of it so a
+// failed exit can never block the end card from appearing (degrading to
+// "end card shows, maybe still fullscreen" is fine; "nothing happens at
+// all" -- the original bug -- is not). Replay is deliberately NOT touched
+// by any of this: it doesn't try to restore fullscreen, the viewer can hit
+// the native fullscreen button again if they want it back.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { markTrailerSeen } from './seen.js';
 import { ROSTER_MAX_NAMED, COUNTDOWN_SECONDS } from './constants.js';
 import TrailerStyles from './TrailerStyles.jsx';
 import BeatRoster, { EmptyRoster } from './beats/BeatRoster.jsx';
 import BeatOutro from './beats/BeatOutro.jsx';
+
+// See the module docblock's "FULLSCREEN TRAP" note. Module-scope (not a
+// hook) -- it's a plain, stateless DOM-API call, nothing here needs to be
+// React-aware.
+function exitVideoFullscreenIfActive(video) {
+  if (!video) return;
+  // iOS Safari's native fullscreen player -- a video-element method,
+  // distinct from (and easily confused with) document.webkitExitFullscreen
+  // below. Guarded so this is a no-op if iOS has already auto-exited on its
+  // own by the time we get here (it often does, right as the video ends).
+  try {
+    if (video.webkitDisplayingFullscreen && typeof video.webkitExitFullscreen === 'function') {
+      video.webkitExitFullscreen();
+    }
+  } catch {
+    // Defensive -- a failed iOS exit must never block the end card.
+  }
+  // Standard Fullscreen API (+ older desktop Safari/Chrome's document-level
+  // webkit-prefixed equivalent). Only acts if OUR video is the thing
+  // actually fullscreened right now -- never yanks the viewer out of some
+  // unrelated fullscreen element.
+  try {
+    const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsElement !== video) return;
+    const exit = document.exitFullscreen
+      ? () => document.exitFullscreen()
+      : document.webkitExitFullscreen
+        ? () => document.webkitExitFullscreen()
+        : null;
+    const result = exit?.();
+    if (result && typeof result.catch === 'function') {
+      result.catch(() => {
+        // Defensive -- a rejected exitFullscreen() (e.g. called outside a
+        // user-gesture context, which some browsers enforce) must never
+        // block the end card either.
+      });
+    }
+  } catch {
+    // Defensive, same reasoning -- some browsers throw synchronously
+    // instead of rejecting.
+  }
+}
 
 function usePrefersReducedMotion() {
   const getMatch = () => (typeof window !== 'undefined' && typeof window.matchMedia === 'function'
@@ -144,14 +219,21 @@ export default function EventTrailer({ input, onClose }) {
   // unrelated field (kretjes, an RSVP) changed elsewhere on the page.
   const eventId = input?.eventId;
   const handleEnded = useCallback(() => {
+    // See the module docblock's "FULLSCREEN TRAP" note -- must happen
+    // before/alongside the end card becoming the active phase, or it
+    // renders invisibly behind native fullscreen chrome.
+    exitVideoFullscreenIfActive(videoRef.current);
     if (eventId) markTrailerSeen(eventId);
     setPhase('ended');
   }, [eventId]);
 
   // Broken/unreachable video: surface a clear message and still show the
   // end card rather than leaving the viewer on a dead black frame with
-  // controls that do nothing.
+  // controls that do nothing. Same fullscreen trap applies here -- a video
+  // that errors out mid-playback while fullscreened strands the viewer
+  // identically to the plain `ended` case.
   const handleError = useCallback(() => {
+    exitVideoFullscreenIfActive(videoRef.current);
     setVideoError(true);
     setPhase('ended');
   }, []);
@@ -256,6 +338,24 @@ export default function EventTrailer({ input, onClose }) {
       else videoRef.current?.focus();
     }
   }, [phase, needsManualPlay]);
+
+  // iOS's native fullscreen player can dismiss itself asynchronously --
+  // either from our own `exitVideoFullscreenIfActive` call in handleEnded/
+  // handleError, or the OS's own auto-exit right as the video ends (see the
+  // module docblock's "FULLSCREEN TRAP" note). By the time it actually
+  // finishes, the focus effect above may already have run and tried to
+  // focus the end card while it was still hidden behind native fullscreen
+  // chrome. Re-run that once the exit has genuinely completed, regardless
+  // of which of the two triggered it.
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return undefined;
+    const onWebkitEndFullscreen = () => {
+      if (phase === 'ended') endCardRef.current?.focus();
+    };
+    el.addEventListener('webkitendfullscreen', onWebkitEndFullscreen);
+    return () => el.removeEventListener('webkitendfullscreen', onWebkitEndFullscreen);
+  }, [phase]);
 
   const going = (input?.going || []).slice(0, ROSTER_MAX_NAMED);
   const goingCount = input?.goingCount ?? 0;
