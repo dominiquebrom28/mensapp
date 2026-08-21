@@ -62,7 +62,7 @@ function NewTournamentModal({ onClose, onCreate, events, fixedEventId }) {
   );
 }
 
-export default function MensGamesShell({ scope = 'page', evt, events = [], teamSets = [], currentUser, canManage = false }) {
+export default function MensGamesShell({ scope = 'page', evt, events = [], teamSets = [], currentUser, canManage = false, onUpdateEvent, onTeamSetsChanged }) {
   const [tournaments, setTournaments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -116,6 +116,8 @@ export default function MensGamesShell({ scope = 'page', evt, events = [], teamS
           onBack={() => setSelectedId(null)}
           onDeleted={() => { setTournaments((prev) => prev.filter((t) => t.id !== selected.id)); setSelectedId(null); }}
           onLocalChange={(next) => setTournaments((prev) => prev.map((t) => (t.id === next.id ? next : t)))}
+          onUpdateEvent={onUpdateEvent}
+          onTeamSetsChanged={onTeamSetsChanged}
         />
       ) : (
         <div style={{ display: 'grid', gap: '1rem' }}>

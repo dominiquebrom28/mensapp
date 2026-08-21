@@ -9,14 +9,15 @@
 // immediately backs out never loses that specific write to a
 // still-pending, later-superseded debounce timer.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Btn, Card, Divider, ErrorState, H, Inp, Lbl, Modal, Tag } from './ui/Kit.jsx';
+import { Btn, Card, Divider, ErrorState, H, Inp, Lbl, Modal, Switch, Tag } from './ui/Kit.jsx';
 import EntrantPicker from './EntrantPicker.jsx';
 import RoundCard from './RoundCard.jsx';
 import RoundEditor from './RoundEditor.jsx';
 import StandingsTable from './StandingsTable.jsx';
 import ScoreboardPanel from './ScoreboardPanel.jsx';
 import { blankRound } from './model.js';
-import { lockRound, unlockRound } from './standings.js';
+import { computeStandings, lockRound, unlockRound } from './standings.js';
+import { finishTournament } from './finishTournament.js';
 import { listScoringTypes } from './scoring/index.js';
 import { deleteTournament, saveTournament, subscribeTournament } from './api.js';
 
@@ -33,11 +34,14 @@ function moveItem(arr, index, dir) {
   return next;
 }
 
-export default function TournamentEditor({ tournament: initialTournament, events, teamSets, canManage, onBack, onDeleted, onLocalChange }) {
+export default function TournamentEditor({ tournament: initialTournament, events, teamSets, canManage, onBack, onDeleted, onLocalChange, onUpdateEvent, onTeamSetsChanged }) {
   const [tournament, setTournamentState] = useState(initialTournament);
   const [expandedRoundId, setExpandedRoundId] = useState(null);
   const [showNewRound, setShowNewRound] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
+  const [showFinish, setShowFinish] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const [finishError, setFinishError] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [saving, setSaving] = useState(false);
   const pendingRef = useRef(null);
@@ -110,6 +114,29 @@ export default function TournamentEditor({ tournament: initialTournament, events
   const entrantsById = useMemo(() => Object.fromEntries((tournament.entrants || []).map((e) => [e.id, e])), [tournament.entrants]);
 
   const setStatus = (status) => update((t) => ({ ...t, status }), { immediate: true });
+
+  // WP-J: finishing a tournament writes medal winners onto the linked event
+  // (reusing `events.winners` -- WinnersTab/HallOfFame pick them up with no
+  // changes to either) and a TeamAward onto each medalled team's
+  // originating team set (§3.1). A tournament with no linked event still
+  // awards teams -- `finishTournament` treats `event` as optional. Archiving
+  // the awarded team set(s) is the modal's own explicit opt-in, default off
+  // (§13 Q5) -- never automatic.
+  const finalStandings = useMemo(() => computeStandings(tournament), [tournament]);
+  const medalCount = useMemo(() => finalStandings.filter((s) => Number.isFinite(s.rank) && s.rank >= 1 && s.rank <= 3).length, [finalStandings]);
+  const doFinish = async (archiveWinningSets) => {
+    setFinishing(true);
+    setFinishError(false);
+    const result = await finishTournament({ tournament, standings: finalStandings, event: linkedEvent, onUpdateEvent, teamSets, archiveWinningSets });
+    setFinishing(false);
+    setShowFinish(false);
+    if (!result.ok) { setFinishError(true); return; }
+    if (result.updatedTeamSets.length && typeof onTeamSetsChanged === 'function') {
+      onTeamSetsChanged((prev) => (Array.isArray(prev) ? prev : []).map((ts) => result.updatedTeamSets.find((u) => u.id === ts.id) || ts));
+    }
+    update(() => result.tournament, { immediate: true });
+  };
+
   const doDelete = async () => {
     if (!window.confirm(`"${tournament.name}" definitief verwijderen? Dit kan niet ongedaan gemaakt worden.`)) return;
     clearTimeout(timerRef.current);
@@ -159,13 +186,14 @@ export default function TournamentEditor({ tournament: initialTournament, events
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Btn variant="subtle" onClick={() => setShowScoreboard(true)}>📺 Scorebord</Btn>
           {canManage && tournament.status === 'draft' && <Btn onClick={() => setStatus('live')}>▶ Start toernooi</Btn>}
-          {canManage && tournament.status === 'live' && <Btn variant="success" onClick={() => { if (window.confirm('Toernooi afronden? Rondes blijven bewerkbaar, maar het toernooi telt als afgesloten.')) setStatus('finished'); }}>🏁 Afronden</Btn>}
+          {canManage && tournament.status === 'live' && <Btn variant="success" onClick={() => setShowFinish(true)}>🏁 Afronden</Btn>}
           {canManage && tournament.status === 'finished' && <Btn variant="ghost" onClick={() => setStatus('live')}>↺ Heropenen</Btn>}
           {canManage && <Btn variant="danger" onClick={doDelete}>Verwijder</Btn>}
         </div>
       </div>
 
       {saveError && <ErrorState message="Opslaan is mislukt — je laatste wijziging staat mogelijk niet online. Probeer het opnieuw." onRetry={() => persist(tournament)} />}
+      {finishError && <ErrorState message="Afronden is niet volledig gelukt — sommige awards zijn mogelijk niet opgeslagen. Probeer het opnieuw." onRetry={() => setShowFinish(true)} />}
 
       <Card>
         <H size="1.05rem">🧑‍🤝‍🧑 Deelnemers</H>
@@ -209,7 +237,40 @@ export default function TournamentEditor({ tournament: initialTournament, events
       )}
 
       {showScoreboard && <ScoreboardPanel tournament={tournament} entrantsById={entrantsById} onClose={() => setShowScoreboard(false)} />}
+
+      {showFinish && (
+        <FinishTournamentModal
+          tournamentName={tournament.name}
+          medalCount={medalCount}
+          linkedEventName={linkedEvent?.name || null}
+          busy={finishing}
+          onClose={() => setShowFinish(false)}
+          onConfirm={doFinish}
+        />
+      )}
     </div>
+  );
+}
+
+function FinishTournamentModal({ tournamentName, medalCount, linkedEventName, busy, onClose, onConfirm }) {
+  const [archive, setArchive] = useState(false);
+  const headingId = 'mg-finish-title';
+  return (
+    <Modal onClose={busy ? () => {} : onClose} labelledBy={headingId} maxWidth={440}>
+      <H id={headingId} size="1.15rem">🏁 &ldquo;{tournamentName}&rdquo; afronden?</H>
+      <div style={{ display: 'grid', gap: '.9rem' }}>
+        <div style={{ fontSize: '.86rem', color: 'var(--cream)', lineHeight: 1.5 }}>
+          {medalCount > 0
+            ? <>Dit kroont {medalCount} deelnemer{medalCount === 1 ? '' : 's'} met een medaille (op basis van de vergrendelde rondes). Elke medaillewinnaar krijgt een award{linkedEventName ? <> en verschijnt bij de Winners van <strong>{linkedEventName}</strong></> : ''}.</>
+            : <>Er zijn nog geen vergrendelde rondes met een medaillewinnaar — er worden geen awards toegekend, maar het toernooi wordt wel afgesloten.</>}
+        </div>
+        <Switch id="mg-finish-archive" checked={archive} onChange={setArchive} label="Archiveer de teamset(s) van de medaillewinnaars" />
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <Btn variant="ghost" onClick={onClose} disabled={busy}>Annuleren</Btn>
+          <Btn variant="success" onClick={() => onConfirm(archive)} disabled={busy}>{busy ? 'Bezig…' : '🏁 Afronden'}</Btn>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

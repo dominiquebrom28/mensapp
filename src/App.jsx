@@ -822,7 +822,7 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose,saraJayUnlocked,on
 // ─────────────────────────────────────────────────────────────────────────────
 // HALL OF FAME
 // ─────────────────────────────────────────────────────────────────────────────
-const HallOfFame = ({events,users=[]}) => {
+const HallOfFame = ({events,users=[],teamSets=[]}) => {
   const allAttendees = {};
   const allWins = {};
   let totalEvents = events.length;
@@ -856,6 +856,55 @@ const HallOfFame = ({events,users=[]}) => {
     });
   });
   const quizBoard = Object.values(quizScores).sort((a,b)=>b.total-a.total);
+
+  // #16 "other ideas" -- three genuinely fun categories built from data the
+  // app already collects but never surfaces as a leaderboard: who's the
+  // designated photographer, who's currently on a roll showing up, and the
+  // running bar tally everyone already jokes about at KretjesTab. Picked
+  // over e.g. poll participation or FAQ answers because these three read as
+  // mates' bragging rights, not an analytics dashboard. All three walk
+  // `events`/`teamSets` defensively -- both are hand-editable JSONB and
+  // must not throw on a malformed row.
+
+  // Lens Legend -- most photos uploaded across every event (photo.uploader,
+  // written by PhotosTab's upload flow, never ranked anywhere today).
+  const photoCounts = {};
+  events.forEach(evt=>{
+    (Array.isArray(evt.photos)?evt.photos:[]).forEach(p=>{
+      if(!p||typeof p.uploader!=="string"||!p.uploader)return;
+      photoCounts[p.uploader]=(photoCounts[p.uploader]||0)+1;
+    });
+  });
+  const photographers=Object.entries(photoCounts).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
+
+  // All-time kretjes tally -- KretjesTab's per-event counter, summed. Not a
+  // per-person leaderboard (kretjes aren't attributed to anyone individually)
+  // -- a group bragging-rights number instead, in the same "mates at a bar"
+  // register the rest of the app already uses for this feature.
+  const totalKretjes=events.reduce((s,e)=>s+(Number.isFinite(e?.kretjes)?e.kretjes:0),0);
+
+  // On a roll -- current *consecutive* attendance streak, walked backwards
+  // from the most recent event. Distinct from "Perfect Attendance" above
+  // (all-time, every event ever): this rewards showing up lately, so
+  // someone who joined the group last year and hasn't missed one since gets
+  // bragging rights too, right next to the old guard.
+  const streakNames=new Set();
+  events.forEach(evt=>(Array.isArray(evt.attendees)?evt.attendees:[]).forEach(a=>{if(a&&typeof a.name==="string"&&a.name)streakNames.add(a.name);}));
+  const streaks=[...streakNames].map(name=>{
+    let streak=0;
+    for(let i=events.length-1;i>=0;i--){
+      const att=(Array.isArray(events[i]?.attendees)?events[i].attendees:[]).find(a=>a&&a.name===name);
+      if(att&&["went","going"].includes(att.status))streak++;
+      else break;
+    }
+    return{name,streak};
+  }).filter(s=>s.streak>=2).sort((a,b)=>b.streak-a.streak);
+
+  // Team trophy cabinet (#16 §6.4) -- team sets carrying at least one
+  // TeamAward (written by `finishTournament`, WP-J -- or hand-added later
+  // via the library). `awards`/`teams` are both hand-editable JSONB,
+  // guarded the same way as everything else here.
+  const decoratedSets=(Array.isArray(teamSets)?teamSets:[]).filter(ts=>ts&&Array.isArray(ts.awards)&&ts.awards.filter(a=>a&&typeof a==="object").length>0);
 
   const podiumColors = ["var(--gold)","var(--muted)","#cd7f32"];
   const podiumEmojis = ["🥇","🥈","🥉"];
@@ -937,6 +986,23 @@ const HallOfFame = ({events,users=[]}) => {
         </div>
       </div>
 
+      {/* On a roll -- current consecutive attendance streak (#16 "other ideas") */}
+      {streaks.length>0&&(
+        <div className="fu2">
+          <H>🔥 On a Roll</H>
+          <div style={{display:"grid",gap:".6rem"}}>
+            {streaks.slice(0,5).map((s,i)=>(
+              <div key={s.name} style={{display:"flex",alignItems:"center",gap:"1rem",background:"var(--bg2)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",border:"1px solid var(--border)"}}>
+                <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:i<3?podiumColors[i]:"var(--muted2)",minWidth:28,textAlign:"center"}}>{i+1}</div>
+                <Avatar name={s.name} size={32} {...getUA(s.name,users)}/>
+                <div style={{flex:1}}><div style={{fontWeight:600,fontSize:".9rem"}}>{getDisplayName(s.name,users)}</div><div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>hasn&apos;t missed one in a while</div></div>
+                <div style={{background:"rgba(224,85,85,.15)",border:"1px solid rgba(224,85,85,.3)",borderRadius:8,padding:"4px 12px",fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--red)"}}>🔥 {s.streak}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Awards leaderboard */}
       {winners.length>0&&(
         <div className="fu3">
@@ -966,6 +1032,59 @@ const HallOfFame = ({events,users=[]}) => {
         </div>
       )}
 
+      {/* Team trophy cabinet (#16 §6.4) -- team sets decorated by a
+          finished tournament (WP-J) or a hand-added award. */}
+      {decoratedSets.length>0&&(
+        <div className="fu3">
+          <H>🏆 Team Trophy Cabinet</H>
+          <div style={{display:"grid",gap:"1rem"}}>
+            {decoratedSets.map(ts=>{
+              const teams=Array.isArray(ts.teams)?ts.teams:[];
+              const awards=ts.awards.filter(a=>a&&typeof a==="object");
+              const byTeam={};
+              awards.forEach(a=>{
+                const key=typeof a.teamId==="string"&&a.teamId?a.teamId:"__onbekend__";
+                if(!byTeam[key])byTeam[key]=[];
+                byTeam[key].push(a);
+              });
+              const rows=Object.entries(byTeam).map(([teamId,list])=>({teamId,team:teams.find(t=>t&&t.id===teamId)||null,list}));
+              return(
+                <Card key={ts.id}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:".9rem"}}>
+                    <span style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--amber2)"}}>{ts.name||"Naamloze teams"}</span>
+                    {ts.category&&<span style={{background:"rgba(232,148,58,.15)",border:"1px solid rgba(232,148,58,.3)",borderRadius:20,padding:"2px 9px",fontSize:".7rem",fontFamily:"var(--font-b)",fontWeight:600,color:"var(--amber2)",letterSpacing:".04em"}}>{ts.category}</span>}
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:".85rem"}}>
+                    {rows.map(({teamId,team,list})=>(
+                      <div key={teamId} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".85rem"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:".5rem"}}>
+                          <span style={{fontSize:"1.2rem",lineHeight:1}}>{team?.avatar||"🎯"}</span>
+                          <span style={{fontFamily:"var(--font-h)",fontSize:".9rem",color:"var(--amber2)"}}>{team?.name||"Onbekend team"}</span>
+                        </div>
+                        {Array.isArray(team?.members)&&team.members.length>0&&(
+                          <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:".6rem"}}>
+                            {team.members.filter(m=>typeof m==="string"&&m).map((m,mi)=>(
+                              <Avatar key={mi} name={m} size={22} {...getUA(m,users)}/>
+                            ))}
+                          </div>
+                        )}
+                        <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                          {list.map((a,ai)=>(
+                            <div key={a.id||ai} style={{fontSize:".76rem",color:"var(--cream)",background:"var(--gold)14",border:"1px solid var(--gold)44",borderRadius:6,padding:"3px 8px"}}>
+                              {a.label||"🏆 Award"}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Quiz leaderboard */}
       {quizBoard.length>0&&(
         <div className="fu3">
@@ -981,6 +1100,33 @@ const HallOfFame = ({events,users=[]}) => {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Lens Legend -- most photos uploaded (#16 "other ideas") */}
+      {photographers.length>0&&(
+        <div className="fu3">
+          <H>📸 Lens Legend</H>
+          <div style={{display:"grid",gap:".6rem"}}>
+            {photographers.slice(0,10).map((p,i)=>(
+              <div key={p.name} style={{display:"flex",alignItems:"center",gap:"1rem",background:"var(--bg2)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",border:"1px solid var(--border)"}}>
+                <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:i<3?podiumColors[i]:"var(--muted2)",minWidth:28,textAlign:"center"}}>{i+1}</div>
+                <Avatar name={p.name} size={32} {...getUA(p.name,users)}/>
+                <div style={{flex:1}}><div style={{fontWeight:600,fontSize:".9rem"}}>{getDisplayName(p.name,users)}</div><div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{p.count} photo{p.count!==1?"s":""} uploaded</div></div>
+                <div style={{background:"rgba(224,128,80,.15)",border:"1px solid rgba(224,128,80,.3)",borderRadius:8,padding:"4px 12px",fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"#e08050"}}>{p.count}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* All-time kretjes tally -- a group bragging-rights number, not a
+          per-person leaderboard (#16 "other ideas") */}
+      {totalKretjes>0&&(
+        <Card className="fu3" style={{textAlign:"center",padding:"1.8rem",background:"linear-gradient(135deg,#1f1609,#2e1e0a)",borderColor:"var(--border2)"}}>
+          <div style={{fontSize:"2rem",marginBottom:".3rem"}}>🍺</div>
+          <div style={{fontFamily:"var(--font-h)",fontSize:"2.2rem",color:"var(--amber2)"}}>{totalKretjes}</div>
+          <div style={{fontSize:".82rem",color:"var(--muted)",marginTop:4}}>kretjes and counting, across every Mensday</div>
+        </Card>
       )}
 
       {events.length===0&&<Card style={{textAlign:"center",padding:"4rem",color:"var(--muted)"}}>No events yet — the Hall of Fame will fill up as you play!</Card>}
@@ -1691,7 +1837,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
         {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast}/>}
         {tab==="FAQ"                  &&<FAQTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Kretjes 🍺"           &&<KretjesTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
-        {tab==="Mens-Games 🏆"        &&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesTab evt={evt} events={events} teamSets={teamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)}/></Suspense>}
+        {tab==="Mens-Games 🏆"        &&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesTab evt={evt} events={events} teamSets={teamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={onUpdate} onTeamSetsChanged={onTeamSetsChanged}/></Suspense>}
       </div>
 
       {/* Live presentation banner — fixed at top of screen */}
@@ -7039,14 +7185,14 @@ export default function App(){
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
         <AnnouncementBanner announcements={announcements} currentUser={currentUser} onArchive={archiveAnnouncement} onHardDelete={hardDeleteAnnouncement} onReactivate={reactivateAnnouncement} onEdit={ann=>{setEditingAnn(ann);setShowAnnounce(true);}} onNew={()=>{setEditingAnn(null);setShowAnnounce(true);}}/>
         {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users} onTeams={openTeams} onTimer={openTimer} onMensGames={openMensGames} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>}
-        {pageView==="hof"&&<HallOfFame events={events} users={users}/>}
+        {pageView==="hof"&&<HallOfFame events={events} users={users} teamSets={teamSets}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
         {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)} teamSets={teamSets} onTeamSetsChanged={setTeamSets}/>}
         {pageView==="updates"&&<UpdatesPage notifications={notifications.filter(n=>!deletedNotifIds.has(n.id)&&(!clearedBefore||n.timestamp>clearedBefore))} notifLastRead={notifLastRead} currentUser={currentUser} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={openEvent} onClearSelf={()=>{setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);}} onDeleteSelf={id=>{setNotifications(prev=>{const next=prev.filter(n=>n.id!==id);if(currentUser)localStorage.setItem(`md-notifs-${currentUser.id}`,JSON.stringify(next));return next;});}} onClearUpdates={async()=>{const cb=new Date().toISOString();const allIds=[...new Set([...deletedNotifIds,...notifications.map(n=>n.id)])];const newSet=new Set(allIds);setDeletedNotifIds(newSet);setClearedBefore(cb);setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);const body=JSON.stringify({ids:allIds,cleared_before:cb});await supabase.from("announcements").upsert({id:"__deleted_notifs__",title:"__deleted_notifs__",body,created_by:"system",created_at:new Date().toISOString(),active:false});supabase.channel("notif-ctrl").send({type:"broadcast",event:"clear-notifs",payload:{ids:allIds,cleared_before:cb}});}} onDeleteNotif={deleteNotifForAll}/>}
         {pageView==="teams"&&<TeamCreatorPage users={users} events={events} currentUser={currentUser} teamSets={teamSets} onTeamSetsChanged={setTeamSets}/>}
         {pageView==="timer"&&<TimerPage/>}
-        {pageView==="mensgames"&&<Suspense fallback={<div style={{padding:"3rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesPage events={events} teamSets={teamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)}/></Suspense>}
+        {pageView==="mensgames"&&<Suspense fallback={<div style={{padding:"3rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesPage events={events} teamSets={teamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={updateEvent} onTeamSetsChanged={setTeamSets}/></Suspense>}
         {pageView==="sarajay"&&<SaraJayOrJAI/>}
       </main>
       <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted2)",fontSize:".72rem",borderTop:"1px solid var(--border)",letterSpacing:".1em"}}>🍺 MensApp · Built for the lads</div>
