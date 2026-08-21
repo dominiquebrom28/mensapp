@@ -443,21 +443,86 @@ const selectTeaserEvent=(events=[])=>{
 // Sensible fallbacks for a blank title/text/button label: an
 // active-but-unconfigured teaser must never render an empty dialog or a
 // button with no label.
+//
+// FULL-SCREEN TAKEOVER (owner direction change, 2026-08-21b): "i want the
+// modal... to be bigger. maybe even screen-covering. so they HAVE to
+// interact with it without being able to see things behind it". Used to
+// render through the shared `Modal` -- a centred card over a semi-
+// transparent (see-through) backdrop. Now its own fullscreen shell, same
+// `position:fixed;inset:0` fullscreen-shell pattern EventTrailer.jsx and
+// PresentationMode already use (see EventTrailer's own docblock for the
+// pattern's rationale), with three differences from a plain copy-paste:
+//  1. OPAQUE background, not a dim -- nothing behind may be visible at all,
+//     that's the explicit ask (EventTrailer/PresentationMode's own
+//     backgrounds are opaque too, so no new pattern here, just confirming
+//     it's deliberate and not an oversight if this ever gets "simplified").
+//  2. No backdrop at all, therefore no backdrop-click-to-dismiss -- the
+//     small-modal version's `onBackdropClose={()=>{}}` no-op doesn't even
+//     have an equivalent here; only Escape or the explicit Skip button can
+//     close this, full stop (unchanged behaviour, just nothing left that
+//     could regress it).
+//  3. Escape is wired to `onSkip` (the SAME handler the Skip button uses),
+//     not a bare close -- owner-confirmed: this is a real, persisted
+//     dismissal, not a temporary one that would just show the teaser again
+//     next entry. (The admin preview affordance's `onSkip` is itself wired
+//     to just closing the preview, not `dismissTeaser` -- see
+//     EditEventModal/NewEventModal above -- so Escape there is correctly
+//     "free", same as its Skip button already was.)
+// Layout: `.teaser-scroll` is the only element that scrolls -- body-scroll
+// lock (identical technique to EventTrailer's) stops the page underneath
+// from scrolling instead. `.teaser-actions` is a flex sibling OUTSIDE the
+// scroll container, not inside it, so the CTA row stays pinned/reachable at
+// the bottom of the viewport no matter how long `text` runs -- a teaser
+// whose call to action is hidden below a wall of copy would defeat itself.
+// Focus: lands on the dialog itself on mount (same idea as EventTrailer's
+// `endCardRef` -- a non-interactive, tabIndex={-1} focus target so a
+// screen reader announces the dialog's accessible name immediately,
+// without risking an accidental Enter/Space activating the primary button
+// the instant it opens).
 const TeaserModal=({evt,onWatch,onSkip})=>{
   const title=evt.teaser_title?.trim()||"🎬 A new trailer just dropped";
   const text=evt.teaser_text?.trim()||`Get hyped for ${evt.name||"the next Mensdag"} — the trailer is ready.`;
   const buttonLabel=evt.teaser_button_label?.trim()||"🎬 Watch the trailer";
+  const rootRef=useRef(null);
+  useEffect(()=>{rootRef.current?.focus();},[]);
+  useEffect(()=>{
+    const prevOverflow=document.body.style.overflow;
+    document.body.style.overflow="hidden";
+    return()=>{document.body.style.overflow=prevOverflow;};
+  },[]);
+  useEffect(()=>{
+    const onKey=e=>{if(e.key==="Escape")onSkip();};
+    window.addEventListener("keydown",onKey);
+    return()=>window.removeEventListener("keydown",onKey);
+  },[onSkip]);
   return(
-    <Modal onClose={onSkip} onBackdropClose={()=>{}} maxWidth={440}>
-      <div role="dialog" aria-modal="true" aria-label={title}>
-        <H>{title}</H>
-        <div style={{color:"var(--cream)",fontSize:".92rem",lineHeight:1.6,opacity:.9,marginBottom:"1.3rem"}}>{text}</div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <Btn onClick={onWatch} variant="gold">{buttonLabel}</Btn>
-          <Btn onClick={onSkip} variant="ghost">Skip</Btn>
+    <div ref={rootRef} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} className="teaser-root">
+      <style>{`
+        .teaser-root{position:fixed;inset:0;height:100dvh;z-index:1000;background:var(--bg);color:var(--cream);display:flex;flex-direction:column;overflow:hidden;outline:none;font-family:var(--font-b);-webkit-tap-highlight-color:transparent}
+        .teaser-bg{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 70% 60% at 50% 15%,rgba(232,148,58,.24),transparent 60%),linear-gradient(160deg,var(--bg4),var(--bg2) 55%,var(--bg))}
+        .teaser-scroll{position:relative;flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex}
+        .teaser-inner{position:relative;z-index:1;margin:auto;max-width:640px;width:100%;padding:calc(3rem + env(safe-area-inset-top,0px)) 1.5rem 2rem;text-align:center;display:flex;flex-direction:column;align-items:center;gap:1.1rem}
+        .teaser-kicker{font-family:var(--font-b);font-weight:700;font-size:.78rem;letter-spacing:.24em;text-transform:uppercase;color:var(--amber)}
+        .teaser-title{font-family:var(--font-h);font-style:italic;font-weight:900;line-height:1.05;color:var(--amber2);text-shadow:0 2px 40px rgba(232,148,58,.35);font-size:clamp(2rem,7vw,3.4rem);margin:0}
+        .teaser-text{color:var(--cream);opacity:.9;font-size:clamp(.95rem,2.4vw,1.1rem);line-height:1.65;max-width:520px;white-space:pre-wrap}
+        .teaser-actions{position:relative;z-index:1;flex:0 0 auto;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;padding:1.1rem 1.5rem calc(1.3rem + env(safe-area-inset-bottom,0px));border-top:1px solid var(--border);background:var(--bg2)}
+        @media(prefers-reduced-motion:no-preference){.teaser-inner{animation:teaser-fade .35s ease both}}
+        @keyframes teaser-fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+        .teaser-root button:focus-visible{outline:3px solid var(--amber);outline-offset:3px}
+      `}</style>
+      <div className="teaser-bg" aria-hidden="true"/>
+      <div className="teaser-scroll">
+        <div className="teaser-inner">
+          <div className="teaser-kicker">🎬 Trailer</div>
+          <h2 className="teaser-title">{title}</h2>
+          <div className="teaser-text">{text}</div>
         </div>
       </div>
-    </Modal>
+      <div className="teaser-actions">
+        <Btn onClick={onWatch} variant="gold" size="lg">{buttonLabel}</Btn>
+        <Btn onClick={onSkip} variant="ghost" size="lg">Skip</Btn>
+      </div>
+    </div>
   );
 };
 const ICONS=["📍","🍺","🏎️","🎯","🧠","🍽️","🍝","🍹","🎳","🔐","🎤","🎲","🏆","🚗","🎉","🍻","🎸","🏄","⚽","🎾","🎨","🎭"];
@@ -680,7 +745,11 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
             <button onClick={onHof} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
             <button onClick={onTeams} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🎲 Teams</button>
             <button onClick={onTimer} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⏱ Timer</button>
-            <button onClick={mensGamesUnlocked?onMensGames:undefined} className="nav-btn" style={{background:view==="mensgames"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:mensGamesUnlocked?"var(--amber2)":"var(--muted)",padding:"5px 12px",cursor:mensGamesUnlocked?"pointer":"not-allowed",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,opacity:mensGamesUnlocked?1:.55}}>{mensGamesUnlocked?"🏆 Mens-Games":"🔒 ???"}</button>
+            {/* Locked mens-games gets a recognisable "🔒 Mens-Games" label, not
+                the Sara Jay "🔒 ???" mystery treatment -- mens-games is just
+                a feature not yet switched on, Sara Jay is a deliberate
+                surprise. Owner-flagged ambiguity, 2026-08-21. */}
+            <button onClick={mensGamesUnlocked?onMensGames:undefined} className="nav-btn" style={{background:view==="mensgames"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:mensGamesUnlocked?"var(--amber2)":"var(--muted)",padding:"5px 12px",cursor:mensGamesUnlocked?"pointer":"not-allowed",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,opacity:mensGamesUnlocked?1:.55}}>{mensGamesUnlocked?"🏆 Mens-Games":"🔒 Mens-Games"}</button>
             <button onClick={saraJayUnlocked?onSaraJay:undefined} className="nav-btn" style={{background:view==="sarajay"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:saraJayUnlocked?"var(--amber2)":"var(--muted)",padding:"5px 12px",cursor:saraJayUnlocked?"pointer":"not-allowed",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,opacity:saraJayUnlocked?1:.55}}>{saraJayUnlocked?"🤖 Sara Jay":"🔒 ???"}</button>
             {can.announce(currentUser)&&<button onClick={onAnnounce} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>📢 Announce</button>}
             {can.manageUsers(currentUser)&&<button onClick={onAdmin} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
@@ -708,7 +777,9 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
           <button onClick={()=>{onHof();setMenuOpen(false);}} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
           <button onClick={()=>{onTeams();setMenuOpen(false);}} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🎲 Team Creator</button>
           <button onClick={()=>{onTimer();setMenuOpen(false);}} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>⏱ Timer</button>
-          <button onClick={mensGamesUnlocked?()=>{onMensGames();setMenuOpen(false);}:undefined} className="nav-btn" style={{background:view==="mensgames"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:mensGamesUnlocked?"var(--amber2)":"var(--muted)",padding:"10px 14px",cursor:mensGamesUnlocked?"pointer":"not-allowed",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",opacity:mensGamesUnlocked?1:.55}}>{mensGamesUnlocked?"🏆 Mens-Games":"🔒 ???"}</button>
+          {/* Same "recognisable, not mysterious" locked label as the desktop
+              button above. */}
+          <button onClick={mensGamesUnlocked?()=>{onMensGames();setMenuOpen(false);}:undefined} className="nav-btn" style={{background:view==="mensgames"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:mensGamesUnlocked?"var(--amber2)":"var(--muted)",padding:"10px 14px",cursor:mensGamesUnlocked?"pointer":"not-allowed",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",opacity:mensGamesUnlocked?1:.55}}>{mensGamesUnlocked?"🏆 Mens-Games":"🔒 Mens-Games"}</button>
           <button onClick={saraJayUnlocked?()=>{onSaraJay();setMenuOpen(false);}:undefined} className="nav-btn" style={{background:view==="sarajay"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:saraJayUnlocked?"var(--amber2)":"var(--muted)",padding:"10px 14px",cursor:saraJayUnlocked?"pointer":"not-allowed",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",opacity:saraJayUnlocked?1:.55}}>{saraJayUnlocked?"🤖 Sara Jay or JAI":"🔒 ???"}</button>
           {can.announce(currentUser)&&<button onClick={()=>{onAnnounce();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>📢 Announce</button>}
           {can.manageUsers(currentUser)&&<button onClick={()=>{onAdmin();setMenuOpen(false);}} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",width:20,height:20,fontSize:".7rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{pendingCount}</span>}</button>}
@@ -1404,15 +1475,18 @@ const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onMensGa
           {[
             {icon:"🎲",title:"Team Creator",desc:"Schud willekeurige teams voor je activiteiten",onClick:onTeams,color:"var(--amber)"},
             {icon:"⏱",title:"Timer",desc:"Afteltimer voor spelletjes en activiteiten",onClick:onTimer,color:"var(--blue)"},
-            {icon:mensGamesUnlocked?"🏆":"🔒",title:"Mens-Games",desc:mensGamesUnlocked?"Bouw een toernooi, scoor live, houd de stand bij":"Binnenkort beschikbaar... 👀",onClick:mensGamesUnlocked?onMensGames:undefined,color:mensGamesUnlocked?"var(--gold)":"var(--muted)",isLocked:!mensGamesUnlocked},
-            {icon:saraJayUnlocked?"🤖":"🔒",title:"Sara Jay or JAI",desc:saraJayUnlocked?"Echt of AI? Één fout = game over. Bouw je streak.":"Binnenkort beschikbaar... 👀",onClick:saraJayUnlocked?onSaraJay:undefined,color:saraJayUnlocked?"var(--purple)":"var(--muted)",isLocked:!saraJayUnlocked},
-          ].map(({icon,title,desc,onClick,color,isLocked})=>(
+            // Locked mens-games keeps its real title -- it's just a feature
+            // not switched on yet, not a deliberate mystery like Sara Jay
+            // (`hideTitleWhenLocked` below stays false only for this one).
+            {icon:mensGamesUnlocked?"🏆":"🔒",title:"Mens-Games",desc:mensGamesUnlocked?"Bouw een toernooi, scoor live, houd de stand bij":"Binnenkort beschikbaar... 👀",onClick:mensGamesUnlocked?onMensGames:undefined,color:mensGamesUnlocked?"var(--gold)":"var(--muted)",isLocked:!mensGamesUnlocked,hideTitleWhenLocked:false},
+            {icon:saraJayUnlocked?"🤖":"🔒",title:"Sara Jay or JAI",desc:saraJayUnlocked?"Echt of AI? Één fout = game over. Bouw je streak.":"Binnenkort beschikbaar... 👀",onClick:saraJayUnlocked?onSaraJay:undefined,color:saraJayUnlocked?"var(--purple)":"var(--muted)",isLocked:!saraJayUnlocked,hideTitleWhenLocked:true},
+          ].map(({icon,title,desc,onClick,color,isLocked,hideTitleWhenLocked})=>(
             <div key={title} onClick={onClick}
               onMouseEnter={e=>{if(!isLocked){e.currentTarget.style.borderColor=color;e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow=`0 8px 28px ${color}22`;}}}
               onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="";}}
               style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"1.5rem 1.4rem",cursor:isLocked?"not-allowed":"pointer",transition:"all .2s cubic-bezier(.4,0,.2,1)",display:"flex",flexDirection:"column",gap:".65rem",opacity:isLocked?.65:1}}>
               <div style={{fontSize:"2.2rem",lineHeight:1}}>{icon}</div>
-              <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:color,lineHeight:1.2}}>{isLocked?"???" : title}</div>
+              <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:color,lineHeight:1.2}}>{isLocked&&hideTitleWhenLocked?"???" : title}</div>
               <div style={{fontSize:".82rem",color:"var(--muted)",lineHeight:1.5}}>{desc}</div>
               <div style={{marginTop:"auto",paddingTop:".5rem",fontSize:".75rem",color:color,opacity:.7,fontWeight:600,letterSpacing:".04em"}}>{isLocked?"Binnenkort beschikbaar":"Openen →"}</div>
             </div>

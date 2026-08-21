@@ -10,11 +10,17 @@
 // triggers their `import()` at all (the lazy chunk must never load, not
 // merely have its buttons hidden).
 //
-// Sara Jay is deliberately kept UNLOCKED (`md-sj-unlocked` seeded `true`) in
-// every test here: its own locked state renders the identical "🔒 ???"
-// label mens-games now also uses (exact mirror, per spec), so without this
-// the two would be indistinguishable by accessible name. Sara Jay itself is
-// out of scope for this file.
+// UPDATE (2026-08-21): the admin on/off *mechanism* is still an exact mirror
+// of Sara Jay, but the LOCKED LABEL is not -- Sara Jay's "🔒 ???" mystery-box
+// treatment made no sense for mens-games (just a feature not switched on
+// yet, not a deliberate surprise) and produced two indistinguishable "🔒 ???"
+// buttons side by side. Mens-games now keeps its real name when locked
+// ("🔒 Mens-Games" in Nav, "Mens-Games" + a lock icon on the Home tile);
+// Sara Jay's own "🔒 ???" treatment is untouched. Sara Jay is kept UNLOCKED
+// (`md-sj-unlocked` seeded `true`) in most tests here purely so its own
+// button/tile don't add noise to assertions that aren't about it -- Sara Jay
+// itself is out of scope for this file except the one test below that
+// locks both, to prove the two labels no longer collide.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
@@ -169,39 +175,56 @@ describe('mens-games admin toggle -- locked (default)', () => {
     })
   })
 
-  it('hides the Nav entry (desktop) and does not let it be opened', async () => {
+  it('hides the Nav entry (desktop) and does not let it be opened -- with a recognisable locked label, not Sara Jay\'s "🔒 ???" mystery treatment', async () => {
     const { default: App } = await import('../App.jsx')
     render(<App />)
     await goHome()
 
-    expect(screen.getByRole('button', { name: '🔒 ???' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '🔒 Mens-Games' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '🏆 Mens-Games' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '🔒 ???' }))
+    fireEvent.click(screen.getByRole('button', { name: '🔒 Mens-Games' }))
     // Nothing navigated -- still on Home, mens-games chunk never touched.
     expect(screen.getByText('MENSAPP')).toBeInTheDocument()
     expect(mensGamesPageLoaded).not.toHaveBeenCalled()
   })
 
-  it('hides the Nav entry in the mobile menu too', async () => {
+  it('hides the Nav entry in the mobile menu too, same recognisable label', async () => {
     setMobile()
     const { default: App } = await import('../App.jsx')
     render(<App />)
     await goHome()
 
     fireEvent.click(screen.getByRole('button', { name: '☰' }))
-    expect(screen.getByRole('button', { name: '🔒 ???' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '🔒 Mens-Games' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '🏆 Mens-Games' })).not.toBeInTheDocument()
   })
 
-  it('shows the Home tile as locked, and it is not clickable', async () => {
+  it('shows the Home tile as locked, still labelled "Mens-Games" (not a mystery box), and it is not clickable', async () => {
     const { default: App } = await import('../App.jsx')
     render(<App />)
     await goHome()
 
-    expect(screen.getByText('???')).toBeInTheDocument()
+    expect(screen.getByText('Mens-Games')).toBeInTheDocument()
     expect(screen.getByText('Binnenkort beschikbaar... 👀')).toBeInTheDocument()
     expect(mensGamesPageLoaded).not.toHaveBeenCalled()
+  })
+
+  it('is distinguishable from Sara Jay\'s own "🔒 ???" mystery-box treatment when BOTH are locked', async () => {
+    localStorage.setItem('md-sj-unlocked', 'false')
+    const { default: App } = await import('../App.jsx')
+    render(<App />)
+    await goHome()
+
+    // Two distinct locked buttons, neither collapsing to the other's label.
+    expect(screen.getByRole('button', { name: '🔒 Mens-Games' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '🔒 ???' })).toBeInTheDocument()
+
+    // Same distinction on the Home tiles: mens-games keeps its name, Sara
+    // Jay stays a mystery box.
+    expect(screen.getByText('Mens-Games')).toBeInTheDocument()
+    expect(screen.getByText('???')).toBeInTheDocument()
+    expect(screen.queryByText('Sara Jay or JAI')).not.toBeInTheDocument()
   })
 
   it('drops the "Mens-Games 🏆" tab from an event page entirely', async () => {

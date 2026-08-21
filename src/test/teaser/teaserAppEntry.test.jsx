@@ -88,17 +88,61 @@ describe('login teaser: app-entry visibility, fallback copy, backdrop, skip', ()
     expect(screen.getByRole('button', { name: 'Skip' })).toBeInTheDocument()
   })
 
-  it('a stray backdrop click does nothing -- the modal stays open, not silently dismissed forever', async () => {
-    const { container } = render(<App />)
+  it('a stray click on the overlay itself does nothing -- the takeover has no backdrop-dismiss at all, only Escape/Skip count', async () => {
+    render(<App />)
 
     await waitFor(() => {
       expect(screen.getByText('🎬 A new trailer just dropped')).toBeInTheDocument()
     })
 
-    fireEvent.click(container.querySelector('.ov'))
+    // The full-screen takeover (no more `Modal`/`.ov` backdrop -- see
+    // App.jsx's TeaserModal docblock) IS the dialog element itself; clicking
+    // anywhere on it that isn't a button must be a no-op.
+    fireEvent.click(screen.getByRole('dialog', { name: '🎬 A new trailer just dropped' }))
 
     // Still visible -- a stray click must never count as a permanent skip.
     expect(screen.getByText('🎬 A new trailer just dropped')).toBeInTheDocument()
+  })
+
+  it('is a full-screen takeover, not the shared centred `Modal` -- own fullscreen-shell class, no Modal backdrop', async () => {
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByText('🎬 A new trailer just dropped')).toBeInTheDocument()
+    })
+
+    const dialog = screen.getByRole('dialog', { name: '🎬 A new trailer just dropped' })
+    // Own fullscreen-shell class (same `position:fixed;inset:0;height:100dvh`
+    // pattern EventTrailer's `.tr-root` uses -- see the embedded stylesheet
+    // in App.jsx's TeaserModal). jsdom has no layout engine, so this proves
+    // the class/markup shape, not that it actually covers the viewport --
+    // that needs a real browser check.
+    expect(dialog.className).toContain('teaser-root')
+    // No shared-`Modal` backdrop element (`.ov`) anywhere -- confirms this
+    // isn't rendering through the centred-card component any more.
+    expect(document.querySelector('.ov')).not.toBeInTheDocument()
+  })
+
+  it('Escape dismisses it persistently (same handler as Skip), not a temporary close', async () => {
+    const { unmount } = render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByText('🎬 A new trailer just dropped')).toBeInTheDocument()
+    })
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByText('🎬 A new trailer just dropped')).not.toBeInTheDocument()
+
+    unmount()
+
+    // Next "app entry" -- a real, persisted dismissal, so it must not
+    // return, exactly like the explicit Skip button's own persistence test
+    // below.
+    render(<App />)
+    await waitFor(() => {
+      expect(screen.getByText('MENSAPP')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('🎬 A new trailer just dropped')).not.toBeInTheDocument()
   })
 
   it('Skip dismisses it, and the dismissal persists across the next app entry (remount)', async () => {
