@@ -62,9 +62,13 @@ const { Card, Modal, H, Lbl, Inp } = (() => {
 })()
 
 // Stubs: irrelevant to typeTouched, and not worth chaining their real
-// (larger, icon-picker-bearing) source into this test.
+// (larger, icon-picker-bearing) source into this test. `TrailerVideoField`
+// (added alongside the trailer's video-player direction change) is the same
+// kind of visually-heavy, unrelated-to-this-test's-concern sibling
+// component as RichTextInput/AttendeeInput -- stubbed the same way.
 const RichTextInput = () => null
 const AttendeeInput = () => null
+const TrailerVideoField = () => null
 const Btn = ({ children, onClick, ...rest }) => (
   <button onClick={onClick} {...rest}>
     {children}
@@ -85,9 +89,17 @@ function buildModal(name) {
     'Btn',
     'RichTextInput',
     'AttendeeInput',
+    'TrailerVideoField',
+    'isSafeVideoUrl',
     `${transformed}\nreturn ${name};`,
   )
-  return fn(React, useState, useRef, Modal, H, Lbl, Inp, Btn, RichTextInput, AttendeeInput)
+  // `isSafeVideoUrl` is a real import in App.jsx, not a module-scope const --
+  // not reachable by name-based extraction (same situation
+  // findChampion.test.js used to document for isSafeImageUrl). `videoUrlErr`
+  // is irrelevant to every case in this file (none of them set
+  // `trailer_video_url`), so a permissive stub that never blocks Save/Create
+  // is correct here.
+  return fn(React, useState, useRef, Modal, H, Lbl, Inp, Btn, RichTextInput, AttendeeInput, TrailerVideoField, () => true)
 }
 
 const EditEventModal = buildModal('EditEventModal')
@@ -255,17 +267,19 @@ describe('EditEventModal typeTouched auto-suggest: re-open no longer resets the 
 })
 
 describe('EditEventModal / NewEventModal inline date validation (dateErr) now blocks Save/Create (fixed in App.jsx:5157/:5189)', () => {
-  it('REGRESSION GUARD: the warning renders AND Save/Create are wired to disabled={!!dateErr}, matching the WinnerForm/HighlightForm pattern', () => {
+  it('REGRESSION GUARD: the warning renders AND Save/Create are wired to disabled={!!dateErr||!!videoUrlErr}, matching the WinnerForm/HighlightForm pattern', () => {
+    // `videoUrlErr` (added alongside the trailer video field) rides the same
+    // disabled-button wire as `dateErr` -- both must block Save/Create.
     for (const name of ['EditEventModal', 'NewEventModal']) {
       const raw = extractNoSpaceComponent(name)
       expect(raw).toMatch(/Einddatum ligt vóór de startdatum/)
-      expect(raw).toMatch(/disabled=\{!!dateErr\}/)
+      expect(raw).toMatch(/disabled=\{!!dateErr\|\|!!videoUrlErr\}/)
     }
     // Save (EditEventModal) and Create (NewEventModal) specifically.
     const editRaw = extractNoSpaceComponent('EditEventModal')
-    expect(editRaw).toMatch(/<Btn onClick=\{\(\)=>onSave\(d\)\} disabled=\{!!dateErr\}>Save<\/Btn>/)
+    expect(editRaw).toMatch(/<Btn onClick=\{\(\)=>onSave\(d\)\} disabled=\{!!dateErr\|\|!!videoUrlErr\}>Save<\/Btn>/)
     const newRaw = extractNoSpaceComponent('NewEventModal')
-    expect(newRaw).toMatch(/disabled=\{!!dateErr\}>Create<\/Btn>/)
+    expect(newRaw).toMatch(/disabled=\{!!dateErr\|\|!!videoUrlErr\}>Create<\/Btn>/)
   })
 
   it('REGRESSION GUARD: setting end_date before date shows the warning and disables the Save button', () => {

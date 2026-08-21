@@ -1,30 +1,25 @@
-// Beat 6 -- The roll call (creative spec §3 Beat 6 + §7 degrade rules).
-// Only ever mounted when `buildBeats.js` found `goingCount >= 3` (technical
-// spec §5.5) -- the "zero attendees" and "few attendees" degrades in the
-// creative brief are handled as follows:
+// The lads who've already RSVP'd -- rendered as part of the trailer's single
+// end-card view (docs/trailer-creative-spec.md §3 Beat 6's roll call,
+// repurposed 2026-08-21: the owner shipped a real video, so this no longer
+// plays as its own timed beat inside a sequence -- it's folded, alongside
+// the kretjes counter and the two CTAs, into the one view shown when the
+// video ends). Kept as its own component (rather than inlined into
+// EventTrailer.jsx) because it composes cleanly and is independently
+// testable.
 //
-//  - "Few (2-3)": ROSTER's own gate already only fires at 3+, so the
-//    smallest roster this component ever renders IS the 3-person case.
-//    `.tr-roster-grid`'s `auto-fit` grid naturally gives 3 people more room
-//    per avatar than 10 would -- no extra branch needed for "bigger, not
-//    sparse."
-//  - "Zero confirmed attendees -> CTA beat" (creative §7): NOT implemented.
-//    `buildBeats.js`'s BEAT_KINDS enum has no zero-attendee CTA variant, and
-//    inventing a synthetic beat outside the fixed engine would violate the
-//    "a mounted beat is guaranteed to have what it needs, by construction"
-//    contract this package is built against. With <3 going, ROSTER is
-//    simply dropped and the trailer runs shorter, straight to `OUTRO` --
-//    whose own RSVP CTA (§2 end state) already covers the call-to-action.
-//    Flagged in the trailer report as a genuine engine/creative gap, not a
-//    silent simplification.
+// Structural note: this used to be a full-bleed `.tr-content` layer (one of
+// several stacked beats, each owning the whole viewport). Now it's one
+// section inside a normal-flow, scrollable end card -- so it renders just
+// its own content, not a positioned wrapper. `EventTrailer.jsx` supplies the
+// card's shell/background/scroll.
 //
-// TrailerAvatar (technical spec §3): deliberately NOT the app's `Avatar` --
-// no import across the App.jsx -> trailer boundary, and no dependency on
-// `ANIMALS` (avoids duplicating that 10-entry emoji/colour table). Falls
-// back to a monogram on an amber-toned gradient, picked from
+// TrailerAvatar (technical spec §3, unchanged): deliberately NOT the app's
+// `Avatar` -- no import across the App.jsx -> trailer boundary, and no
+// dependency on `ANIMALS` (avoids duplicating that 10-entry emoji/colour
+// table). Falls back to a monogram on an amber-toned gradient, picked from
 // `avatarIndex` purely for visual variety -- never the app's actual animal
-// palette. "Honest downside" (spec's own words): this never reflects a
-// person's real chosen avatar when they have no photo.
+// palette. Honest downside: this never reflects a person's real chosen
+// avatar when they have no photo.
 const MONO_GRADIENTS = [
   'linear-gradient(135deg,var(--gold),var(--amber))',
   'linear-gradient(135deg,var(--amber),var(--amber2))',
@@ -51,10 +46,23 @@ export function TrailerAvatar({ name, photoUrl, avatarIndex = 0, size = 72, styl
   );
 }
 
+// Empty state (zero confirmed "going"): never an empty grid -- a short,
+// on-brand nudge instead. `EventTrailer.jsx` renders this in BeatRoster's
+// place rather than mounting BeatRoster with nothing to show.
+export function EmptyRoster() {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div className="tr-kicker" style={{ marginBottom: '.4rem' }}>🍺 The lads showing up</div>
+      <div className="tr-title tr-slam" style={{ fontSize: 'clamp(1.3rem,5vw,2rem)' }}>Nobody&apos;s locked in yet</div>
+      <div className="tr-note" style={{ marginTop: '.5rem' }}>Be the first name on the list.</div>
+    </div>
+  );
+}
+
 export default function BeatRoster({ data }) {
   const { going, goingCount, moreCount } = data;
   return (
-    <div className="tr-content tr-content-center">
+    <div style={{ textAlign: 'center' }}>
       <div className="tr-kicker" style={{ marginBottom: '.3rem' }}>🍺 The lads showing up</div>
       <h2 className="tr-title tr-slam" style={{ fontSize: 'clamp(1.6rem,6vw,2.6rem)', marginBottom: '1.6rem' }}>
         {goingCount} confirmed

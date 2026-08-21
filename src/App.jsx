@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { supabase, hashPin } from "./supabase.js";
-import { isSafeImageUrl } from "./features/trailer/safeUrl.js";
+import { isSafeImageUrl, isSafeVideoUrl } from "./features/trailer/safeUrl.js";
 
 // The app's first code split (technical spec `docs/trailer-technical-spec.md`
 // §3): keeps the trailer's weight out of the main chunk, loaded only when an
@@ -333,97 +333,25 @@ const dayHeadingLabel=(dateStr,dayIndex)=>{
 // (ties keep their existing relative order) so manual reordering via the
 // editor's ↑/↓ still shows through whenever times are equal or blank.
 const scheduleDayTimeOrder=(a,b)=>((a.day??0)-(b.day??0))||(a.time||"").localeCompare(b.time||"");
-// "Reigning champion" continuity nod for the trailer's LEGACY beat (creative
-// spec §3 Beat 5). Derived the same way `HallOfFame`/`WinnersTab` already
-// compute their own leaderboards -- not a new source of truth: (1) the most
-// recent ARCHIVED edition other than the current one, scanned for a winner
-// whose category reads as an "Overall Champion" award (case-insensitive
-// match on the word "champion", since award categories are free-text
-// admins type themselves -- there's no fixed schema field for this); (2) if
-// no archived edition ever recorded one, fall back to the all-time top quiz
-// scorer across every event, computed identically to `HallOfFame`'s own
-// `quizBoard` reducer. No prior edition and no quiz history at all -> `null`
-// -- the trailer's `buildBeats.js` simply never emits the LEGACY beat, per
-// its own conditional-emission contract (never a placeholder).
-const findChampion=(evt,events=[],users=[])=>{
-  // `schedule`/`winners`/`quizzes` are hand-editable JSONB -- assume nothing
-  // about their shape. `winners`/`quizzes` are only ever expected to be
-  // arrays of plain objects, but malformed data (an object instead of an
-  // array, a stray `null` entry) must degrade to "skip it", never throw:
-  // this runs unconditionally inside `toTrailerInput`, and with no error
-  // boundary anywhere in the app, a throw here takes down the whole
-  // EventPage for every visitor, not just trailer viewers.
-  const past=events.filter(e=>e&&e.archived&&e.id!==evt.id).sort((a,b)=>new Date(b.date)-new Date(a.date));
-  for(const p of past){
-    const winners=Array.isArray(p.winners)?p.winners:[];
-    const champ=winners.find(w=>w&&typeof w==="object"&&/champion/i.test(w.category||""));
-    if(champ){
-      const ua=getUA(champ.winner,users);
-      return{
-        name:getDisplayName(champ.winner,users),
-        photoUrl:isSafeImageUrl(ua.photoUrl)?ua.photoUrl:"",
-        avatarIndex:ua.index??0,
-        title:champ.category||"Reigning Champion",
-        detail:(typeof champ.detail==="string"&&champ.detail.trim())?champ.detail.trim():p.name,
-      };
-    }
-  }
-  const quizTotals={};
-  events.forEach(e=>{
-    if(!e)return;
-    const quizzes=Array.isArray(e.quizzes)?e.quizzes:[];
-    quizzes.filter(q=>q&&typeof q==="object"&&q.status==="finished").forEach(quiz=>{
-      const scores=(quiz.scores&&typeof quiz.scores==="object"&&!Array.isArray(quiz.scores))?quiz.scores:{};
-      Object.entries(scores).forEach(([name,score])=>{
-        const pts=Number.isFinite(score)?score:0;
-        if(!quizTotals[name])quizTotals[name]={name,total:0};
-        quizTotals[name].total+=pts;
-      });
-    });
-  });
-  const topScorer=Object.values(quizTotals).sort((a,b)=>b.total-a.total)[0];
-  if(topScorer&&topScorer.total>0){
-    const ua=getUA(topScorer.name,users);
-    return{
-      name:getDisplayName(topScorer.name,users),
-      photoUrl:isSafeImageUrl(ua.photoUrl)?ua.photoUrl:"",
-      avatarIndex:ua.index??0,
-      title:"Quiz Legend",
-      detail:`${topScorer.total} pts all-time`,
-    };
-  }
-  return null;
-};
-// Boundary adapter for the trailer feature (src/features/trailer/). Produces a
-// plain, serialisable view model with every `secret` stop's content REMOVED --
-// not flagged, removed -- so the trailer subsystem cannot leak it even by
-// accident. Keep the `const NAME=(...)=>{ ... };` shape: the source-extraction
-// test helpers in src/test/ match on it.
-//
-// Signature extended with `events` (the full events list, not just `evt`,
-// per docs/trailer-technical-spec.md §2.3's original shape) -- required so
-// `findChampion` above can look at *other* editions, not just this one.
-const toTrailerInput=(evt,users=[],events=[])=>{
-  const stops=(evt.schedule||[]).map((s,i)=>({s,i}))
-    .sort((a,b)=>scheduleDayTimeOrder(a.s,b.s))
-    .map(({s,i})=>{
-      const base={key:`stop-${i}`,secret:!!s.secret,day:s.day??0,dayLabel:dayHeadingLabel(evt.date,s.day??0),time:s.time||""};
-      if(s.secret)return base;
-      return{...base,icon:s.icon||"",activity:s.activity||"",location:s.location||"",note:s.note||"",image:isSafeImageUrl(s.image)?s.image:""};
-    });
+// Boundary adapter for the trailer feature (src/features/trailer/). The
+// trailer now plays the event's real, owner-produced video and ends on a
+// single end-card view -- direction change from the owner, 2026-08-21. The
+// beat-engine this used to feed (schedule montage, secret tease, "reigning
+// champion" legacy nod scanning every archived edition) has no consumer any
+// more and was deleted outright, not just unwired -- see `findChampion`'s
+// removal in the same change. Produces a plain, serialisable view model with
+// exactly what the end card needs: roster, kretjes, event identity, the
+// video URL. Keep the `const NAME=(...)=>{ ... };` shape: the
+// source-extraction test helpers in src/test/ match on it.
+const toTrailerInput=(evt,users=[])=>{
   const going=(evt.attendees||[]).filter(a=>a.status==="going")
     .slice(0,12).map(a=>({name:getDisplayName(a.name,users),...getUA(a.name,users)}));
-  const champion=findChampion(evt,events,users);
   return{
-    eventId:evt.id,name:evt.name||"",type:evt.type||"day",theme:evt.theme||"",
-    location:(evt.location&&evt.location!=="TBD")?evt.location:"",
-    dateLabel:formatEventDateRange(evt.date,evt.end_date),
-    startsAtIso:`${evt.date}T${evt.start_time||"12:00"}:00`,
-    dayCount:eventDayCount(evt.date,evt.end_date),
-    stops,secretCount:stops.filter(s=>s.secret).length,
+    eventId:evt.id,name:evt.name||"",
+    videoUrl:isSafeVideoUrl(evt.trailer_video_url)?evt.trailer_video_url:"",
+    kretjes:Number.isFinite(evt.kretjes)?evt.kretjes:0,
     goingCount:(evt.attendees||[]).filter(a=>a.status==="going").length,
-    going:going.map(g=>({name:g.name,photoUrl:g.photoUrl||"",avatarIndex:g.index??0})),
-    ...(champion?{champion}:{}),
+    going:going.map(g=>({name:g.name,photoUrl:isSafeImageUrl(g.photoUrl)?g.photoUrl:"",avatarIndex:g.index??0})),
   };
 };
 const ICONS=["📍","🍺","🏎️","🎯","🧠","🍽️","🍝","🍹","🎳","🔐","🎤","🎲","🏆","🚗","🎉","🍻","🎸","🏄","⚽","🎾","🎨","🎭"];
@@ -1433,7 +1361,7 @@ const TeamsTab=({evt,onUpdate,currentUser,users=[]})=>{
   );
 };
 
-const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif})=>{
+const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],initialTab,scrollToId,onSendNotif})=>{
   const [tab,setTab]=useState(initialTab||"Overview");
   useEffect(()=>{
     if(!scrollToId)return;
@@ -1454,19 +1382,18 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
   const isAdmin=can.editEvent(currentUser);
   const isMobile=useIsMobile();
   const [trailerOpen,setTrailerOpen]=useState(false);
-  const canTrailer=!isPast&&(evt.schedule?.length||0)>0;
-  // Gated on `trailerOpen`, not just memoized on identity: `toTrailerInput`
-  // (and `findChampion` inside it) does real work -- scanning every archived
-  // event's winners/quizzes -- on the hottest page in the app. Computing it
-  // on every EventPage render regardless of whether anyone ever opens the
-  // trailer is wasted work, and it's what turns a trailer-only bug into an
-  // every-visitor bug (there is no error boundary anywhere in this app).
-  // `null` while closed; the `<EventTrailer>` mount below is gated on the
-  // same flag, so it never sees the `null`. Still memoized on evt/users/
-  // events identity so an unrelated realtime sync elsewhere doesn't rebuild
-  // the view model (and, downstream, EventTrailer's beat timeline) while
-  // the trailer IS open.
-  const trailerInput=useMemo(()=>(trailerOpen?toTrailerInput(evt,users,events):null),[trailerOpen,evt,users,events]);
+  // Gates on the event actually having a real trailer video now (owner
+  // direction change, 2026-08-21) -- not on schedule length. Visible to
+  // everyone, not just admins.
+  const canTrailer=isSafeVideoUrl(evt.trailer_video_url);
+  // Gated on `trailerOpen`, not just memoized on identity: cheap as
+  // `toTrailerInput` now is, there's no reason to rebuild the view model on
+  // every EventPage render regardless of whether anyone ever opens the
+  // trailer. `null` while closed; the `<EventTrailer>` mount below is gated
+  // on the same flag, so it never sees the `null`. Still memoized on
+  // evt/users identity so an unrelated realtime sync elsewhere doesn't
+  // rebuild the view model while the trailer IS open.
+  const trailerInput=useMemo(()=>(trailerOpen?toTrailerInput(evt,users):null),[trailerOpen,evt,users]);
 
   const resetPresenter=useCallback(()=>{setPresenterDetected(false);setViewerDismissed(false);setSchedLive(null);},[]);
 
@@ -5347,6 +5274,43 @@ const AttendeeInput=({attendees,setAttendees,users=[]})=>{
   );
 };
 
+// Trailer video field, shared by EditEventModal/NewEventModal: a pasted
+// link OR an upload, either populating `trailer_video_url`. Follows the
+// existing upload pattern (profile-photos at EditProfileModal, "Quiz
+// images", event-photos at PhotosTab) -- storage bucket "event-videos".
+// URL validation reuses `isSafeVideoUrl` (safeUrl.js): http(s) only, and
+// must look like a video file (.mp4/.webm/.mov/.ogg) -- the same extension
+// set `PresentationMode` already treats as a video at its own
+// video-vs-image branch.
+const TrailerVideoField=({value,onChange,error})=>{
+  const [uploading,setUploading]=useState(false);
+  const [uploadErr,setUploadErr]=useState("");
+  const fileRef=useRef();
+  const handleUpload=async e=>{
+    const file=e.target.files[0];if(!file)return;
+    setUploading(true);setUploadErr("");
+    const path=`${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
+    const{data,error:upErr}=await supabase.storage.from("event-videos").upload(path,file);
+    if(upErr){setUploadErr("Upload mislukt: "+upErr.message);setUploading(false);e.target.value="";return;}
+    const{data:{publicUrl}}=supabase.storage.from("event-videos").getPublicUrl(data.path);
+    onChange(publicUrl);setUploading(false);e.target.value="";
+  };
+  return(
+    <div>
+      <Lbl>Trailer video</Lbl>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <Inp value={value||""} onChange={e=>onChange(e.target.value)} placeholder="https://…video.mp4 (of upload)" style={{flex:1,minWidth:180}}/>
+        <Btn onClick={()=>fileRef.current.click()} variant="ghost" size="sm" disabled={uploading}>{uploading?"Uploaden…":"📹 Upload"}</Btn>
+        {value&&<Btn onClick={()=>onChange("")} variant="ghost" size="sm" style={{color:"var(--red)"}}>Verwijderen</Btn>}
+      </div>
+      <input ref={fileRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/ogg" style={{display:"none"}} onChange={handleUpload}/>
+      {error&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:4}}>⚠ {error}</div>}
+      {uploadErr&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:4}}>{uploadErr}</div>}
+      <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:4}}>Plak een link of upload een bestand (.mp4, .webm, .mov, .ogg).</div>
+    </div>
+  );
+};
+
 const EditEventModal=({evt,onSave,onClose,users=[]})=>{
   const [d,setD]=useState({...evt});
   // If this event already arrives with an end_date, its saved `type` is by
@@ -5356,6 +5320,7 @@ const EditEventModal=({evt,onSave,onClose,users=[]})=>{
   // gets the auto-suggest on its first range.
   const typeTouched=useRef(!!evt.end_date);
   const dateErr=d.end_date&&d.date&&d.end_date<d.date?"Einddatum ligt vóór de startdatum":"";
+  const videoUrlErr=d.trailer_video_url&&!isSafeVideoUrl(d.trailer_video_url)?"Ongeldige video-link (moet http(s) zijn en eindigen op .mp4, .webm, .mov of .ogg)":"";
   const setEndDate=v=>{
     const next={...d,end_date:v};
     if(v&&v!==d.date&&!typeTouched.current)next.type="weekend";
@@ -5376,18 +5341,20 @@ const EditEventModal=({evt,onSave,onClose,users=[]})=>{
       {dateErr&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:-6}}>⚠ {dateErr}</div>}
       {[["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
       <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>{typeTouched.current=true;setD({...d,type:e.target.value});}} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
+      <TrailerVideoField value={d.trailer_video_url} onChange={v=>setD({...d,trailer_video_url:v})} error={videoUrlErr}/>
       <div><Lbl>Description</Lbl><RichTextInput value={d.description||""} onChange={v=>setD({...d,description:v})} placeholder="Beschrijving… **bold**, *italic*, - lijstje" rows={3}/></div>
       <div><Lbl>Attendees</Lbl><AttendeeInput attendees={d.attendees} setAttendees={v=>setD({...d,attendees:v})} users={users}/></div>
-      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave(d)} disabled={!!dateErr}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
+      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave(d)} disabled={!!dateErr||!!videoUrlErr}>Save</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
     </div></Modal>
   );
 };
 
 const NewEventModal=({onSave,onClose,users=[]})=>{
   const yr=new Date().getFullYear();
-  const [d,setD]=useState({name:`Mensday ${yr}`,type:"day",date:`${yr}-09-13`,end_date:"",start_time:"12:00",end_time:"",location:"TBD",description:"",theme:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false,kretjes:0});
+  const [d,setD]=useState({name:`Mensday ${yr}`,type:"day",date:`${yr}-09-13`,end_date:"",start_time:"12:00",end_time:"",location:"TBD",description:"",theme:"",trailer_video_url:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false,kretjes:0});
   const typeTouched=useRef(false);
   const dateErr=d.end_date&&d.date&&d.end_date<d.date?"Einddatum ligt vóór de startdatum":"";
+  const videoUrlErr=d.trailer_video_url&&!isSafeVideoUrl(d.trailer_video_url)?"Ongeldige video-link (moet http(s) zijn en eindigen op .mp4, .webm, .mov of .ogg)":"";
   const setEndDate=v=>{
     const next={...d,end_date:v};
     if(v&&v!==d.date&&!typeTouched.current)next.type="weekend";
@@ -5408,9 +5375,10 @@ const NewEventModal=({onSave,onClose,users=[]})=>{
       {dateErr&&<div style={{fontSize:".72rem",color:"var(--red)",marginTop:-6}}>⚠ {dateErr}</div>}
       {[["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
       <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>{typeTouched.current=true;setD({...d,type:e.target.value});}} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
+      <TrailerVideoField value={d.trailer_video_url} onChange={v=>setD({...d,trailer_video_url:v})} error={videoUrlErr}/>
       <div><Lbl>Description</Lbl><RichTextInput value={d.description||""} onChange={v=>setD({...d,description:v})} placeholder="Beschrijving… **bold**, *italic*, - lijstje" rows={3}/></div>
       <div><Lbl>Attendees</Lbl><AttendeeInput attendees={d.attendees} setAttendees={v=>setD({...d,attendees:v})} users={users}/></div>
-      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave({...d,id:`evt-${Date.now()}`})} disabled={!!dateErr}>Create</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
+      <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave({...d,id:`evt-${Date.now()}`})} disabled={!!dateErr||!!videoUrlErr}>Create</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
     </div></Modal>
   );
 };

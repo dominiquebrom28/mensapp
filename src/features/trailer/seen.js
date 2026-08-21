@@ -3,8 +3,9 @@
 // -- technical spec §10). Matches the app's existing localStorage-only
 // preference pattern (`ann-dismissed`, `md-sj-unlocked`).
 //
-// Not pure (does real localStorage I/O) and not required to be -- only
-// buildBeats.js/timeline.js carry that constraint (spec §5.1).
+// Not pure (does real localStorage I/O) and not required to be -- unchanged
+// by the 2026-08-21 video-player direction change, which only touched the
+// beat-engine files (now deleted) this module never depended on.
 import { SEEN_KEY, TRAILER_VERSION } from './constants.js';
 
 function readAll() {

@@ -1,76 +1,167 @@
-// Component tests for src/features/trailer/EventTrailer.jsx (technical spec
-// §8's `EventTrailer.render.test.jsx`). Uses the shared, OPT-IN
-// src/test/mocks/mediaEnv.js -- installed/restored per test, never via the
-// shared setup.js (zero risk to the rest of the suite).
+// Component tests for src/features/trailer/EventTrailer.jsx.
+//
+// Rewritten 2026-08-21 for the owner's direction change: the generated beat
+// sequence (tap-to-start poster, buildBeats/timeline/clock, media
+// preloader, dual-layer audio) is gone. EventTrailer now (1) plays a real
+// video via native `<video controls>`, and (2) on the video ending, shows a
+// single end-card view with the roster, the kretjes counter, and both
+// CTAs. Uses the shared, OPT-IN src/test/mocks/mediaEnv.js -- installed/
+// restored per test, never via the shared setup.js (zero risk to the rest
+// of the suite).
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { installMediaEnv } from '../mocks/mediaEnv.js'
+import { SEEN_KEY, TRAILER_VERSION } from '../../features/trailer/constants.js'
 import EventTrailer from '../../features/trailer/EventTrailer.jsx'
 
-// Deliberately the same shape as buildBeats.test.js's `baseInput` -- a
-// no-media, no-schedule event resolves to the floor sequence
-// [title, meta, outro], keeping these tests fast/deterministic and
-// exercising the "no images anywhere" degrade path incidentally.
 const baseInput = (overrides = {}) => ({
   eventId: 'evt-1',
   name: 'Mensdag XL',
-  type: 'day',
-  theme: '',
-  location: 'Amsterdam',
-  dateLabel: '12 september 2026',
-  startsAtIso: '2026-09-12T12:00:00',
-  dayCount: 1,
-  stops: [],
-  secretCount: 0,
+  videoUrl: 'https://example.com/trailer.mp4',
+  kretjes: 42,
   goingCount: 0,
   going: [],
   ...overrides,
 })
 
+const goingList = (n) => Array.from({ length: n }, (_, i) => ({ name: `Lad ${i}`, photoUrl: '', avatarIndex: i % 4 }))
+
 let env
+
 afterEach(() => {
   cleanup()
   env?.restore()
   env = null
+  localStorage.clear()
   vi.restoreAllMocks()
 })
 
 describe('EventTrailer', () => {
-  it('renders the start poster and does not call play() before the tap', () => {
+  it('renders the video with controls and the event as its accessible label, no end card yet', () => {
     env = installMediaEnv()
-    const playSpy = vi.spyOn(window.HTMLMediaElement.prototype, 'play')
     render(<EventTrailer input={baseInput()} onClose={() => {}} />)
 
-    expect(screen.getByRole('button', { name: /play trailer/i })).toBeInTheDocument()
-    expect(playSpy).not.toHaveBeenCalled()
+    const video = screen.getByLabelText('Mensdag XL trailer video')
+    expect(video.tagName).toBe('VIDEO')
+    expect(video).toHaveAttribute('controls')
+    expect(video).toHaveAttribute('src', 'https://example.com/trailer.mp4')
+    expect(screen.queryByText('↻ Watch again')).not.toBeInTheDocument()
   })
 
-  it('calls play() once on tap', async () => {
+  it('shows the end card (roster + kretjes + both CTAs) once the video ends, and marks the trailer seen', () => {
+    env = installMediaEnv()
+    render(<EventTrailer input={baseInput({ goingCount: 2, going: goingList(2) })} onClose={() => {}} />)
+
+    const video = screen.getByLabelText('Mensdag XL trailer video')
+    fireEvent.ended(video)
+
+    expect(screen.getByText('2 confirmed')).toBeInTheDocument()
+    expect(screen.getByText('Lad 0')).toBeInTheDocument()
+    expect(screen.getByText('42')).toBeInTheDocument() // kretjes count
+    expect(screen.getByRole('button', { name: '↻ Watch again' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'RSVP now →' })).toBeInTheDocument()
+
+    const seen = JSON.parse(localStorage.getItem(SEEN_KEY))
+    expect(seen['evt-1']).toEqual({ v: TRAILER_VERSION, at: expect.any(Number) })
+  })
+
+  it('an empty roster (goingCount 0) shows the empty-state nudge, never an empty grid', () => {
+    env = installMediaEnv()
+    render(<EventTrailer input={baseInput({ goingCount: 0, going: [] })} onClose={() => {}} />)
+
+    fireEvent.ended(screen.getByLabelText('Mensdag XL trailer video'))
+
+    expect(screen.getByText("Nobody's locked in yet")).toBeInTheDocument()
+    expect(screen.queryByText(/confirmed$/)).not.toBeInTheDocument()
+  })
+
+  it('caps the named roster and shows a "+N more legends" tile beyond the cap', () => {
+    env = installMediaEnv()
+    render(<EventTrailer input={baseInput({ goingCount: 13, going: goingList(13) })} onClose={() => {}} />)
+
+    fireEvent.ended(screen.getByLabelText('Mensdag XL trailer video'))
+
+    expect(screen.getByText('13 confirmed')).toBeInTheDocument()
+    expect(screen.getByText('Lad 9')).toBeInTheDocument() // 10th named (index 9), within the cap
+    expect(screen.queryByText('Lad 10')).not.toBeInTheDocument() // 11th, beyond the cap
+    expect(screen.getByText('+3')).toBeInTheDocument()
+    expect(screen.getByText('more legends')).toBeInTheDocument()
+  })
+
+  it('a video error surfaces a clear message AND still shows the end card, rather than a dead black screen', () => {
+    env = installMediaEnv()
+    render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+
+    fireEvent.error(screen.getByLabelText('Mensdag XL trailer video'))
+
+    expect(screen.getByRole('status')).toHaveTextContent(/couldn.t play the trailer video/i)
+    expect(screen.getByText('1 confirmed')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'RSVP now →' })).toBeInTheDocument()
+  })
+
+  it('no video URL at all goes straight to the end card with the same error messaging (defensive -- the entry point should already gate on this)', () => {
+    env = installMediaEnv()
+    render(<EventTrailer input={baseInput({ videoUrl: '', goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+
+    expect(screen.getByRole('status')).toHaveTextContent(/couldn.t play the trailer video/i)
+    expect(screen.getByRole('button', { name: '↻ Watch again' })).toBeInTheDocument()
+  })
+
+  it('"Watch again" returns to the player and calls play() on the video element (no reload needed on the plain end-of-video path)', async () => {
     env = installMediaEnv()
     const playSpy = vi.spyOn(window.HTMLMediaElement.prototype, 'play')
-    render(<EventTrailer input={baseInput()} onClose={() => {}} />)
+    render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+
+    fireEvent.ended(screen.getByLabelText('Mensdag XL trailer video'))
+    expect(screen.getByRole('button', { name: '↻ Watch again' })).toBeInTheDocument()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /play trailer/i }))
+      fireEvent.click(screen.getByRole('button', { name: '↻ Watch again' }))
     })
 
     expect(playSpy).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: '↻ Watch again' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Mensdag XL trailer video')).toBeInTheDocument()
   })
 
-  it('a rejected play() still starts the visual trailer', async () => {
+  it('"Watch again" after a video error re-primes the source (calls load()) before playing, and clears the error banner', async () => {
     env = installMediaEnv()
-    env.setPlayResult('reject')
-    render(<EventTrailer input={baseInput()} onClose={() => {}} />)
+    const loadSpy = vi.fn()
+    window.HTMLMediaElement.prototype.load = loadSpy
+    render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+
+    fireEvent.error(screen.getByLabelText('Mensdag XL trailer video'))
+    expect(screen.getByRole('status')).toBeInTheDocument()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /play trailer/i }))
+      fireEvent.click(screen.getByRole('button', { name: '↻ Watch again' }))
     })
 
-    // The poster is gone and the tap-zone chrome (only mounted once
-    // `started` is true) is in the document -- the visual sequence started
-    // regardless of the audio promise rejecting.
-    expect(screen.queryByRole('button', { name: /play trailer/i })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /next beat/i })).toBeInTheDocument()
+    expect(loadSpy).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Mensdag XL trailer video')).toBeInTheDocument()
+  })
+
+  it('"Watch again" is a no-op (stays on the end card) when there was never a video URL to replay', () => {
+    env = installMediaEnv()
+    const playSpy = vi.spyOn(window.HTMLMediaElement.prototype, 'play')
+    render(<EventTrailer input={baseInput({ videoUrl: '', goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '↻ Watch again' }))
+
+    expect(playSpy).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '↻ Watch again' })).toBeInTheDocument()
+  })
+
+  it('"RSVP now" closes the trailer', () => {
+    env = installMediaEnv()
+    const onClose = vi.fn()
+    render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={onClose} />)
+
+    fireEvent.ended(screen.getByLabelText('Mensdag XL trailer video'))
+    fireEvent.click(screen.getByRole('button', { name: 'RSVP now →' }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('Escape closes the trailer', () => {
@@ -83,12 +174,12 @@ describe('EventTrailer', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('the always-visible Skip control closes the trailer', () => {
+  it('the always-visible close control closes the trailer', () => {
     env = installMediaEnv()
     const onClose = vi.fn()
     render(<EventTrailer input={baseInput()} onClose={onClose} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /skip trailer/i }))
+    fireEvent.click(screen.getByRole('button', { name: /close trailer/i }))
 
     expect(onClose).toHaveBeenCalledTimes(1)
   })
@@ -120,68 +211,11 @@ describe('EventTrailer', () => {
     document.body.style.overflow = ''
   })
 
-  // Mobile pause control (technical spec §5.4's "tap/click the stage:
-  // toggle() pause/resume" -- reachable on a touchscreen, since the
-  // creative-spec tap zones claim the whole stage for skip/replay instead;
-  // see EventTrailer.jsx's own "FLAGGED SPEC CONFLICT" docblock). This is
-  // wiring coverage only -- `toggle()`/`pause()` actually halting the rAF
-  // clock is the (already-QA'd, unchanged) engine layer's own contract,
-  // covered by useTrailerClock.test.js's pause/resume assertions.
-  describe('mobile pause control', () => {
-    async function startedTrailer() {
-      const onClose = vi.fn()
-      const utils = render(<EventTrailer input={baseInput()} onClose={onClose} />)
-      await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: /play trailer/i }))
-      })
-      return utils
-    }
+  it('the RSVP CTA is a real ≥44px target (WCAG 2.2 target size)', () => {
+    env = installMediaEnv()
+    render(<EventTrailer input={baseInput({ goingCount: 1, going: goingList(1) })} onClose={() => {}} />)
+    fireEvent.ended(screen.getByLabelText('Mensdag XL trailer video'))
 
-    it('renders a 44x44 Pause control once playing, that flips to Play on click and back on a second click', async () => {
-      env = installMediaEnv()
-      await startedTrailer()
-
-      const toggleBtn = await screen.findByRole('button', { name: /^pause$/i })
-      expect(toggleBtn).toHaveClass('tr-icon-btn') // min-width/min-height:44px, see TrailerStyles.jsx
-      expect(toggleBtn).toHaveTextContent('⏸')
-
-      fireEvent.click(toggleBtn)
-      expect(screen.getByRole('button', { name: /^play$/i })).toHaveTextContent('▶')
-      expect(screen.queryByRole('button', { name: /^pause$/i })).not.toBeInTheDocument()
-
-      fireEvent.click(screen.getByRole('button', { name: /^play$/i }))
-      expect(screen.getByRole('button', { name: /^pause$/i })).toHaveTextContent('⏸')
-    })
-
-    it('is present at both the mobile and desktop chrome layout (no viewport-gated rendering)', async () => {
-      // The control's *rendering* isn't behind any matchMedia/viewport
-      // check -- it's a plain conditional on clock.state, so it exists in
-      // the DOM regardless of viewport. (Pixel-level position at each
-      // breakpoint is a visual/layout concern outside jsdom's box-model
-      // support -- see the trailer QA report for a static CSS-math flag
-      // about the neighbouring Mute control's position at the mobile
-      // breakpoint specifically.)
-      env = installMediaEnv()
-      await startedTrailer()
-      expect(await screen.findByRole('button', { name: /^pause$/i })).toBeInTheDocument()
-    })
-
-    it('Space bar toggles the same control (shared handler with the on-screen button)', async () => {
-      env = installMediaEnv()
-      await startedTrailer()
-      await screen.findByRole('button', { name: /^pause$/i })
-
-      fireEvent.keyDown(window, { key: ' ' })
-      expect(screen.getByRole('button', { name: /^play$/i })).toBeInTheDocument()
-
-      fireEvent.keyDown(window, { key: ' ' })
-      expect(screen.getByRole('button', { name: /^pause$/i })).toBeInTheDocument()
-    })
-
-    it('does not throw when Space is pressed before the trailer has started (no clock yet)', () => {
-      env = installMediaEnv()
-      render(<EventTrailer input={baseInput()} onClose={() => {}} />)
-      expect(() => fireEvent.keyDown(window, { key: ' ' })).not.toThrow()
-    })
+    expect(screen.getByRole('button', { name: 'RSVP now →' })).toHaveClass('tr-cta')
   })
 })

@@ -1,20 +1,28 @@
 // Integration coverage for the coordinator-requested guarantee: the trailer
-// adapter (`toTrailerInput`, and therefore `findChampion` inside it) must
-// not run on every EventPage render -- only once the trailer is actually
-// opened. `toTrailerInput`/`findChampion` are un-exported module-scope
-// consts inside App.jsx, so they can't be `vi.mock`-ed directly. Instead
-// this spies on `isSafeImageUrl` (a real ES-module import in App.jsx) as an
-// unambiguous proxy: a repo-wide grep confirms it has exactly three call
-// sites, and every one of them is inside `toTrailerInput`/`findChampion`
-// (App.jsx:364, 389, 412) -- nowhere else in the ~6,300-line file reads it.
-// So "isSafeImageUrl was never called" is equivalent to "toTrailerInput
-// never ran" for the purposes of this test, without needing to reach into
-// App.jsx's private scope.
+// adapter (`toTrailerInput`, an un-exported module-scope const inside
+// App.jsx) must not run on every EventPage render -- only once the trailer
+// is actually opened.
 //
-// This renders the *real* `<App/>` (same pattern as App.smoke.test.jsx),
-// auto-logged-in via the `md-session` localStorage shortcut App.jsx itself
-// supports, so the event page is reached without simulating the full
-// username/PIN login form.
+// Updated 2026-08-21 for the owner's direction change (a real video + a
+// single end card replaces the generated beat sequence): `toTrailerInput`
+// shrank to {eventId, name, videoUrl, kretjes, goingCount, going}, and its
+// one remaining non-trivial step is validating each "going" attendee's
+// `photoUrl` via `isSafeImageUrl` before handing it to the roster. That's
+// this test's proxy now, in place of the old schedule-stop-image check
+// (`toTrailerInput` no longer reads `evt.schedule` at all -- there's no
+// montage any more). A repo-wide grep confirms `isSafeImageUrl` has exactly
+// one call site in App.jsx, inside `toTrailerInput`, so "isSafeImageUrl was
+// never called" is equivalent to "toTrailerInput never ran" for the
+// purposes of this test, without needing to reach into App.jsx's private
+// scope.
+//
+// Note: `canTrailer` (the "Watch the trailer" button's own visibility gate)
+// now reads `isSafeVideoUrl(evt.trailer_video_url)` directly on every
+// EventPage render -- unlike the old `findChampion`-driven adapter, that
+// gate is cheap (one URL parse + a regex), so there's no equivalent
+// "wasted work" concern for it the way there was for the old champion scan.
+// This test is scoped to the one adapter step that still only makes sense
+// to run once the trailer is open.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
@@ -44,6 +52,7 @@ vi.mock('../../supabase.js', async () => {
             pin_hash: 'irrelevant-for-session-shortcut-login',
             joined_at: '2023-01-01',
             avatar: 0,
+            photo_url: 'https://example.com/doom.jpg',
           },
         ],
         error: null,
@@ -61,13 +70,14 @@ vi.mock('../../supabase.js', async () => {
             location: 'Amsterdam',
             description: '',
             theme: '',
-            attendees: [],
-            // Non-empty schedule with an image is what makes `canTrailer`
-            // true AND what would call `isSafeImageUrl` the instant
-            // `toTrailerInput` runs (via the stops.map redaction step).
-            schedule: [
-              { day: 0, time: '18:00', icon: '🍺', activity: 'Borrel', location: 'Kroeg', note: '', image: 'https://example.com/borrel.jpg' },
-            ],
+            // Non-empty + a safe video extension is what makes `canTrailer`
+            // true (isSafeVideoUrl, gated separately from this test's proxy).
+            trailer_video_url: 'https://example.com/trailer.mp4',
+            // A "going" attendee whose photo_url is what would call
+            // `isSafeImageUrl` the instant `toTrailerInput` runs (via the
+            // roster-mapping step).
+            attendees: [{ name: 'Doom', status: 'going' }],
+            schedule: [],
             polls: [],
             photos: [],
             quizzes: [],
@@ -95,8 +105,8 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('trailer adapter gating (toTrailerInput/findChampion only run when the trailer is open)', () => {
-  it('does not call isSafeImageUrl (i.e. does not run toTrailerInput/findChampion) while the event page is open but the trailer is closed, and does once the trailer is opened', async () => {
+describe('trailer adapter gating (toTrailerInput only validates roster photos when the trailer is open)', () => {
+  it('does not call isSafeImageUrl (i.e. does not run toTrailerInput) while the event page is open but the trailer is closed, and does once the trailer is opened', async () => {
     localStorage.setItem('md-session', 'u-1')
     render(<App />)
 
@@ -109,8 +119,8 @@ describe('trailer adapter gating (toTrailerInput/findChampion only run when the 
     fireEvent.click(screen.getByText('Mensdag XL'))
 
     // EventPage is open (the "Watch the trailer" button only renders when
-    // `canTrailer` is true, i.e. we're really on the event page with a
-    // non-empty schedule) -- and `trailerOpen` is still false at this point.
+    // `canTrailer` is true, i.e. `trailer_video_url` is set and valid) --
+    // and `trailerOpen` is still false at this point.
     const trailerBtn = await screen.findByRole('button', { name: /watch the trailer/i })
 
     expect(isSafeImageUrlSpy).not.toHaveBeenCalled()
@@ -119,11 +129,11 @@ describe('trailer adapter gating (toTrailerInput/findChampion only run when the 
 
     // Opening it flips `trailerOpen`, which is the only thing gating
     // `toTrailerInput`'s useMemo -- now it must have run at least once,
-    // and `isSafeImageUrl` (called on the one schedule stop's image) is the
-    // observable proof.
+    // and `isSafeImageUrl` (called on the one "going" attendee's photo_url)
+    // is the observable proof.
     await waitFor(() => {
       expect(isSafeImageUrlSpy).toHaveBeenCalled()
     })
-    expect(isSafeImageUrlSpy).toHaveBeenCalledWith('https://example.com/borrel.jpg')
+    expect(isSafeImageUrlSpy).toHaveBeenCalledWith('https://example.com/doom.jpg')
   })
 })
