@@ -69,6 +69,20 @@ const { Card, Modal, H, Lbl, Inp } = (() => {
 const RichTextInput = () => null
 const AttendeeInput = () => null
 const TrailerVideoField = () => null
+// `Switch` (the login-teaser toggle) and `TeaserModal` (its preview
+// affordance) are new module-scope siblings EditEventModal/NewEventModal
+// now reference -- same stubbing rationale as the three above: irrelevant
+// to typeTouched/dateErr/videoUrlErr, not worth chaining their real source
+// into this harness. `Switch`'s stub still calls `onChange` with the next
+// boolean (not the click event) so a test that DID want to flip it could,
+// mirroring the real component's contract.
+const Switch = ({ checked, onChange, label, id }) => (
+  <label htmlFor={id}>
+    <input id={id} type="checkbox" checked={!!checked} onChange={(e) => onChange(e.target.checked)} />
+    {label}
+  </label>
+)
+const TeaserModal = () => null
 const Btn = ({ children, onClick, ...rest }) => (
   <button onClick={onClick} {...rest}>
     {children}
@@ -90,6 +104,8 @@ function buildModal(name) {
     'RichTextInput',
     'AttendeeInput',
     'TrailerVideoField',
+    'Switch',
+    'TeaserModal',
     'isSafeVideoUrl',
     `${transformed}\nreturn ${name};`,
   )
@@ -99,7 +115,7 @@ function buildModal(name) {
   // is irrelevant to every case in this file (none of them set
   // `trailer_video_url`), so a permissive stub that never blocks Save/Create
   // is correct here.
-  return fn(React, useState, useRef, Modal, H, Lbl, Inp, Btn, RichTextInput, AttendeeInput, TrailerVideoField, () => true)
+  return fn(React, useState, useRef, Modal, H, Lbl, Inp, Btn, RichTextInput, AttendeeInput, TrailerVideoField, Switch, TeaserModal, () => true)
 }
 
 const EditEventModal = buildModal('EditEventModal')

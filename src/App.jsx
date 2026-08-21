@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { supabase, hashPin } from "./supabase.js";
 import { isSafeImageUrl, isSafeVideoUrl } from "./features/trailer/safeUrl.js";
+import { hasSeenTrailer } from "./features/trailer/seen.js";
+import { hasDismissedTeaser, dismissTeaser } from "./features/teaser/dismissed.js";
 
 // The app's first code split (technical spec `docs/trailer-technical-spec.md`
 // §3): keeps the trailer's weight out of the main chunk, loaded only when an
@@ -134,6 +136,19 @@ const Inp = ({value,onChange,placeholder,style={},type="text",multiline=false,on
     : <input type={type} value={value} onChange={onChange} placeholder={placeholder} onKeyDown={onKeyDown} autoFocus={autoFocus} style={{...base,...style}}/>;
 };
 const Lbl = ({children}) => <div style={{fontSize:".75rem",color:"var(--muted)",letterSpacing:".06em",textTransform:"uppercase",marginBottom:5}}>{children}</div>;
+// Accessible on/off toggle -- a real `<button role="switch">` (native
+// Enter/Space activation + a visible focus ring for free), unlike the
+// ad-hoc `<div onClick>` `Toggle` scoped inside PollsTab (not reachable from
+// here, and not keyboard-operable). 42x24 hit area clears WCAG 2.2's 24x24
+// minimum target size.
+const Switch = ({checked,onChange,label,id}) => (
+  <div style={{display:"flex",alignItems:"center",gap:10}}>
+    <button type="button" id={id} role="switch" aria-checked={checked} onClick={()=>onChange(!checked)} style={{width:42,height:24,borderRadius:12,border:`1px solid ${checked?"var(--amber)":"var(--border)"}`,background:checked?"var(--amber)":"var(--bg3)",position:"relative",cursor:"pointer",padding:0,flexShrink:0}}>
+      <span aria-hidden="true" style={{position:"absolute",top:2,left:checked?20:2,width:18,height:18,borderRadius:"50%",background:checked?"#1a1008":"var(--muted2)",transition:"left .15s"}}/>
+    </button>
+    {label&&<label htmlFor={id} style={{fontSize:".83rem",color:"var(--cream)",cursor:"pointer"}}>{label}</label>}
+  </div>
+);
 const Tag = ({children,color="var(--amber)"}) => (
   <span style={{background:color+"22",color,border:`1px solid ${color}33`,borderRadius:6,padding:"3px 10px",fontSize:".73rem",fontWeight:600}}>{children}</span>
 );
@@ -361,6 +376,64 @@ const toTrailerInput=(evt,users=[],events=[])=>{
     goingCount:(evt.attendees||[]).filter(a=>a.status==="going").length,
     going:going.map(g=>({name:g.name,photoUrl:isSafeImageUrl(g.photoUrl)?g.photoUrl:"",avatarIndex:g.index??0})),
   };
+};
+// ─────────────────────────────────────────────────────────────────────────────
+// LOGIN TEASER (owner request, 2026-08-21): an admin-configurable modal that
+// greets users on entry and routes them to an event's trailer. Lives next to
+// the trailer adapter above because both read the same
+// `trailer_video_url`/`teaser_*` event columns and exist for the same
+// reason: getting the trailer actually watched.
+//
+// Selection rule: any NON-archived event with `teaser_active` AND a valid
+// `trailer_video_url` (same `isSafeVideoUrl` guard `canTrailer` uses on the
+// event page, so a teaser can never point its own button at a dead end).
+// Deliberately NOT filtered on the event being upcoming -- direct owner
+// instruction: "it doesn't matter when the event is... the feature should
+// work regardless of when an event is." A date comparison would
+// second-guess the admin's own `teaser_active` decision; archiving is the
+// deliberate way to retire a teaser (`isPast` is `evt.archived`, not
+// date-derived, same as the event page). Among qualifying events the
+// soonest `date` wins.
+//
+// No-video edge case: handled right here, at selection, by simply excluding
+// that event from the candidate pool -- NOT by suppressing the whole
+// feature or pointing the button at the event page instead. That way, if a
+// different qualifying event DOES have a valid video, the teaser still
+// shows for that one; only an admin flipping `teaser_active` on with no
+// video AND no other qualifying event stays silent (same "no qualifying
+// event -> nothing shows" rule as any other empty-candidates case).
+const selectTeaserEvent=(events=[])=>{
+  const candidates=events.filter(e=>!e.archived&&e.teaser_active&&isSafeVideoUrl(e.trailer_video_url));
+  if(!candidates.length)return null;
+  return[...candidates].sort((a,b)=>new Date(a.date)-new Date(b.date))[0];
+};
+// Purely presentational -- no localStorage, no navigation, no Supabase. The
+// caller decides what "watch"/"skip" actually mean: the real App-root mount
+// wires them to navigation + dismissal/seen-state (see `App`'s "teaser"
+// state below), while EditEventModal/NewEventModal's preview affordance
+// wires both to just closing the preview -- so an admin can check their own
+// teaser copy any number of times without ever touching the real
+// dismissed-state, which would otherwise cost them their only look at their
+// own teaser the moment they tried it once.
+// Sensible fallbacks for a blank title/text/button label: an
+// active-but-unconfigured teaser must never render an empty dialog or a
+// button with no label.
+const TeaserModal=({evt,onWatch,onSkip})=>{
+  const title=evt.teaser_title?.trim()||"🎬 A new trailer just dropped";
+  const text=evt.teaser_text?.trim()||`Get hyped for ${evt.name||"the next Mensdag"} — the trailer is ready.`;
+  const buttonLabel=evt.teaser_button_label?.trim()||"🎬 Watch the trailer";
+  return(
+    <Modal onClose={onSkip} onBackdropClose={()=>{}} maxWidth={440}>
+      <div role="dialog" aria-modal="true" aria-label={title}>
+        <H>{title}</H>
+        <div style={{color:"var(--cream)",fontSize:".92rem",lineHeight:1.6,opacity:.9,marginBottom:"1.3rem"}}>{text}</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <Btn onClick={onWatch} variant="gold">{buttonLabel}</Btn>
+          <Btn onClick={onSkip} variant="ghost">Skip</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
 };
 const ICONS=["📍","🍺","🏎️","🎯","🧠","🍽️","🍝","🍹","🎳","🔐","🎤","🎲","🏆","🚗","🎉","🍻","🎸","🏄","⚽","🎾","🎨","🎭"];
 const TROPHY_ICONS=["🏆","🥇","🥈","🥉","🎯","🧠","🍺","😴","😅","📸","🎤","🏎️","🔐","🎳","🎲","👑","💀","🤡","🎖️","⚡","🦆","🐐"];
@@ -1370,7 +1443,7 @@ const TeamsTab=({evt,onUpdate,currentUser,users=[]})=>{
   );
 };
 
-const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif})=>{
+const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif,autoOpenTrailerId,onAutoTrailerConsumed})=>{
   const [tab,setTab]=useState(initialTab||"Overview");
   useEffect(()=>{
     if(!scrollToId)return;
@@ -1404,6 +1477,17 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
   // evt/users/events identity so an unrelated realtime sync elsewhere
   // doesn't rebuild the view model while the trailer IS open.
   const trailerInput=useMemo(()=>(trailerOpen?toTrailerInput(evt,users,events):null),[trailerOpen,evt,users,events]);
+  // Login teaser's "Watch the trailer" button lands here (via `openEvent` +
+  // `autoOpenTrailerId` set together at the App root) and auto-opens the
+  // same trailer overlay the page's own button uses -- one code path, so
+  // behaviour (RSVP CTA closing back to this page, `markTrailerSeen`, etc.)
+  // is identical either way. Guarded on `canTrailer` too: `selectTeaserEvent`
+  // already only ever teases events with a valid video, but this stays
+  // defensive rather than trusting the caller. Consumed exactly once via
+  // the callback, so navigating away and back doesn't reopen it.
+  useEffect(()=>{
+    if(autoOpenTrailerId===evt.id&&canTrailer){setTrailerOpen(true);onAutoTrailerConsumed?.();}
+  },[autoOpenTrailerId,evt.id,canTrailer,onAutoTrailerConsumed]);
 
   const resetPresenter=useCallback(()=>{setPresenterDetected(false);setViewerDismissed(false);setSchedLive(null);},[]);
 
@@ -5370,12 +5454,21 @@ const EditEventModal=({evt,onSave,onClose,users=[]})=>{
   const typeTouched=useRef(!!evt.end_date);
   const dateErr=d.end_date&&d.date&&d.end_date<d.date?"Einddatum ligt vóór de startdatum":"";
   const videoUrlErr=d.trailer_video_url&&!isSafeVideoUrl(d.trailer_video_url)?"Ongeldige video-link (moet http(s) zijn en eindigen op .mp4, .webm, .mov of .ogg)":"";
+  // Admin-facing preview of the login teaser (docs: the owner's spec calls
+  // this out explicitly -- without it, the only way to see your own live
+  // teaser is to dismiss it, which permanently hides it on that device).
+  // Renders the REAL `TeaserModal`, so it's exactly what a user would see
+  // (same fallback copy included) -- but with `onWatch`/`onSkip` both wired
+  // to just closing the preview, never to `dismissTeaser`/navigation, so
+  // trying it costs nothing.
+  const [previewTeaser,setPreviewTeaser]=useState(false);
   const setEndDate=v=>{
     const next={...d,end_date:v};
     if(v&&v!==d.date&&!typeTouched.current)next.type="weekend";
     setD(next);
   };
   return(
+    <>
     <Modal onClose={onClose} onBackdropClose={()=>{if(!dateErr&&!videoUrlErr)onSave(d);}} maxWidth={500}><H>Edit Event</H>
     <div style={{display:"grid",gap:".9rem"}}>
       <div><Lbl>Event Name</Lbl><Inp value={d.name||""} onChange={e=>setD({...d,name:e.target.value})} placeholder="Event Name"/></div>
@@ -5391,25 +5484,44 @@ const EditEventModal=({evt,onSave,onClose,users=[]})=>{
       {[["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
       <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>{typeTouched.current=true;setD({...d,type:e.target.value});}} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
       <TrailerVideoField value={d.trailer_video_url} onChange={v=>setD({...d,trailer_video_url:v})} error={videoUrlErr}/>
+      <div style={{border:"1px dashed var(--border2)",borderRadius:"var(--radius-sm)",padding:"1rem",display:"grid",gap:".7rem"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+          <Lbl>🎬 Login teaser</Lbl>
+          <Btn onClick={()=>setPreviewTeaser(true)} variant="ghost" size="sm">👀 Preview</Btn>
+        </div>
+        <Switch checked={!!d.teaser_active} onChange={v=>setD({...d,teaser_active:v})} label="Show this teaser on login" id="teaser-active-edit"/>
+        {d.teaser_active&&<>
+          <div><Lbl>Teaser title</Lbl><Inp value={d.teaser_title||""} onChange={e=>setD({...d,teaser_title:e.target.value})} placeholder="🎬 A new trailer just dropped"/></div>
+          <div><Lbl>Teaser text</Lbl><Inp value={d.teaser_text||""} onChange={e=>setD({...d,teaser_text:e.target.value})} placeholder="Get hyped -- the trailer is ready." multiline rows={2}/></div>
+          <div><Lbl>Button label</Lbl><Inp value={d.teaser_button_label||""} onChange={e=>setD({...d,teaser_button_label:e.target.value})} placeholder="🎬 Watch the trailer"/></div>
+          {!isSafeVideoUrl(d.trailer_video_url)&&<div style={{fontSize:".72rem",color:"var(--red)"}}>⚠ No trailer video set above yet -- this teaser will not show to anyone until one is added.</div>}
+        </>}
+      </div>
       <div><Lbl>Description</Lbl><RichTextInput value={d.description||""} onChange={v=>setD({...d,description:v})} placeholder="Beschrijving… **bold**, *italic*, - lijstje" rows={3}/></div>
       <div><Lbl>Attendees</Lbl><AttendeeInput attendees={d.attendees} setAttendees={v=>setD({...d,attendees:v})} users={users}/></div>
       <div style={{display:"flex",gap:8,marginTop:4,alignItems:"center",flexWrap:"wrap"}}><Btn onClick={()=>onSave(d)} disabled={!!dateErr||!!videoUrlErr}>Save</Btn><Btn onClick={onClose} variant="ghost">Discard changes</Btn><span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span></div>
     </div></Modal>
+    {previewTeaser&&<TeaserModal evt={d} onWatch={()=>setPreviewTeaser(false)} onSkip={()=>setPreviewTeaser(false)}/>}
+    </>
   );
 };
 
 const NewEventModal=({onSave,onClose,users=[]})=>{
   const yr=new Date().getFullYear();
-  const [d,setD]=useState({name:"Mens",type:"day",date:`${yr}-09-13`,end_date:"",start_time:"12:00",end_time:"",location:"TBD",description:"",theme:"",trailer_video_url:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false,kretjes:0});
+  const [d,setD]=useState({name:"Mens",type:"day",date:`${yr}-09-13`,end_date:"",start_time:"12:00",end_time:"",location:"TBD",description:"",theme:"",trailer_video_url:"",teaser_active:false,teaser_title:"",teaser_text:"",teaser_button_label:"",attendees:[],schedule:[],polls:[],photos:[],quizzes:[],winners:[],highlights:[],faqs:[],archived:false,kretjes:0});
   const typeTouched=useRef(false);
   const dateErr=d.end_date&&d.date&&d.end_date<d.date?"Einddatum ligt vóór de startdatum":"";
   const videoUrlErr=d.trailer_video_url&&!isSafeVideoUrl(d.trailer_video_url)?"Ongeldige video-link (moet http(s) zijn en eindigen op .mp4, .webm, .mov of .ogg)":"";
+  // See EditEventModal's identical comment above -- same preview affordance,
+  // same reasoning.
+  const [previewTeaser,setPreviewTeaser]=useState(false);
   const setEndDate=v=>{
     const next={...d,end_date:v};
     if(v&&v!==d.date&&!typeTouched.current)next.type="weekend";
     setD(next);
   };
   return(
+    <>
     <Modal onClose={onClose} onBackdropClose={()=>{}} maxWidth={500}><H>New Event</H>
     <div style={{display:"grid",gap:".85rem"}}>
       <div><Lbl>Event Name</Lbl><Inp value={d.name||""} onChange={e=>setD({...d,name:e.target.value})} placeholder="Event Name"/></div>
@@ -5425,10 +5537,25 @@ const NewEventModal=({onSave,onClose,users=[]})=>{
       {[["location","Locatie"],["theme","Thema"]].map(([k,l])=><div key={k}><Lbl>{l}</Lbl><Inp value={d[k]||""} onChange={e=>setD({...d,[k]:e.target.value})} placeholder={l}/></div>)}
       <div><Lbl>Type</Lbl><select value={d.type} onChange={e=>{typeTouched.current=true;setD({...d,type:e.target.value});}} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%"}}><option value="day">Day Event</option><option value="weekend">Weekend</option></select></div>
       <TrailerVideoField value={d.trailer_video_url} onChange={v=>setD({...d,trailer_video_url:v})} error={videoUrlErr}/>
+      <div style={{border:"1px dashed var(--border2)",borderRadius:"var(--radius-sm)",padding:"1rem",display:"grid",gap:".7rem"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+          <Lbl>🎬 Login teaser</Lbl>
+          <Btn onClick={()=>setPreviewTeaser(true)} variant="ghost" size="sm">👀 Preview</Btn>
+        </div>
+        <Switch checked={!!d.teaser_active} onChange={v=>setD({...d,teaser_active:v})} label="Show this teaser on login" id="teaser-active-new"/>
+        {d.teaser_active&&<>
+          <div><Lbl>Teaser title</Lbl><Inp value={d.teaser_title||""} onChange={e=>setD({...d,teaser_title:e.target.value})} placeholder="🎬 A new trailer just dropped"/></div>
+          <div><Lbl>Teaser text</Lbl><Inp value={d.teaser_text||""} onChange={e=>setD({...d,teaser_text:e.target.value})} placeholder="Get hyped -- the trailer is ready." multiline rows={2}/></div>
+          <div><Lbl>Button label</Lbl><Inp value={d.teaser_button_label||""} onChange={e=>setD({...d,teaser_button_label:e.target.value})} placeholder="🎬 Watch the trailer"/></div>
+          {!isSafeVideoUrl(d.trailer_video_url)&&<div style={{fontSize:".72rem",color:"var(--red)"}}>⚠ No trailer video set above yet -- this teaser will not show to anyone until one is added.</div>}
+        </>}
+      </div>
       <div><Lbl>Description</Lbl><RichTextInput value={d.description||""} onChange={v=>setD({...d,description:v})} placeholder="Beschrijving… **bold**, *italic*, - lijstje" rows={3}/></div>
       <div><Lbl>Attendees</Lbl><AttendeeInput attendees={d.attendees} setAttendees={v=>setD({...d,attendees:v})} users={users}/></div>
       <div style={{display:"flex",gap:8,marginTop:4}}><Btn onClick={()=>onSave({...d,id:`evt-${Date.now()}`})} disabled={!!dateErr||!!videoUrlErr}>Create</Btn><Btn onClick={onClose} variant="ghost">Cancel</Btn></div>
     </div></Modal>
+    {previewTeaser&&<TeaserModal evt={d} onWatch={()=>setPreviewTeaser(false)} onSkip={()=>setPreviewTeaser(false)}/>}
+    </>
   );
 };
 
@@ -6177,6 +6304,21 @@ export default function App(){
   const [saraJayUnlocked,setSaraJayUnlocked]=useState(()=>{try{return JSON.parse(localStorage.getItem("md-sj-unlocked")||"false");}catch{return false;}});
   const [showAnnounce,setShowAnnounce]=useState(false);
   const [editingAnn,setEditingAnn]=useState(null);
+  // Login teaser (src/features/teaser/dismissed.js + `selectTeaserEvent`/
+  // `TeaserModal` above): `teaserEvent` is the currently-shown teaser, or
+  // null. `teaserEvalRef` makes the "show on every app entry" check fire
+  // exactly once per entry -- not on every unrelated re-render, and not on
+  // the 30s events poll re-running `selectTeaserEvent` against a fresh
+  // array identity. Reset on `logout` below so a different lad logging in
+  // on the same device/tab (or the same one logging back in) is a fresh
+  // "entry" too, not silently skipped because this tab happened to show it
+  // to someone else earlier.
+  const [teaserEvent,setTeaserEvent]=useState(null);
+  const teaserEvalRef=useRef(false);
+  // Id of the event whose trailer the teaser's primary button should
+  // auto-open, once `openEvent` has navigated there -- consumed (reset to
+  // null) by EventPage the instant it acts on it, so it never re-fires.
+  const [autoTrailerId,setAutoTrailerId]=useState(null);
   const eventsRef=useRef([]);
   useEffect(()=>{eventsRef.current=events;},[events]);
   const diffBaseRef=useRef([]);
@@ -6321,6 +6463,27 @@ export default function App(){
     return()=>{clearInterval(poll);supabase.removeChannel(notifCtrl);supabase.removeChannel(evtNotifCh);};
   },[]);
 
+  // Decide once per "app entry" (loaded + a resolved, active `currentUser`
+  // -- covers both a fresh credential login AND the `md-session` resume
+  // shortcut, deliberately not just the literal login flow, since sessions
+  // persist and almost nobody would ever see it otherwise) whether the
+  // login teaser should show. `ACTIVE_ROLES` check is redundant with the
+  // `role==="pending"` early return below (this effect never runs before
+  // that render happens, since `loaded`+`currentUser` are the same gate) --
+  // kept explicit anyway per the spec's own call-out, and as a defensive
+  // guard against any future role that isn't "pending" but also isn't meant
+  // to be a full member.
+  useEffect(()=>{
+    if(teaserEvalRef.current)return;
+    if(!loaded||!currentUser)return;
+    if(!ACTIVE_ROLES.includes(currentUser.role))return;
+    teaserEvalRef.current=true;
+    const candidate=selectTeaserEvent(events);
+    if(!candidate)return;
+    if(hasDismissedTeaser(candidate.id)||hasSeenTrailer(candidate.id))return;
+    setTeaserEvent(candidate);
+  },[loaded,currentUser,events]);
+
   const deleteNotifForAll=async(notifId)=>{
     const newSet=new Set([...deletedNotifIds,notifId]);
     setDeletedNotifIds(newSet);
@@ -6351,7 +6514,7 @@ export default function App(){
     await supabase.from("users").upsert(u);
   };
   const login=u=>{setCurrentUser(u);localStorage.setItem("md-session",u.id);};
-  const logout=()=>{setCurrentUser(null);localStorage.removeItem("md-session");setActiveId(null);setPageView("home");};
+  const logout=()=>{setCurrentUser(null);localStorage.removeItem("md-session");setActiveId(null);setPageView("home");teaserEvalRef.current=false;setTeaserEvent(null);};
   const register=async u=>{
     const {error}=await supabase.from("users").insert([u]);
     if(error){console.error("Register error:",error);return error.message||"Onbekende fout";}
@@ -6446,6 +6609,27 @@ export default function App(){
       setUsers(prev=>prev.map(u=>u.id===currentUser.id?updated:u));
     }
   };
+  // Primary button: navigate to that event's page (same destination the
+  // page's own "🎬 Watch the trailer" button lives on) and flag its trailer
+  // to auto-open there -- see EventPage's `autoOpenTrailerId` effect above.
+  // Deliberately does NOT call `dismissTeaser` -- "watched" is earned by
+  // actually finishing the video (`markTrailerSeen`, inside EventTrailer's
+  // `onEnded`), not by merely tapping this button. Closing the overlay here
+  // is enough either way: re-showing on the *next* app entry is gated on
+  // hasDismissedTeaser/hasSeenTrailer, not on whether this modal is mounted.
+  const teaserWatch=()=>{
+    if(!teaserEvent)return;
+    setAutoTrailerId(teaserEvent.id);
+    openEvent(teaserEvent.id);
+    setTeaserEvent(null);
+  };
+  // Secondary button: an explicit, deliberate choice (never the backdrop --
+  // see TeaserModal's `onBackdropClose={()=>{}}`) -- never shows again for
+  // this event on this device.
+  const teaserSkip=()=>{
+    if(teaserEvent)dismissTeaser(teaserEvent.id);
+    setTeaserEvent(null);
+  };
   const activeEvent=events.find(e=>e.id===activeId);
   const activeMember=users.find(u=>u.id===activeMemberId);
 
@@ -6466,7 +6650,7 @@ export default function App(){
         {pageView==="hof"&&<HallOfFame events={events} users={users}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
-        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll}/>}
+        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)}/>}
         {pageView==="updates"&&<UpdatesPage notifications={notifications.filter(n=>!deletedNotifIds.has(n.id)&&(!clearedBefore||n.timestamp>clearedBefore))} notifLastRead={notifLastRead} currentUser={currentUser} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={openEvent} onClearSelf={()=>{setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);}} onDeleteSelf={id=>{setNotifications(prev=>{const next=prev.filter(n=>n.id!==id);if(currentUser)localStorage.setItem(`md-notifs-${currentUser.id}`,JSON.stringify(next));return next;});}} onClearUpdates={async()=>{const cb=new Date().toISOString();const allIds=[...new Set([...deletedNotifIds,...notifications.map(n=>n.id)])];const newSet=new Set(allIds);setDeletedNotifIds(newSet);setClearedBefore(cb);setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);const body=JSON.stringify({ids:allIds,cleared_before:cb});await supabase.from("announcements").upsert({id:"__deleted_notifs__",title:"__deleted_notifs__",body,created_by:"system",created_at:new Date().toISOString(),active:false});supabase.channel("notif-ctrl").send({type:"broadcast",event:"clear-notifs",payload:{ids:allIds,cleared_before:cb}});}} onDeleteNotif={deleteNotifForAll}/>}
         {pageView==="teams"&&<TeamCreatorPage users={users} events={events} onUpdateEvent={updateEvent}/>}
         {pageView==="timer"&&<TimerPage/>}
@@ -6477,6 +6661,7 @@ export default function App(){
       {showAnnounce&&can.announce(currentUser)&&<AnnouncementModal onSave={saveAnnouncement} onClose={()=>{setShowAnnounce(false);setEditingAnn(null);}} existing={editingAnn} currentUser={currentUser}/>}
       {newEvent&&can.editEvent(currentUser)&&<NewEventModal users={users} onSave={async evt=>{setEvents(prev=>[...prev,evt]);setNewEvent(false);openEvent(evt.id);await supabase.from("events").upsert([evt]);}} onClose={()=>setNewEvent(false)}/>}
       {editingProfile&&<EditProfileModal user={currentUser} onSave={async u=>{await saveProfile(u);setEditingProfile(false);}} onClose={()=>setEditingProfile(false)}/>}
+      {teaserEvent&&<TeaserModal evt={teaserEvent} onWatch={teaserWatch} onSkip={teaserSkip}/>}
     </div>
   );
 }
