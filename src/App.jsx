@@ -6583,7 +6583,11 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
   const allAppSelected=allAppNames.length>0&&allAppNames.every(n=>pickedNames.has(n));
   const unassignedNames=teams?participants.filter(p=>!teams.some(t=>(t.members||[]).includes(p))):[];
   const visibleSets=teamSets.filter(ts=>libFilter==="archived"?ts.status==="archived":ts.status!=="archived");
-  const iconBtn=(active,color)=>({background:"none",border:"none",cursor:"pointer",fontSize:".82rem",padding:4,minWidth:24,minHeight:24,display:"flex",alignItems:"center",justifyContent:"center",opacity:active?1:.32,color:color||"var(--cream)",lineHeight:1,transition:"opacity .15s",borderRadius:6});
+  // 44x44 minimum tap target (was 24x24) -- this is the row a slightly
+  // drunk man needs to hit one-handed in a bar. Bumping the box without
+  // shrinking the row required moving these off the name line -- see the
+  // two-line member row below.
+  const iconBtn=(active,color)=>({background:"none",border:"none",cursor:"pointer",fontSize:".95rem",padding:4,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center",opacity:active?1:.32,color:color||"var(--cream)",lineHeight:1,transition:"opacity .15s",borderRadius:8});
 
   return(
     <div className="fu">
@@ -6698,27 +6702,32 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
               <Btn onClick={clearTeams} variant="ghost" size="sm">♻️ Opnieuw beginnen</Btn>
             </div>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))",gap:"1rem",marginBottom:"1.5rem"}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"1rem",marginBottom:"1.5rem"}}>
             {teams.map((team,i)=>{
               const col=TEAM_COLORS[i%TEAM_COLORS.length];
               const members=Array.isArray(team.members)?team.members:[];
               return(
                 <div key={team.id} style={{background:"var(--bg2)",border:`1px solid ${col}44`,borderRadius:"var(--radius)",padding:"1.1rem",animation:"teamReveal .4s ease both",animationDelay:`${i*70}ms`}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:".75rem"}}>
-                    <div onClick={()=>setAvatarPicker(avatarPicker===i?null:i)}
-                      style={{fontSize:"1.4rem",cursor:"pointer",lineHeight:1,padding:"2px 4px",borderRadius:6,border:"1px solid var(--border)",background:"var(--bg3)",userSelect:"none",flexShrink:0}}>
+                    {/* Was a 24px-ish div with an onClick -- matching the
+                        44x44, real-<button> treatment mens-games already
+                        uses for its icon pickers (TournamentEditor/
+                        RoundEditor), for the same reason as the member-row
+                        icon buttons above. */}
+                    <button type="button" onClick={()=>setAvatarPicker(avatarPicker===i?null:i)} aria-label="Kies team-icoon" aria-expanded={avatarPicker===i}
+                      style={{width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.4rem",cursor:"pointer",lineHeight:1,borderRadius:8,border:"1px solid var(--border)",background:"var(--bg3)",userSelect:"none",flexShrink:0}}>
                       {team.avatar}
-                    </div>
+                    </button>
                     <input value={team.name} onChange={e=>renameTeam(i,e.target.value)}
                       style={{flex:1,background:"transparent",border:"none",borderBottom:`1px solid ${col}66`,color:col,fontFamily:"var(--font-h)",fontSize:".95rem",outline:"none",padding:"2px 0",minWidth:0}}/>
                   </div>
                   {avatarPicker===i&&(
-                    <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:".6rem",padding:".4rem",background:"var(--bg)",borderRadius:8,border:"1px solid var(--border)"}}>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:".6rem",padding:".4rem",background:"var(--bg)",borderRadius:8,border:"1px solid var(--border)"}}>
                       {TEAM_AVATARS.map(av=>(
-                        <div key={av} onClick={()=>setAvatar(i,av)}
-                          style={{fontSize:"1.2rem",cursor:"pointer",padding:"3px 4px",borderRadius:5,border:team.avatar===av?"2px solid var(--amber)":"1px solid transparent",userSelect:"none"}}>
+                        <button key={av} type="button" onClick={()=>setAvatar(i,av)} aria-pressed={team.avatar===av} aria-label={`Kies icoon ${av}`}
+                          style={{width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.2rem",cursor:"pointer",borderRadius:8,background:team.avatar===av?"rgba(232,148,58,.18)":"var(--bg3)",border:team.avatar===av?"1px solid var(--amber)":"1px solid var(--border)",userSelect:"none"}}>
                           {av}
-                        </div>
+                        </button>
                       ))}
                     </div>
                   )}
@@ -6729,18 +6738,28 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
                       const isCap=team.captain===name;
                       const isPinned=pins[name]===team.id;
                       return(
-                        <div key={j} style={{display:"flex",alignItems:"center",gap:4,padding:"5px 0",borderTop:j>0?"1px solid var(--border)":"none"}}>
-                          {u?<Avatar name={u.username} size={22} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>:<div style={{width:22,height:22,borderRadius:"50%",background:"var(--bg4)",border:"1px solid var(--border)",flexShrink:0}}/>}
-                          <span style={{fontSize:".88rem",color:isCap?"var(--gold)":"var(--cream)",fontWeight:isCap?700:400,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</span>
-                          <button onClick={()=>toggleCaptain(team.id,name)} aria-label={isCap?`${name} is aanvoerder — klik om te verwijderen`:`Maak ${name} aanvoerder`} title={isCap?"Aanvoerder verwijderen":"Maak aanvoerder"} style={iconBtn(isCap,"var(--gold)")}>👑</button>
-                          <button onClick={()=>togglePin(name,team.id)} aria-label={isPinned?`${name} losmaken (mag weer geloot worden)`:`${name} vastzetten op dit team`} title={isPinned?"Losmaken":"Vastzetten (blijft bij opnieuw loten)"} style={iconBtn(isPinned,"var(--blue)")}>📌</button>
-                          {teams.length>1&&(
-                            <select value={team.id} onChange={e=>assignMember(name,e.target.value)} aria-label={`Verplaats ${name} naar een ander team`}
-                              style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,color:"var(--cream)",fontSize:".7rem",padding:"3px 4px",minHeight:24,maxWidth:86}}>
-                              {teams.map(t=><option key={t.id} value={t.id}>{t.avatar} {t.name}</option>)}
-                            </select>
-                          )}
-                          <button onClick={()=>remove(name)} aria-label={`${name} verwijderen uit deelnemers`} style={iconBtn(true,"var(--muted)")}>✕</button>
+                        // Two-line row (was one line with avatar + name + 3
+                        // icon buttons + a team-move dropdown all jammed
+                        // together): name gets its own full-width line so it
+                        // stops truncating, controls drop to a second,
+                        // wrapping line so the 44px tap targets below have
+                        // room to breathe instead of forcing the card wider.
+                        <div key={j} style={{display:"flex",flexDirection:"column",gap:2,padding:"6px 0",borderTop:j>0?"1px solid var(--border)":"none"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
+                            {u?<Avatar name={u.username} size={22} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>:<div style={{width:22,height:22,borderRadius:"50%",background:"var(--bg4)",border:"1px solid var(--border)",flexShrink:0}}/>}
+                            <span style={{fontSize:".88rem",color:isCap?"var(--gold)":"var(--cream)",fontWeight:isCap?700:400,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</span>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4,flexWrap:"wrap"}}>
+                            {teams.length>1&&(
+                              <select value={team.id} onChange={e=>assignMember(name,e.target.value)} aria-label={`Verplaats ${name} naar een ander team`}
+                                style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",fontSize:".74rem",padding:"0 6px",minHeight:44,maxWidth:112,flex:"1 1 auto"}}>
+                                {teams.map(t=><option key={t.id} value={t.id}>{t.avatar} {t.name}</option>)}
+                              </select>
+                            )}
+                            <button onClick={()=>toggleCaptain(team.id,name)} aria-label={isCap?`${name} is aanvoerder — klik om te verwijderen`:`Maak ${name} aanvoerder`} title={isCap?"Aanvoerder verwijderen":"Maak aanvoerder"} style={iconBtn(isCap,"var(--gold)")}>👑</button>
+                            <button onClick={()=>togglePin(name,team.id)} aria-label={isPinned?`${name} losmaken (mag weer geloot worden)`:`${name} vastzetten op dit team`} title={isPinned?"Losmaken":"Vastzetten (blijft bij opnieuw loten)"} style={iconBtn(isPinned,"var(--blue)")}>📌</button>
+                            <button onClick={()=>remove(name)} aria-label={`${name} verwijderen uit deelnemers`} style={iconBtn(true,"var(--muted)")}>✕</button>
+                          </div>
                         </div>
                       );
                     })}
@@ -7436,15 +7455,22 @@ export default function App(){
       <GS/>
       {/* Write-failure banner: a hard-to-miss, manually-dismissed alert for
           any event write this app treats as "must not silently lose user
-          work" (see `updateEvent`/NewEventModal's onSave). Fixed above
-          everything else in the app (Nav is z-index 200, PresentationMode
-          is the highest normal overlay at 1000) so it's visible no matter
-          which modal or overlay was open when the write failed. */}
+          work" (see `updateEvent`/NewEventModal's onSave). `top:58` (not 0)
+          deliberately sits it flush below Nav's fixed bar instead of on top
+          of it -- Nav is 58px tall and the banner is taller, so top:0 used
+          to blank out the logo/Lads/Hall of Fame/Teams/Mens-Games/
+          notifications/logout for as long as the banner was up, trapping
+          whoever hit the failed save with no way to navigate away. z-index
+          stays above every other overlay (Nav is 200, PresentationMode --
+          untouched here -- is the highest normal overlay at 1000) so it's
+          still visible no matter which modal was open when the write
+          failed; it just no longer competes with Nav for the same strip of
+          screen. */}
       {writeError&&(
-        <div role="alert" aria-live="assertive" style={{position:"fixed",top:0,left:0,right:0,zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",gap:12,flexWrap:"wrap",background:"linear-gradient(90deg,rgba(45,10,10,.97),rgba(64,14,14,.97))",borderBottom:"1px solid rgba(224,85,85,.55)",padding:".7rem 1.4rem",backdropFilter:"blur(12px)"}}>
+        <div role="alert" aria-live="assertive" style={{position:"fixed",top:58,left:0,right:0,zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",gap:12,flexWrap:"wrap",background:"linear-gradient(90deg,rgba(45,10,10,.97),rgba(64,14,14,.97))",borderBottom:"1px solid rgba(224,85,85,.55)",padding:".7rem 1.4rem",backdropFilter:"blur(12px)"}}>
           <span aria-hidden="true" style={{fontSize:"1rem"}}>⚠️</span>
           <span style={{color:"#fff",fontSize:".85rem",fontWeight:600}}>{writeError}</span>
-          <button onClick={()=>setWriteError(null)} style={{background:"rgba(255,255,255,.14)",border:"1px solid rgba(255,255,255,.3)",borderRadius:8,color:"#fff",padding:"6px 14px",cursor:"pointer",fontSize:".75rem",fontWeight:700,fontFamily:"var(--font-b)",minHeight:32}}>Dismiss</button>
+          <button onClick={()=>setWriteError(null)} style={{background:"rgba(255,255,255,.14)",border:"1px solid rgba(255,255,255,.3)",borderRadius:8,color:"#fff",padding:"6px 14px",cursor:"pointer",fontSize:".75rem",fontWeight:700,fontFamily:"var(--font-b)",minHeight:44,display:"flex",alignItems:"center"}}>Dismiss</button>
         </div>
       )}
       <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onUpdates={()=>setPageView("updates")} onProfile={()=>openMember(currentUser.id)} onTeams={openTeams} onTimer={openTimer} onMensGames={openMensGames} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>

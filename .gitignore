@@ -12,3 +12,9 @@ dist
 /public/trailer-preview-mock/
 /docs/trailer-shots/
 /trailer-capture.mjs
+
+# Throwaway QA/browser-verification harness (2026-08-21 media pass) -- never ship
+/qa-harness.html
+/src/qa-harness/
+/public/qa-harness-mock/
+/docs/qa-shots/
