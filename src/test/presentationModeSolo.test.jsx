@@ -13,6 +13,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
+import { isSafeImageUrl } from '../features/trailer/safeUrl.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const APP_JSX_PATH = path.join(__dirname, '..', 'App.jsx')
@@ -170,6 +171,7 @@ function extractPresentationMode() {
     'useRef',
     'useCallback',
     'supabase',
+    'isSafeImageUrl',
     `${transformed}\nreturn PresentationMode;`,
   )
   return fn
@@ -205,7 +207,7 @@ let fakeSupabase
 beforeEach(() => {
   vi.useFakeTimers()
   fakeSupabase = makeFakeSupabase()
-  PresentationMode = extractPresentationMode()(React, useState, useEffect, useRef, useCallback, fakeSupabase)
+  PresentationMode = extractPresentationMode()(React, useState, useEffect, useRef, useCallback, fakeSupabase, isSafeImageUrl)
 })
 
 afterEach(() => {
@@ -315,5 +317,63 @@ describe('PresentationMode solo mode', () => {
     const exitBtn = screen.getByText('✕ Exit')
     fireEvent.click(exitBtn)
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  // Dot navigation used to colour secret/revealed stops red/green with no
+  // `isPresenter` guard, so a solo browser (which can jump to any dot on
+  // demand, unlike a locked viewer) could see exactly which running-order
+  // positions hold a secret stop -- and, with neighbouring dots' slide
+  // content showing real times once visited, roughly when. Fixed
+  // pre-existing bug (confirmed on main, not introduced by this branch).
+  it('never colours the dot strip by secret/revealed status -- every dot looks like a plain stop, even the secret one', () => {
+    const evt = makeEvt() // stop index 1 (display position 2) is the secret one
+    render(<PresentationMode evt={evt} onUpdate={() => {}} isPresenter={false} isSolo={true} onClose={() => {}} />)
+    const dots = document.querySelectorAll('div[style*="justify-content: center"][style*="bottom"] > button')
+    expect(dots.length).toBe(4) // intro + 3 stops
+    dots.forEach((dot, i) => {
+      if (i === 2) return // the current/active dot is amber regardless -- not the property under test
+      // Neither the "secret, unrevealed" red nor the "secret, revealed"
+      // green -- every non-active dot, secret or not, is the same plain colour.
+      expect(dot.style.background).not.toBe('rgba(224, 85, 85, 0.5)')
+      expect(dot.style.background).not.toBe('rgba(76, 175, 125, 0.6)')
+    })
+  })
+
+  // src/App.jsx:~5570 (`href={stop.locationUrl}`) had no URL validation --
+  // React doesn't block a `javascript:` scheme in an href, so a
+  // hand-edited/malicious schedule-stop Maps URL was stored XSS on click.
+  // Fixed the same way the two other sites in the app already were
+  // (`isSafeImageUrl` from safeUrl.js, http(s)-only).
+  it('never renders a clickable link for an unsafe (javascript:) locationUrl', () => {
+    const evt = {
+      id: 'evt-xss-1',
+      name: 'XSS Test',
+      date: '2026-09-11',
+      schedule: [
+        { activity: 'Sketchy Stop', day: 0, time: '09:00', icon: '📍', secret: false, location: 'Somewhere', locationUrl: 'javascript:alert(1)' },
+      ],
+    }
+    render(<PresentationMode evt={evt} onUpdate={() => {}} isPresenter={false} isSolo={true} onClose={() => {}} />)
+    fireEvent.click(screen.getByText('→'))
+    advanceFade()
+    expect(screen.getByText('Somewhere')).toBeInTheDocument()
+    // Plain text, not a link -- no way to click through to the javascript: URL.
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  it('still renders a real, safe (https:) locationUrl as a clickable link', () => {
+    const evt = {
+      id: 'evt-safe-url-1',
+      name: 'Safe URL Test',
+      date: '2026-09-11',
+      schedule: [
+        { activity: 'Normal Stop', day: 0, time: '09:00', icon: '📍', secret: false, location: 'Café de Kroeg', locationUrl: 'https://maps.google.com/?q=kroeg' },
+      ],
+    }
+    render(<PresentationMode evt={evt} onUpdate={() => {}} isPresenter={false} isSolo={true} onClose={() => {}} />)
+    fireEvent.click(screen.getByText('→'))
+    advanceFade()
+    const link = screen.getByRole('link', { name: /Café de Kroeg/i })
+    expect(link).toHaveAttribute('href', 'https://maps.google.com/?q=kroeg')
   })
 })

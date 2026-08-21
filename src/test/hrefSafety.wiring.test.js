@@ -8,9 +8,12 @@
 // Same wiring-only-verification approach as teamCreatorPage.wiring.test.js
 // -- OverviewTab/PollsTab pull in a large dependency graph not worth
 // re-injecting for a one-line conditional guard around an already-tested
-// pure function. Does NOT cover the schedule-stop link inside
-// PresentationMode (App.jsx ~5563) -- out of scope for this pass, per the
-// explicit "do not touch PresentationMode" constraint.
+// pure function. The schedule-stop link inside PresentationMode
+// (App.jsx, PresentationMode's own render) was originally left unguarded
+// here ("do not touch PresentationMode"); that constraint was lifted for
+// the stable-stop-id pass and the same guard was applied there too (see
+// presentationModeSolo.test.jsx for behavioral coverage of the actual
+// rendered output, via the real, mounted component).
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -27,5 +30,9 @@ describe('href safety wiring', () => {
 
   it('the poll external link (PollsTab) is gated on isSafeImageUrl', () => {
     expect(source).toMatch(/\{poll\.link\?\.url&&isSafeImageUrl\(poll\.link\.url\)&&\(/)
+  })
+
+  it('the schedule stop location link inside PresentationMode is also gated on isSafeImageUrl', () => {
+    expect(source).toMatch(/isSafeImageUrl\(stop\.locationUrl\)\?<a href=\{stop\.locationUrl\}/)
   })
 })

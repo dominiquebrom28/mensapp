@@ -495,4 +495,58 @@ describe('PresentationMode presenter: outgoing broadcast carries realIdx alongsi
     const lastTrack = ch.track.mock.calls.at(-1)[0]
     expect(lastTrack.realIdx).toBeNull()
   })
+
+  // The reorder-desync fix (ticket: stable stop identity) adds a `stopId`
+  // field alongside the legacy `idx`/`realIdx` -- additive, so an
+  // older-build viewer (who has never heard of `stopId`) still works off
+  // `realIdx`/`idx` exactly as before. Confirms the new field actually
+  // rides along, not just the old ones.
+  it('also sends a `stopId` identifying the stop by its own stable id, alongside the legacy idx/realIdx', () => {
+    const evt = {
+      id: 'evt-sender-3',
+      name: 'Sender StopId Test',
+      date: '2026-09-11',
+      schedule: [
+        { id: 'stop-alpha', activity: 'Alpha', day: 0, time: '09:00', secret: false },
+        { id: 'stop-bravo', activity: 'Bravo', day: 0, time: '12:00', secret: false },
+      ],
+    }
+    render(<PresentationMode evt={evt} onUpdate={() => {}} isPresenter={true} onClose={() => {}} />)
+    fireEvent.click(screen.getByText('→'))
+    advanceFade()
+    fireEvent.click(screen.getByText('→'))
+    advanceFade()
+    const ch = fakeSupabase.lastChannel
+    const lastSend = ch.send.mock.calls.at(-1)[0]
+    expect(lastSend.payload.stopId).toBe('stop-bravo')
+    expect(lastSend.payload.realIdx).toBe(1)
+  })
+})
+
+describe('PresentationMode dot navigation: secret/revealed colouring never leaks to a non-presenter (item 2, dots)', () => {
+  // src/App.jsx's dot strip coloured secret-stop dots red/green with no
+  // `isPresenter` guard, so a viewer or solo browser could see exactly
+  // which running-order positions hold a surprise (and, with neighbouring
+  // dots' times visible once visited, roughly when) just by looking at the
+  // strip -- contradicting the intro slide's own withholding of the secret
+  // *count* from non-presenters. Confirmed pre-existing on main.
+  it('a viewer never sees secret/revealed dot colouring, even though the schedule has a secret stop', () => {
+    const evt = {
+      id: 'evt-dotleak-1',
+      name: 'Dot Leak Test',
+      date: '2026-09-11',
+      schedule: [
+        { activity: 'Public One', day: 0, time: '09:00', secret: false },
+        { activity: 'Secret Two', day: 0, time: '12:00', secret: true },
+        { activity: 'Public Three', day: 0, time: '15:00', secret: false },
+      ],
+    }
+    render(<PresentationMode evt={evt} onUpdate={() => {}} isPresenter={false} onClose={() => {}} />)
+    const dots = document.querySelectorAll('div[style*="justify-content: center"][style*="bottom"] > button')
+    expect(dots.length).toBe(4) // intro + 3 stops
+    dots.forEach((dot) => {
+      expect(dot.style.background).not.toBe('rgba(224, 85, 85, 0.5)')
+      expect(dot.style.background).not.toBe('rgba(76, 175, 125, 0.6)')
+    })
+  })
 })

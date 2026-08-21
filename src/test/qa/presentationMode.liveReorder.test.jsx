@@ -1,30 +1,34 @@
-// QA repro (2026-08-21 event-side re-verification pass): does the
-// `realIdx`/`order` machinery actually survive a schedule edit that lands
-// WHILE a presentation is live -- the exact composition the owner's audit
-// brief called out ("the schedule editor now saves on backdrop click, and
-// a schedule change during a live presentation is exactly the divergence
-// the realIdx work was meant to survive -- do they actually compose?").
+// QA repro (2026-08-21 event-side re-verification pass), now a regression
+// guard: does the slide-identity machinery survive a schedule edit that
+// lands WHILE a presentation is live -- the exact composition the owner's
+// audit brief called out ("the schedule editor now saves on backdrop
+// click, and a schedule change during a live presentation is exactly the
+// divergence the realIdx work was meant to survive -- do they actually
+// compose?").
 //
-// Finding: `realIdx` identifies a stop by its ARRAY INDEX, not by any
-// stable identity (schedule stops have no `id` field -- see `blankStop` in
-// App.jsx). The whole "survive a divergent slide" mechanism (order[],
-// resolveLiveIdx, applySlide's realIdx resolution) is built to survive a
+// Originally: no. `realIdx` identified a stop by its ARRAY INDEX, not by
+// any stable identity (schedule stops had no `id` field -- see `blankStop`
+// in App.jsx). The "survive a divergent slide" mechanism (order[],
+// resolveLiveIdx, applySlide's realIdx resolution) was built to survive a
 // schedule that's ADDED TO or SHRUNK -- it clamps out-of-range indices and
-// re-resolves an out-of-range realIdx to the nearest valid slide. It is
-// NOT built to survive a REORDER: same array length, same real indices,
-// but the (day,time) sort producing `order[]` changes -- e.g. an editor
-// retiming a stop, or using the schedule editor's own up/down
-// "move within day" control (`moveInDay`, App.jsx), both real, common,
-// backdrop-click-saved edits.
+// re-resolves an out-of-range realIdx to the nearest valid slide -- but NOT
+// a REORDER: same array length, same real indices, but the (day,time) sort
+// producing `order[]` changes -- e.g. an editor retiming a stop, or using
+// the schedule editor's own up/down "move within day" control (`moveInDay`,
+// App.jsx), both real, common, backdrop-click-saved edits. `idx` (a display
+// POSITION) stayed put across the re-render, but `order[idx-1]` resolved to
+// a DIFFERENT real stop, because the sort order shifted -- the presenter's
+// own screen would silently swap to a different stop's content with no
+// navigation action, and the next idx-driven broadcast would send that
+// wrong stop's realIdx to the room as if the presenter had chosen it.
 //
-// When that happens mid-presentation, `idx` (a display POSITION, e.g.
-// "slide 2") stays put across the re-render, but `order[idx-1]` now
-// resolves to a DIFFERENT real stop, because the sort order shifted. The
-// presenter's own screen silently swaps to a different stop's content --
-// with no navigation action, no error, no "catching up" indicator (that
-// only covers still-out-of-range indices, not a same-range remap) -- and
-// the very next idx-driven effect broadcasts THAT wrong stop's realIdx to
-// every viewer as if the presenter had chosen it.
+// Fixed: every stop now carries a stable `id` (backfilled for legacy data,
+// persisted by the presenter), and PresentationMode pins its displayed
+// slide to that id rather than to a raw array position -- when the running
+// order reshuffles under it, `idx` (and the outgoing broadcast) are
+// silently corrected to keep pointing at the SAME stop instead of drifting
+// to whatever now sorts into that slide number. This file now guards that
+// fix rather than documenting the bug.
 //
 // Uses the same source-extraction technique as
 // presentationModeRobustness.test.jsx / presentationModeOrder.test.jsx
@@ -185,7 +189,7 @@ function advanceFade() {
 }
 
 describe('PresentationMode live composition: schedule edit landing mid-presentation (reorder, not add/remove)', () => {
-  it('PRESENTER: retiming a same-day stop (moveInDay-equivalent) while parked on a slide silently swaps the displayed AND broadcast stop, with no navigation and no indicator', () => {
+  it('PRESENTER: retiming a same-day stop (moveInDay-equivalent) while parked on a slide keeps showing the SAME stop (self-heals `idx`) and re-broadcasts the correction, with no navigation needed', () => {
     const evt = {
       id: 'evt-reorder-1',
       name: 'Reorder Test',
@@ -226,25 +230,25 @@ describe('PresentationMode live composition: schedule edit landing mid-presentat
     }
     rerender(<PresentationMode evt={retimed} onUpdate={() => {}} isPresenter={true} onClose={() => {}} />)
 
-    // The presenter did not click anything. `idx` (slide position 2) is
-    // unchanged. But display order is now [B,A], so slide 2 now resolves
-    // to StopA -- a silent content swap the presenter never asked for.
-    expect(screen.getByText('StopA')).toBeInTheDocument()
-    expect(screen.queryByText('StopB')).not.toBeInTheDocument()
+    // The presenter did not click anything, and the running order flipped
+    // to [B,A] under them -- but content stays pinned to the SAME stop
+    // (StopB) they were actually looking at, not whatever now sorts into
+    // slide position 2.
+    expect(screen.getByText('StopB')).toBeInTheDocument()
+    expect(screen.queryByText('StopA')).not.toBeInTheDocument()
+    // The slide *number* is allowed to (and does) change -- StopB is now
+    // display position 1, not 2 -- since it honestly reflects where the
+    // pinned stop actually sits in the new running order.
+    expect(screen.getByText('Stop 1 / 2')).toBeInTheDocument()
 
-    // Sharper finding: the outgoing-broadcast effect's deps are
-    // `[idx,isPresenter]`, NOT `evt` -- so it does NOT re-fire just because
-    // the schedule (and therefore what realIdx=1 under the old order vs.
-    // the new order means) changed. No new broadcast is sent at all. Every
-    // viewer currently following this presenter is now looking at STALE
-    // content (StopB, from the last broadcast) while the presenter's own
-    // screen has already silently moved to StopA -- room and presenter
-    // disagree on what's on screen, with no error and no indicator either
-    // side, until the presenter's NEXT navigation (which re-fires the
-    // effect and would broadcast whatever the reorder happens to resolve
-    // `idx` to at that point -- see the sibling reorder test for that half).
+    // The self-heal re-fires the idx-driven broadcast effect, so the room
+    // converges without the presenter needing to click anything: a NEW
+    // broadcast goes out, still correctly identifying StopB (real index 1)
+    // -- the room is never left holding stale content.
     const sendCallsAfter = fakeSupabase.lastChannel.send.mock.calls.length
-    expect(sendCallsAfter).toBe(sendCallsBefore) // no re-broadcast on the reorder itself
-    expect(lastPayloadBefore.realIdx).toBe(1) // viewers are still holding StopB's realIdx
+    expect(sendCallsAfter).toBeGreaterThan(sendCallsBefore)
+    const lastPayloadAfter = fakeSupabase.lastChannel.send.mock.calls.at(-1)[0].payload
+    expect(lastPayloadAfter.realIdx).toBe(1) // still StopB, by real array index
+    expect(lastPayloadAfter.idx).toBe(1) // its corrected slide position
   })
 })

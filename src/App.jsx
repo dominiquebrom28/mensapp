@@ -1745,9 +1745,11 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
           // alongside the legacy `idx` display position for backwards
           // compat -- a presenter on a build that predates `realIdx` simply
           // won't send it, and PresentationMode's own resolver falls back
-          // to `idx` when that's the case. See PresentationMode for the
-          // full rationale.
-          setSchedLive({idx:p.idx??0,realIdx:p.realIdx,revealedSecrets:p.revealedSecrets??[]});
+          // to `idx` when that's the case. `stopId`/`revealedStopIds` are
+          // the same idea one layer more robust: a stop's own stable id
+          // (survives a live reorder, not just an add/remove) -- see
+          // PresentationMode for the full rationale on all four.
+          setSchedLive({idx:p.idx??0,realIdx:p.realIdx,stopId:p.stopId,revealedSecrets:p.revealedSecrets??[],revealedStopIds:p.revealedStopIds});
           setPresenterDetected(true);
         } else if(seenPresenter){
           resetPresenter(); // presenter actually ended (we had confirmed they were there)
@@ -1756,7 +1758,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
       .on('broadcast',{event:'slide'},({payload})=>{
         // Keep schedLive current while dismissed so Rejoin shows the right slide
         seenPresenter=true;
-        setSchedLive({idx:payload.idx??0,realIdx:payload.realIdx,revealedSecrets:payload.revealedSecrets??[]});
+        setSchedLive({idx:payload.idx??0,realIdx:payload.realIdx,stopId:payload.stopId,revealedSecrets:payload.revealedSecrets??[],revealedStopIds:payload.revealedStopIds});
       })
       .subscribe();
     return()=>supabase.removeChannel(ch);
@@ -5263,7 +5265,27 @@ const AnnouncementBanner=({announcements,currentUser,onArchive,onHardDelete,onRe
 // "X secret" counts, no LIVE badge wording) already falls out of isPresenter
 // being false, same as it does for a real viewer.
 const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,onPresenterLeft,onHide,isSolo=false})=>{
-  const allStops=evt.schedule||[];
+  // Every stop needs a stable identity that survives being REORDERED, not
+  // just added or removed (see the docblock a few lines up + the QA repro
+  // this whole pass exists to close): `order`/`realIdx` alone only key off
+  // a stop's position in `evt.schedule`, which a retimed stop or the
+  // schedule editor's own moveInDay control can silently change out from
+  // under a live presentation with no navigation and no indicator. Stops
+  // saved before this existed have no `id`; `withStopIds` gives every stop
+  // one, preferring a real, persisted `id` when present and falling back to
+  // a position-keyed one (`_localstop-N`) when not. The fallback is stable
+  // within a render, and across an ordinary retime (a time/day edit never
+  // touches physical array order), but NOT across moveInDay's own swap
+  // (which moves the stop object bodily -- a *real* id travels with it, a
+  // position-keyed fallback doesn't, since it's recomputed from array
+  // position on every call). That gap is closed for good, not just
+  // narrowed, by the presenter-only backfill-and-persist effect further
+  // down, which writes real ids back onto `evt.schedule` the first time it
+  // sees any stop missing one -- from then on every client (this one, and
+  // every viewer via the existing `postgres_changes` subscription) works
+  // off the same real ids instead of each separately inventing a fallback.
+  const withStopIds=stops=>stops.map((s,i)=>s.id?s:{...s,id:`_localstop-${i}`});
+  const allStops=withStopIds(evt.schedule||[]);
   const total=allStops.length+1;
   // Display order only, by (day,time) -- everything below that addresses a
   // stop by index (revealedSecrets, toggleReveal's mutation, the broadcast
@@ -5271,6 +5293,38 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   // `order[n]`, so sync/secret-reveal/keyboard/fullscreen behaviour is
   // unchanged; only which index is shown at slide position n+1 changes.
   const order=allStops.map((_,i)=>i).sort((a,b)=>scheduleDayTimeOrder(allStops[a],allStops[b]));
+  // Converts a set of stop ids back into the legacy real-index shape (for
+  // the wire, so a build that predates ids still understands
+  // `revealedSecrets`) -- a stop whose id isn't found in `stops` (e.g. it
+  // was removed) is simply dropped, same "diverged, drop it" tolerance the
+  // rest of this component already applies elsewhere.
+  const toLegacyRevealed=(stops,ids)=>ids.map(id=>stops.findIndex(s=>s.id===id)).filter(i=>i!==-1);
+  // Resolves an incoming live payload (a presence track or a broadcast) to
+  // a real schedule-array index (or `null` for the intro slide), against
+  // whichever (stops, order) pair the caller passes in -- `resolveLiveIdx`
+  // below uses this render's own `allStops`/`order`; `applySlide` inside
+  // the channel effect further down recomputes its own fresh pair from
+  // `evtRef.current` each time it runs (see that effect for why) and passes
+  // those instead. Preference order, each falling through to the next only
+  // when it can't resolve: `stopId` (this stop's own stable identity --
+  // survives a reorder, not just an add/remove) -> legacy `realIdx` (a real
+  // array index -- survives add/remove but not a reorder) -> legacy `idx`
+  // (a raw display position, the original pre-`realIdx` behaviour). A build
+  // that predates this fix never sends `stopId`, so this degrades exactly
+  // to its historical realIdx/idx behaviour for that sender.
+  const resolvePayloadRealIdx=(payload,stops,ord)=>{
+    if(!payload)return{found:false};
+    if(payload.stopId!==undefined&&payload.stopId!==null){
+      const ri=stops.findIndex(s=>s.id===payload.stopId);
+      if(ri!==-1)return{found:true,realIdx:ri};
+    }
+    if(payload.stopId===null)return{found:true,realIdx:null};
+    if(payload.realIdx!==undefined){
+      if(payload.realIdx===null)return{found:true,realIdx:null};
+      if(ord.includes(payload.realIdx))return{found:true,realIdx:payload.realIdx};
+    }
+    return{found:false};
+  };
   // A presence/broadcast snapshot (`currentLive`, and the live payloads
   // handled inside the channel effect below) can be stale or describe a
   // schedule this client's own `evt.schedule` doesn't match yet -- a late
@@ -5280,36 +5334,48 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   // always clamp into THIS client's own valid range, so a divergent or
   // out-of-range snapshot can never seed (or later set) an out-of-bounds
   // slide index -- a viewer that's briefly behind lands on the nearest
-  // valid slide instead of a dead screen. Prefers `realIdx` (a real
-  // schedule-array index identifying the stop itself, sent alongside the
-  // legacy `idx` display-position field for backwards compat -- see the
-  // channel effect below) when present; falls back to the legacy `idx`
-  // field for payloads from a build that predates `realIdx`.
+  // valid slide instead of a dead screen.
   const resolveLiveIdx=live=>{
     if(!live)return 0;
+    const r=resolvePayloadRealIdx(live,allStops,order);
     let ni;
-    if(live.realIdx!==undefined){
-      if(live.realIdx===null)ni=0;
-      else{
-        const pos=order.indexOf(live.realIdx);
-        ni=pos===-1?(live.idx??0):pos+1;
-      }
-    } else {
-      ni=live.idx??0;
-    }
+    if(r.found)ni=r.realIdx===null?0:order.indexOf(r.realIdx)+1;
+    else ni=live.idx??0;
     return Math.max(0,Math.min(total-1,ni));
   };
   const isMultiDay=eventDayCount(evt.date,evt.end_date)>1;
   const isMobile=useIsMobile();
-  const [idx,setIdx]=useState(isPresenter?0:resolveLiveIdx(currentLive));
-  const [revealedSecrets,setRevealedSecrets]=useState(()=>currentLive?.revealedSecrets||[]);
+  const initialIdx=isPresenter?0:resolveLiveIdx(currentLive);
+  // Translates whatever shape an initial presence snapshot's revealed set
+  // arrives in (an older build's real-index numbers, or this build's own
+  // stop ids) into stop ids -- this render's own `allStops` is the frame of
+  // reference, same preference (ids, then legacy indices) `applySlide`
+  // inside the channel effect below uses for every later update, so a late
+  // joiner's very first paint already agrees with everything after it.
+  const initialRevealed=(()=>{
+    if(!currentLive)return[];
+    if(Array.isArray(currentLive.revealedStopIds))return currentLive.revealedStopIds;
+    return(currentLive.revealedSecrets??[]).map(n=>allStops[n]?.id).filter(Boolean);
+  })();
+  const [idx,setIdx]=useState(initialIdx);
+  const [revealedSecrets,setRevealedSecrets]=useState(initialRevealed);
   const [fading,setFading]=useState(false);
   const [locallyDismissed,setLocallyDismissed]=useState(false);
-  const idxRef=useRef(isPresenter?0:resolveLiveIdx(currentLive));
-  const revealedRef=useRef(currentLive?.revealedSecrets||[]);
+  const idxRef=useRef(initialIdx);
+  const revealedRef=useRef(initialRevealed);
   const evtRef=useRef(evt);
   const chRef=useRef(null);
   const onPresenterLeftRef=useRef(onPresenterLeft);
+  // The id of the stop `idx` currently points at (`null` on the intro) --
+  // the anchor the self-heal effect below re-derives `idx` from whenever
+  // the running order reshuffles under it (a retimed stop, or moveInDay,
+  // saved live) so this client's own `idx` stays pointed at the SAME stop
+  // instead of silently drifting to whatever now sorts into that numeric
+  // slide position. Set at every intentional navigation (`goTo`) and every
+  // resolved incoming slide (`applySlide`) below, always in lockstep with
+  // `idx` itself (same fade-timing) so it's never briefly out of sync with
+  // what's actually on screen.
+  const pinnedStopIdRef=useRef(initialIdx===0?null:(allStops[order[initialIdx-1]]?.id??null));
   useEffect(()=>{onPresenterLeftRef.current=onPresenterLeft;},[onPresenterLeft]);
   useEffect(()=>{evtRef.current=evt;},[evt]);
   useEffect(()=>{idxRef.current=idx;},[idx]);
@@ -5322,6 +5388,46 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   useEffect(()=>{
     if(idx>total-1)setIdx(total-1);
   },[idx,total]);
+  // The actual fix for the reorder desync: re-derive `idx` from the pinned
+  // stop's own identity against THIS render's `order` every time either
+  // changes. A stop's real (day,time)-sorted position can change with no
+  // navigation at all -- a retimed stop, or moveInDay, landing purely via a
+  // fresh `evt` prop, same as any other live schedule edit. When the pinned
+  // stop is still present this either finds it already at `idx` (no-op) or
+  // moves `idx` to wherever it sorts now -- content stays pinned to the
+  // SAME stop either way; only its slide *number* (and which dot is lit)
+  // can change. `idx` changing here also re-fires the presenter's own
+  // outgoing-broadcast effect below (it depends on `idx`), so a correction
+  // reaches the room with no click needed. When the pinned stop is no
+  // longer present at all (actually removed), this intentionally does
+  // nothing and leaves the shrink-clamp effect above to pull `idx` back
+  // into range. Deps are `order`/`allStops`/`idx` -- `order`/`allStops` are
+  // freshly recomputed every render (new array references each time), so
+  // in practice this still re-checks every render, same cost as a
+  // low-render-frequency, full-screen presentation UI can easily absorb;
+  // the body only ever calls `setIdx` when the resolved position actually
+  // differs from the current one, so it can't loop.
+  useEffect(()=>{
+    if(pinnedStopIdRef.current==null)return;
+    const pos=order.findIndex(ri=>allStops[ri]?.id===pinnedStopIdRef.current);
+    if(pos!==-1&&pos+1!==idx)setIdx(pos+1);
+  },[order,allStops,idx]);
+  // Presenter-only: the first time this presenter's own schedule has ANY
+  // stop missing a real `id`, write real ids back onto `evt.schedule` (see
+  // `withStopIds` above for the full rationale). Solo/viewer never write to
+  // the event (see this component's own docblock), so this is gated on
+  // `isPresenter` the same way `toggleReveal`'s write already is.
+  // Naturally idempotent, no ref flag needed: `onUpdate` (see
+  // App/EventPage's `updateEvent`) applies its update to local state
+  // optimistically, so the very next render's `evt.schedule` already has
+  // ids and this effect's own `hasMissingIds` check goes false.
+  useEffect(()=>{
+    if(!isPresenter)return;
+    const raw=evt.schedule||[];
+    if(raw.length===0||!raw.some(s=>!s.id))return;
+    const withIds=raw.map((s,i)=>s.id?s:{...s,id:`sid-${Date.now().toString(36)}-${i}-${Math.random().toString(36).slice(2,8)}`});
+    onUpdate({...evt,schedule:withIds});
+  },[isPresenter,evt,onUpdate]);
 
   // Channel setup: Presence for detection/initial-state, Broadcast for real-time slide sync.
   // Solo never runs any of this -- no channel is created at all (not
@@ -5334,13 +5440,14 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
     chRef.current=ch;
     if(isPresenter){
       // Presence lets late-joining viewers get the current slide on
-      // subscribe. `realIdx:null` because a presenter always starts at
-      // `idx===0` (the intro) on mount -- see the idx-driven broadcast
-      // effect below for how `realIdx` is computed once the presenter
+      // subscribe. `realIdx:null`/`stopId:null` because a presenter always
+      // starts at `idx===0` (the intro) on mount -- see the idx-driven
+      // broadcast effect below for how they're computed once the presenter
       // navigates.
       ch.subscribe(async status=>{
         if(status==='SUBSCRIBED'){
-          ch.track({presenting:true,idx:idxRef.current,realIdx:null,revealedSecrets:revealedRef.current});
+          const legacyRevealed=toLegacyRevealed(withStopIds(evtRef.current.schedule||[]),revealedRef.current);
+          ch.track({presenting:true,idx:idxRef.current,realIdx:null,stopId:null,revealedSecrets:legacyRevealed,revealedStopIds:revealedRef.current});
         }
       });
     } else {
@@ -5350,28 +5457,36 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
       // closed over whenever this effect itself last ran -- deps are
       // `[isPresenter,isSolo]`, not `evt`, on purpose, so this effect
       // doesn't tear down and recreate the channel on every schedule edit)
-      // -- see the `resolveLiveIdx` comment above for the full rationale,
-      // and for the `realIdx`-preferred / legacy-`idx`-fallback shape.
-      // Never trusts the raw incoming number: always clamps into THIS
-      // client's own valid range.
+      // -- see the `resolveLiveIdx`/`resolvePayloadRealIdx` comments above
+      // for the full rationale, and for the `stopId`-preferred /
+      // `realIdx`-then-`idx`-fallback shape. Never trusts the raw incoming
+      // number: always clamps into THIS client's own valid range.
       const applySlide=payload=>{
         seenPresenter=true;
-        const mySchedule=evtRef.current.schedule||[];
+        const mySchedule=withStopIds(evtRef.current.schedule||[]);
         const myTotal=mySchedule.length+1;
+        const myOrder=mySchedule.map((_,i)=>i).sort((a,b)=>scheduleDayTimeOrder(mySchedule[a],mySchedule[b]));
+        const r=resolvePayloadRealIdx(payload,mySchedule,myOrder);
         let ni;
-        if(payload.realIdx!==undefined){
-          if(payload.realIdx===null)ni=0;
-          else{
-            const myOrder=mySchedule.map((_,i)=>i).sort((a,b)=>scheduleDayTimeOrder(mySchedule[a],mySchedule[b]));
-            const pos=myOrder.indexOf(payload.realIdx);
-            ni=pos===-1?(payload.idx??0):pos+1;
-          }
-        } else {
-          ni=payload.idx??0;
-        }
+        if(r.found)ni=r.realIdx===null?0:myOrder.indexOf(r.realIdx)+1;
+        else ni=payload.idx??0;
         ni=Math.max(0,Math.min(myTotal-1,ni));
-        if(ni!==idxRef.current){setFading(true);setTimeout(()=>{setIdx(ni);setFading(false);},230);}
-        setRevealedSecrets(payload.revealedSecrets??[]);
+        const resolvedId=ni===0?null:(mySchedule[myOrder[ni-1]]?.id??null);
+        if(ni!==idxRef.current){
+          setFading(true);
+          setTimeout(()=>{pinnedStopIdRef.current=resolvedId;setIdx(ni);setFading(false);},230);
+        } else {
+          pinnedStopIdRef.current=resolvedId;
+        }
+        // Prefers the new, id-based reveal set when the sender has it;
+        // otherwise translates the legacy real-index-shaped set into THIS
+        // client's own stop ids so `isRevealed`/dot colours (both id-keyed
+        // now, see render below) still resolve correctly against an
+        // older-build presenter's payload.
+        const revealedIds=Array.isArray(payload.revealedStopIds)
+          ?payload.revealedStopIds
+          :(payload.revealedSecrets??[]).map(n=>mySchedule[n]?.id).filter(Boolean);
+        setRevealedSecrets(revealedIds);
       };
       ch
         // Presence: initial state for late joiners + detect presenter left
@@ -5400,33 +5515,47 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   // longer resolves the same broadcast number to a different stop --
   // computed fresh from `evtRef.current` (not the render-scope
   // `order`/`allStops`) so it stays correct even though this effect's own
-  // deps are `[idx,isPresenter]`, not `evt`. Sent alongside the legacy
-  // `idx` display position so a viewer on a build that predates `realIdx`
-  // still works unchanged (falls back to it inside `applySlide` above /
-  // `resolveLiveIdx` above that).
+  // deps include `evt` (see below), not just `[idx,isPresenter]`. `stopId`
+  // rides alongside it, one layer more robust (survives a reorder too, not
+  // just an add/remove) -- both sent next to the legacy `idx` display
+  // position so a viewer on a build that predates either still works
+  // unchanged (falls back to them inside `applySlide` above /
+  // `resolveLiveIdx` above that). `evt` is in the dep list on top of
+  // `idx`/`isPresenter` -- not just so a reorder that happens to leave the
+  // pinned stop's slide *number* unchanged still reaches the room (the
+  // self-heal effect above already re-fires this whenever `idx` itself
+  // moves), but as the explicit belt-and-suspenders the schedule-desync
+  // audit asked for: any live schedule edit while presenting re-confirms
+  // to the room what's actually on screen, not just navigation.
   useEffect(()=>{
     if(!isPresenter||!chRef.current)return;
-    const mySchedule=evtRef.current.schedule||[];
+    const mySchedule=withStopIds(evtRef.current.schedule||[]);
     const myOrder=mySchedule.map((_,i)=>i).sort((a,b)=>scheduleDayTimeOrder(mySchedule[a],mySchedule[b]));
     const realIdx=idx===0?null:myOrder[idx-1];
-    chRef.current.track({presenting:true,idx,realIdx,revealedSecrets:revealedRef.current});
-    chRef.current.send({type:'broadcast',event:'slide',payload:{idx,realIdx,revealedSecrets:revealedRef.current}});
-  },[idx,isPresenter]);
+    const stopId=idx===0?null:(mySchedule[myOrder[idx-1]]?.id??null);
+    const revealedStopIds=revealedRef.current;
+    const revealedSecrets=toLegacyRevealed(mySchedule,revealedStopIds);
+    chRef.current.track({presenting:true,idx,realIdx,stopId,revealedSecrets,revealedStopIds});
+    chRef.current.send({type:'broadcast',event:'slide',payload:{idx,realIdx,stopId,revealedSecrets,revealedStopIds}});
+  },[idx,isPresenter,evt]);
 
-  const toggleReveal=useCallback(stopIdx=>{
-    const cur=revealedRef.current;
-    const revealing=!cur.includes(stopIdx);
-    const next=revealing?[...cur,stopIdx]:cur.filter(i=>i!==stopIdx);
+  const toggleReveal=useCallback((stopIdx,stopId)=>{
+    const cur=revealedRef.current; // stop ids
+    const revealing=!cur.includes(stopId);
+    const next=revealing?[...cur,stopId]:cur.filter(id=>id!==stopId);
     setRevealedSecrets(next);
     if(chRef.current){
       // `stopIdx` here IS the real schedule index already (the caller
       // passes `order[idx-1]`, not the display position) -- reuse it
-      // directly as `realIdx` rather than recomputing it.
-      chRef.current.track({presenting:true,idx:idxRef.current,realIdx:stopIdx,revealedSecrets:next});
-      chRef.current.send({type:'broadcast',event:'slide',payload:{idx:idxRef.current,realIdx:stopIdx,revealedSecrets:next}});
+      // directly as `realIdx` rather than recomputing it. `stopId` is the
+      // same stop's own stable id, passed by the caller alongside it.
+      const mySchedule=withStopIds(evtRef.current.schedule||[]);
+      const revealedSecrets=toLegacyRevealed(mySchedule,next);
+      chRef.current.track({presenting:true,idx:idxRef.current,realIdx:stopIdx,stopId,revealedSecrets,revealedStopIds:next});
+      chRef.current.send({type:'broadcast',event:'slide',payload:{idx:idxRef.current,realIdx:stopIdx,stopId,revealedSecrets,revealedStopIds:next}});
     }
     const e=evtRef.current;
-    const updatedSchedule=(e.schedule||[]).map((s,i)=>i===stopIdx?{...s,secret:!revealing}:s);
+    const updatedSchedule=(e.schedule||[]).map((s,i)=>(s.id?s.id===stopId:i===stopIdx)?{...s,secret:!revealing}:s);
     onUpdate({...e,schedule:updatedSchedule});
   },[onUpdate]);
 
@@ -5443,7 +5572,18 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
     if(!isPresenter&&!isSolo)return;
     if(n<0||n>=total)return;
     setFading(true);
-    setTimeout(()=>{setIdx(n);setFading(false);},230);
+    setTimeout(()=>{
+      // Resolved against THIS moment's own schedule (via `evtRef`, not a
+      // value the `[total,isPresenter,isSolo]`-memoized callback closed
+      // over back when it was created) -- same reasoning as everywhere
+      // else in this component that reads `evtRef.current` fresh rather
+      // than trusting a stale closure.
+      const freshStops=withStopIds(evtRef.current.schedule||[]);
+      const freshOrder=freshStops.map((_,i)=>i).sort((a,b)=>scheduleDayTimeOrder(freshStops[a],freshStops[b]));
+      pinnedStopIdRef.current=n===0?null:(freshStops[freshOrder[n-1]]?.id??null);
+      setIdx(n);
+      setFading(false);
+    },230);
   },[total,isPresenter,isSolo]);
 
   useEffect(()=>{
@@ -5470,7 +5610,7 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   const stopIdx=isIntro?-1:order[idx-1];
   const stop=isIntro?null:allStops[stopIdx];
   const isSecret=!!stop?.secret;
-  const isRevealed=revealedSecrets.includes(stopIdx);
+  const isRevealed=!!stop&&revealedSecrets.includes(stop.id);
   const isHidden=isSecret&&!isRevealed; // secret and not yet revealed
   // Only show background media when stop is visible (not hidden to viewers)
   const media=stop&&(!isHidden||isPresenter)?(stop.image||""):"";
@@ -5551,7 +5691,7 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
                 {stop?.time&&<span style={{fontSize:".95rem",color:"rgba(255,255,255,.8)",fontWeight:600,letterSpacing:".04em"}}>{stop.time}</span>}
                 {/* Reveal/hide toggle — presenter only, for secret stops */}
                 {isPresenter&&isSecret&&(
-                  <button onClick={()=>toggleReveal(stopIdx)}
+                  <button onClick={()=>toggleReveal(stopIdx,stop.id)}
                     style={{marginLeft:"auto",background:isRevealed?"rgba(224,85,85,.18)":"rgba(76,175,125,.18)",border:`1px solid ${isRevealed?"rgba(224,85,85,.45)":"rgba(76,175,125,.45)"}`,borderRadius:10,color:isRevealed?"var(--red)":"var(--green)",padding:"7px 18px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:700,backdropFilter:"blur(8px)",display:"flex",alignItems:"center",gap:6,transition:"all .15s"}}
                     onMouseEnter={e=>e.currentTarget.style.opacity=".8"}
                     onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
@@ -5565,7 +5705,7 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
               </div>
               {stop?.location&&<div style={{fontSize:"1rem",color:"rgba(255,255,255,.82)",marginBottom:".5rem",display:"flex",alignItems:"center",gap:7}}>
                 <span>📍</span>
-                {stop.locationUrl?<a href={stop.locationUrl} target="_blank" rel="noreferrer" style={{color:"var(--amber2)",textDecoration:"none"}}>{stop.location}</a>:<span>{stop.location}</span>}
+                {isSafeImageUrl(stop.locationUrl)?<a href={stop.locationUrl} target="_blank" rel="noreferrer" style={{color:"var(--amber2)",textDecoration:"none"}}>{stop.location}</a>:<span>{stop.location}</span>}
               </div>}
               {stop?.note&&<div style={{fontSize:".95rem",color:"rgba(255,255,255,.72)",fontStyle:"italic",lineHeight:1.6,maxWidth:640,marginTop:4}}>{stop.note}</div>}
             </div>
@@ -5584,13 +5724,20 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
         onMouseLeave={e=>{e.currentTarget.style.background=isMobile?"rgba(255,255,255,.03)":"rgba(255,255,255,.07)";}}
         style={{position:"absolute",right:0,top:"50%",transform:"translateY(-50%)",background:isMobile?"rgba(255,255,255,.03)":"rgba(255,255,255,.07)",border:isMobile?"none":"1px solid rgba(255,255,255,.14)",borderRadius:isMobile?"10px 0 0 10px":12,color:isMobile?"rgba(255,255,255,.5)":"#fff",width:isMobile?36:52,height:isMobile?72:52,cursor:"pointer",fontSize:isMobile?"1rem":"1.3rem",display:"flex",alignItems:"center",justifyContent:"center",zIndex:15,transition:"background .15s",backdropFilter:"blur(8px)"}}>→</button>}
 
-      {/* Dot navigation — clickable for presenter; secret=red dot, revealed=green dot */}
+      {/* Dot navigation — clickable for presenter/solo; secret=red dot, revealed=green dot (presenter only, see below) */}
       <div style={{position:"absolute",bottom:"1.2rem",left:0,right:0,display:"flex",justifyContent:"center",gap:7,zIndex:15}}>
         {Array.from({length:total}).map((_,i)=>{
           const si=i>0?order[i-1]:null;
           const dotStop=i>0?allStops[si]:null;
-          const dotSecret=dotStop?.secret;
-          const dotRevealed=dotSecret&&revealedSecrets.includes(si);
+          // Secret/revealed colouring is presenter-only intel -- a viewer
+          // or solo browser must not be able to tell which running-order
+          // positions hold a surprise (with neighbouring stop times visible
+          // in the schedule, that's enough to guess roughly when, defeating
+          // the whole point of a secret stop) just by glancing at the dot
+          // strip. Matches the intro slide's own withholding of the secret
+          // *count* from non-presenters a few hundred lines up.
+          const dotSecret=isPresenter&&dotStop?.secret;
+          const dotRevealed=dotSecret&&revealedSecrets.includes(dotStop?.id);
           const dotColor=i===idx?"var(--amber)":dotSecret?(dotRevealed?"rgba(76,175,125,.6)":"rgba(224,85,85,.5)"):"rgba(255,255,255,.2)";
           return(
             <button key={i} onClick={()=>(isPresenter||isSolo)&&goTo(i)}
@@ -5606,6 +5753,12 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
 // EDIT MODALS
 // ─────────────────────────────────────────────────────────────────────────────
 const blankStop={time:"",activity:"",location:"",locationUrl:"",icon:"📍",note:"",image:"",secret:false,day:0};
+// A stable id per new stop (PresentationMode keys slide identity off this
+// now, not array position -- see its own docblock) -- generated fresh at
+// each call site below rather than baked into `blankStop` itself, since
+// `blankStop` is spread into more than one new stop per session and a
+// static id on the shared template would make every new stop share it.
+const makeStopId=()=>`sid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
 const EditScheduleModal=({evt,onSave,onClose})=>{
   const [sched,setSched]=useState(evt.schedule.map(s=>({...blankStop,...s})));
   const [iconPicker,setIconPicker]=useState(null);
@@ -5624,7 +5777,7 @@ const EditScheduleModal=({evt,onSave,onClose})=>{
     if(j===undefined)return;
     setSched(s=>{const next=[...s];[next[i],next[j]]=[next[j],next[i]];return next;});
   };
-  const addStopOnDay=day=>setSched(s=>[...s,{...blankStop,day}]);
+  const addStopOnDay=day=>setSched(s=>[...s,{...blankStop,id:makeStopId(),day}]);
   // Group stops by day for headings; anything outside the event's current
   // [0,dayCount) range (e.g. the event's date range shrank after stops were
   // scheduled further out) is surfaced in its own group instead of being
@@ -5664,7 +5817,7 @@ const EditScheduleModal=({evt,onSave,onClose})=>{
   };
   return(<Modal onClose={onClose} onBackdropClose={()=>onSave(sched)} maxWidth={640}><H>Edit Schedule</H><div style={{display:"grid",gap:".9rem"}}>
     {!isMultiDay&&overflowIdxs.length===0
-      ? <>{sched.map((s,i)=>renderStop(i))}<Btn onClick={()=>setSched(s=>[...s,{...blankStop}])} variant="subtle" size="sm">+ Add Stop</Btn></>
+      ? <>{sched.map((s,i)=>renderStop(i))}<Btn onClick={()=>setSched(s=>[...s,{...blankStop,id:makeStopId()}])} variant="subtle" size="sm">+ Add Stop</Btn></>
       : <>
         {groups.map(g=>(
           <div key={g.day} style={{display:"grid",gap:".9rem",paddingBottom:6,borderBottom:"1px solid var(--border)"}}>

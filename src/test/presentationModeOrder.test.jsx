@@ -253,7 +253,12 @@ function advanceFade() {
 // Four stops deliberately NOT in (day,time) order in the underlying array,
 // spanning two days, with a secret stop in the middle of the pack -- this
 // is the shape most likely to expose an off-by-one or day/time inversion in
-// the order/stopIdx mapping.
+// the order/stopIdx mapping. Each stop carries its own explicit `id` --
+// PresentationMode backfills one for a stop that doesn't have one and (as
+// presenter) persists it via `onUpdate`, which these tests aren't wired to
+// feed back into a re-render, so giving every stop a real id up front keeps
+// that backfill a no-op and this file's onUpdate-call-count assertions
+// about exactly what a real user action (the reveal click) does.
 function makeEvt() {
   return {
     id: 'evt-order-1',
@@ -261,10 +266,10 @@ function makeEvt() {
     date: '2026-09-11',
     end_date: '2026-09-12',
     schedule: [
-      { activity: 'A1-real0', day: 1, time: '09:00', icon: '📍', secret: false }, // real idx 0
-      { activity: 'B0late-real1', day: 0, time: '20:00', icon: '📍', secret: false }, // real idx 1
-      { activity: 'C0early-real2-SECRET', day: 0, time: '09:00', icon: '📍', secret: true }, // real idx 2
-      { activity: 'D1early-real3', day: 1, time: '08:00', icon: '📍', secret: false }, // real idx 3
+      { id: 'real0', activity: 'A1-real0', day: 1, time: '09:00', icon: '📍', secret: false }, // real idx 0
+      { id: 'real1', activity: 'B0late-real1', day: 0, time: '20:00', icon: '📍', secret: false }, // real idx 1
+      { id: 'real2', activity: 'C0early-real2-SECRET', day: 0, time: '09:00', icon: '📍', secret: true }, // real idx 2
+      { id: 'real3', activity: 'D1early-real3', day: 1, time: '08:00', icon: '📍', secret: false }, // real idx 3
     ],
   }
 }
