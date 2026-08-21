@@ -28,6 +28,7 @@
 // `finishTournament` itself does I/O, and a failed write for one team set
 // doesn't stop the others -- it's reported back in `errors` instead of
 // losing the whole operation.
+import { supabase } from '../../supabase.js';
 import { addTeamAward, archiveTeamSet } from '../teamlib/api.js';
 
 const MEDAL_ICON = { 1: '🥇', 2: '🥈', 3: '🥉' };
@@ -152,10 +153,24 @@ export async function finishTournament({ tournament, standings, event = null, on
   if (event && typeof event === 'object' && typeof onUpdateEvent === 'function') {
     const tId = (tournament && typeof tournament.id === 'string' && tournament.id) || 'trn';
     const prefix = `mg-${tId}-`;
-    const existing = Array.isArray(event.winners) ? event.winners : [];
-    const kept = existing.filter((w) => !(w && typeof w.id === 'string' && w.id.startsWith(prefix)));
     try {
-      await onUpdateEvent({ ...event, winners: [...kept, ...winners] });
+      // Re-read the event row immediately before writing rather than
+      // trusting the possibly-stale `event` object passed in. The global
+      // Mens-Games page has no realtime subscription on events (only a 30s
+      // poll), so building the write off that stale object and letting
+      // `onUpdateEvent` do its usual full-row upsert could silently discard
+      // a concurrent write to any other field on the same event -- live
+      // quiz scores, RSVPs, kretjes, photos. Same idiom App.jsx's own quiz
+      // handlers use (`writeAnswer`, `changeTeamAvatar`, "End Session"):
+      // fetch fresh, merge, write off the fresh copy. Falls back to the
+      // passed-in `event` only if the fresh read itself comes back empty
+      // (e.g. a transient blip) so a finish still completes rather than
+      // silently dropping the awards.
+      const { data: fresh } = await supabase.from('events').select('*').eq('id', event.id).single();
+      const base = (fresh && typeof fresh === 'object') ? fresh : event;
+      const existing = Array.isArray(base.winners) ? base.winners : [];
+      const kept = existing.filter((w) => !(w && typeof w.id === 'string' && w.id.startsWith(prefix)));
+      await onUpdateEvent({ ...base, winners: [...kept, ...winners] });
     } catch (error) {
       errors.push({ scope: 'event', error });
     }

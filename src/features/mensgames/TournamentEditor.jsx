@@ -34,7 +34,7 @@ function moveItem(arr, index, dir) {
   return next;
 }
 
-export default function TournamentEditor({ tournament: initialTournament, events, teamSets, canManage, onBack, onDeleted, onLocalChange, onUpdateEvent, onTeamSetsChanged }) {
+export default function TournamentEditor({ tournament: initialTournament, events, teamSets, teamSetsError = null, onRetryTeamSets, canManage, onBack, onDeleted, onLocalChange, onUpdateEvent, onTeamSetsChanged }) {
   const [tournament, setTournamentState] = useState(initialTournament);
   const [expandedRoundId, setExpandedRoundId] = useState(null);
   const [showNewRound, setShowNewRound] = useState(false);
@@ -43,10 +43,18 @@ export default function TournamentEditor({ tournament: initialTournament, events
   const [finishing, setFinishing] = useState(false);
   const [finishError, setFinishError] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  // Own wording, not `saveError` -- a failed delete used to show "Opslaan
+  // is mislukt" (a message about saving), which is the wrong operation.
+  const [deleteError, setDeleteError] = useState(false);
   const [saving, setSaving] = useState(false);
   const pendingRef = useRef(null);
   const timerRef = useRef(null);
   const idRef = useRef(initialTournament.id);
+  // Synchronous mirror of `tournament`, used only so `update()` (below) can
+  // compute its next value without depending on React's deferred updater
+  // invocation -- see that function's own comment for why.
+  const tournamentRef = useRef(initialTournament);
+  useEffect(() => { tournamentRef.current = tournament; }, [tournament]);
 
   useEffect(() => {
     // A different tournament was opened -- reset local state rather than
@@ -67,25 +75,40 @@ export default function TournamentEditor({ tournament: initialTournament, events
     });
   };
 
+  // Computes `next` off `tournamentRef` (updated synchronously right here,
+  // not via a `setTournamentState` functional updater) rather than off
+  // React's own deferred `prev` -- two things this avoids:
+  //  - `onLocalChange`/`persist` running from *inside* a `setState`
+  //    updater, which React may invoke more than once per commit
+  //    (StrictMode does, in dev) and which is itself a parent `setState`
+  //    call (`onLocalChange` is the parent's `setTournaments`) fired
+  //    mid-child-render -- both flagged by the security review.
+  //  - a stale read: several rapid calls to `update()` inside the same
+  //    synchronous batch (six stepper taps -- WP-E) must each chain off the
+  //    PREVIOUS tap's result, not off whatever `tournament` still was at
+  //    the start of the batch -- `setTournamentState`'s own `prev` isn't
+  //    guaranteed to reflect that yet when read synchronously afterwards,
+  //    since React defers invoking a functional updater until it processes
+  //    the batch. `tournamentRef` is updated inline instead, so it always
+  //    reflects the running total mid-batch.
   const update = (updater, { immediate = false } = {}) => {
-    setTournamentState((prev) => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      onLocalChange?.(next);
-      if (immediate) {
-        clearTimeout(timerRef.current);
+    const next = typeof updater === 'function' ? updater(tournamentRef.current) : updater;
+    tournamentRef.current = next;
+    setTournamentState(next);
+    onLocalChange?.(next);
+    if (immediate) {
+      clearTimeout(timerRef.current);
+      pendingRef.current = null;
+      persist(next);
+    } else {
+      pendingRef.current = next;
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        const toSave = pendingRef.current;
         pendingRef.current = null;
-        persist(next);
-      } else {
-        pendingRef.current = next;
-        clearTimeout(timerRef.current);
-        timerRef.current = setTimeout(() => {
-          const toSave = pendingRef.current;
-          pendingRef.current = null;
-          persist(toSave);
-        }, SAVE_DEBOUNCE_MS);
-      }
-      return next;
-    });
+        persist(toSave);
+      }, SAVE_DEBOUNCE_MS);
+    }
   };
 
   // Flush any pending debounced write on unmount so navigating straight
@@ -140,9 +163,10 @@ export default function TournamentEditor({ tournament: initialTournament, events
   const doDelete = async () => {
     if (!window.confirm(`"${tournament.name}" definitief verwijderen? Dit kan niet ongedaan gemaakt worden.`)) return;
     clearTimeout(timerRef.current);
+    setDeleteError(false);
     const result = await deleteTournament(tournament.id);
     if (result.ok) onDeleted?.();
-    else setSaveError(true);
+    else setDeleteError(true);
   };
 
   const rounds = tournament.rounds || [];
@@ -193,11 +217,12 @@ export default function TournamentEditor({ tournament: initialTournament, events
       </div>
 
       {saveError && <ErrorState message="Opslaan is mislukt — je laatste wijziging staat mogelijk niet online. Probeer het opnieuw." onRetry={() => persist(tournament)} />}
+      {deleteError && <ErrorState message="Verwijderen is mislukt. Probeer het opnieuw." onRetry={doDelete} />}
       {finishError && <ErrorState message="Afronden is niet volledig gelukt — sommige awards zijn mogelijk niet opgeslagen. Probeer het opnieuw." onRetry={() => setShowFinish(true)} />}
 
       <Card>
         <H size="1.05rem">🧑‍🤝‍🧑 Deelnemers</H>
-        <EntrantPicker mode="tournament" bare entrants={tournament.entrants} teamSets={teamSets} teamSetId={tournament.teamSetId} linkedEvent={linkedEvent} disabled={!canManage}
+        <EntrantPicker mode="tournament" bare entrants={tournament.entrants} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} teamSetId={tournament.teamSetId} linkedEvent={linkedEvent} disabled={!canManage}
           onChange={(entrants) => update((t) => ({ ...t, entrants }))}
           onSetTeamSetId={(id) => update((t) => ({ ...t, teamSetId: id }), { immediate: true })} />
       </Card>

@@ -52,10 +52,12 @@ export default defineConfig([
     },
   },
   {
-    // Event trailer (docs/trailer-technical-spec.md §11): all text renders as
-    // plain React children, never `dangerouslySetInnerHTML`/`renderMd` --
-    // enforced here so it's not just a convention to remember.
-    files: ['src/features/trailer/**/*.{js,jsx}'],
+    // All feature slices (docs/trailer-technical-spec.md §11 for the
+    // trailer; mensgames/ui/styles.jsx's own header comment makes the same
+    // claim for mens-games): text renders as plain React children, never
+    // `dangerouslySetInnerHTML`/`renderMd`. Widened from trailer-only so
+    // that claim is enforced everywhere it's made, not just remembered.
+    files: ['src/features/**/*.{js,jsx}'],
     rules: {
       'react/no-danger': 'error',
     },

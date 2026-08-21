@@ -822,7 +822,7 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose,saraJayUnlocked,on
 // ─────────────────────────────────────────────────────────────────────────────
 // HALL OF FAME
 // ─────────────────────────────────────────────────────────────────────────────
-const HallOfFame = ({events,users=[],teamSets=[]}) => {
+const HallOfFame = ({events,users=[],teamSets=[],teamSetsError=null,onRetryTeamSets}) => {
   const allAttendees = {};
   const allWins = {};
   let totalEvents = events.length;
@@ -1033,7 +1033,16 @@ const HallOfFame = ({events,users=[],teamSets=[]}) => {
       )}
 
       {/* Team trophy cabinet (#16 §6.4) -- team sets decorated by a
-          finished tournament (WP-J) or a hand-added award. */}
+          finished tournament (WP-J) or a hand-added award. A failed read
+          used to just silently show nothing here, same lie as everywhere
+          else teamSets is read: there may well be a cabinet, we simply
+          couldn't reach it. */}
+      {decoratedSets.length===0&&teamSetsError&&(
+        <div className="fu3">
+          <H>🏆 Team Trophy Cabinet</H>
+          <TeamSetsErrorNotice onRetry={onRetryTeamSets}/>
+        </div>
+      )}
       {decoratedSets.length>0&&(
         <div className="fu3">
           <H>🏆 Team Trophy Cabinet</H>
@@ -1559,25 +1568,45 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const TABS=["Overview","Polls","Quiz","Teams","Photos","Winners & Highlights","FAQ","Kretjes 🍺","Mens-Games 🏆"];
 
+// Shared read-failure notice for every teamSets read site (TeamsTab,
+// TeamCreatorPage's library, QuizBuilder's team picker, HallOfFame's
+// trophy cabinet -- EntrantPicker has its own equivalent in mensgames/ui,
+// wired to the same `teamSetsError` string). `fetchTeamSets` (teamlib/
+// api.js) now reports {ok,error,teamSets} instead of a bare [] on failure,
+// specifically so this is distinguishable from "the library is genuinely
+// empty" -- rendering that as "Nog geen teams" would be a lie: the data
+// exists, it just couldn't be reached.
+const TeamSetsErrorNotice=({onRetry})=>(
+  <div role="alert" style={{textAlign:"center",padding:"1.4rem 1rem",color:"var(--red)",border:"1px solid rgba(224,85,85,.35)",borderRadius:"var(--radius-sm)",background:"rgba(224,85,85,.06)"}}>
+    <div aria-hidden="true" style={{fontSize:"1.4rem",marginBottom:".4rem"}}>⚠️</div>
+    <div style={{fontSize:".85rem",marginBottom:onRetry?".7rem":0}}>Kon de teams-bibliotheek niet laden. Er bestaan mogelijk al teams -- probeer het opnieuw.</div>
+    {onRetry&&<Btn onClick={onRetry} variant="danger" size="sm">Opnieuw proberen</Btn>}
+  </div>
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TEAMS TAB
 // ─────────────────────────────────────────────────────────────────────────────
-const TeamsTab=({evt,teamSets=[],onTeamSetsChanged,currentUser,users=[]})=>{
+const TeamsTab=({evt,teamSets=[],teamSetsError=null,onRetryTeamSets,onTeamSetsChanged,currentUser,users=[]})=>{
   // Library sets, filtered down to "active and actually linked to this
   // event" -- an archived set, or one only used elsewhere, has no business
   // showing up on an event's Teams tab. §5.2 row 1.
   const linked=teamSets.filter(ts=>ts.status!=="archived"&&(ts.eventIds||[]).includes(evt.id));
   const isAdmin=can.editEvent(currentUser);
+  const [unlinkError,setUnlinkError]=useState(false);
   // "Verwijder" -> "Loskoppelen": this set lives in the shared library now,
   // so destroying it from inside one event would take it away from every
   // other event (and any tournament) that references it too. This only
   // drops the link between this event and the set; the set itself, and its
   // other links, are untouched.
   const unlink=async ts=>{
+    setUnlinkError(false);
     const result=await unlinkTeamSetFromEvent(ts,evt.id);
     if(result.ok)onTeamSetsChanged?.(prev=>prev.map(x=>x.id===ts.id?result.teamSet:x));
+    else setUnlinkError(true);
   };
   if(linked.length===0)return(
+    teamSetsError?<TeamSetsErrorNotice onRetry={onRetryTeamSets}/>:
     <div style={{textAlign:"center",padding:"3rem 1rem",color:"var(--muted)"}}>
       <div style={{fontSize:"2.5rem",marginBottom:"1rem"}}>🎲</div>
       <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",marginBottom:".5rem",color:"var(--cream)"}}>Geen teams gekoppeld</div>
@@ -1586,6 +1615,7 @@ const TeamsTab=({evt,teamSets=[],onTeamSetsChanged,currentUser,users=[]})=>{
   );
   return(
     <div style={{display:"grid",gap:"1.2rem"}}>
+      {unlinkError&&<div role="alert" style={{color:"var(--red)",fontSize:".85rem",fontWeight:600}}>Loskoppelen mislukt — probeer opnieuw.</div>}
       {linked.map(ts=>{
         const summary=teamSetSummary(ts);
         return(
@@ -1640,7 +1670,7 @@ const TeamsTab=({evt,teamSets=[],onTeamSetsChanged,currentUser,users=[]})=>{
   );
 };
 
-const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif,autoOpenTrailerId,onAutoTrailerConsumed,teamSets=[],onTeamSetsChanged})=>{
+const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif,autoOpenTrailerId,onAutoTrailerConsumed,teamSets=[],teamSetsError=null,onRetryTeamSets,onTeamSetsChanged})=>{
   const [tab,setTab]=useState(initialTab||"Overview");
   useEffect(()=>{
     if(!scrollToId)return;
@@ -1832,12 +1862,12 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
         {tab==="Overview"             &&<OverviewTab evt={evt} onUpdate={onUpdate} isPast={isPast} currentUser={currentUser} users={users} onSendNotif={onSendNotif}/>}
         {tab==="Polls"                &&<PollsTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users} onSendNotif={onSendNotif}/>}
         {tab==="Quiz"                 &&<QuizTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users} onOpenQuizDash={()=>setQuizDash(true)}/>}
-        {tab==="Teams"                &&<TeamsTab evt={evt} teamSets={teamSets} onTeamSetsChanged={onTeamSetsChanged} currentUser={currentUser} users={users}/>}
+        {tab==="Teams"                &&<TeamsTab evt={evt} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} onTeamSetsChanged={onTeamSetsChanged} currentUser={currentUser} users={users}/>}
         {tab==="Photos"               &&<PhotosTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast}/>}
         {tab==="FAQ"                  &&<FAQTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Kretjes 🍺"           &&<KretjesTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
-        {tab==="Mens-Games 🏆"        &&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesTab evt={evt} events={events} teamSets={teamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={onUpdate} onTeamSetsChanged={onTeamSetsChanged}/></Suspense>}
+        {tab==="Mens-Games 🏆"        &&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesTab evt={evt} events={events} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={onUpdate} onTeamSetsChanged={onTeamSetsChanged}/></Suspense>}
       </div>
 
       {/* Live presentation banner — fixed at top of screen */}
@@ -1865,7 +1895,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
       {trailerOpen&&<Suspense fallback={null}>
         <EventTrailer input={trailerInput} onClose={()=>setTrailerOpen(false)}/>
       </Suspense>}
-      {quizDash&&<QuizDashboard evt={evt} onUpdate={onUpdate} users={users} teamSets={teamSets} onClose={()=>setQuizDash(false)}/>}
+      {quizDash&&<QuizDashboard evt={evt} onUpdate={onUpdate} users={users} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} onClose={()=>setQuizDash(false)}/>}
       {/* Live quiz participant view — shown to everyone when a quiz is being presented */}
       {(()=>{const liveQ=(evt.quizzes||[]).find(q=>q._liveState);return liveQ&&!quizDash&&<QuizParticipantView evt={evt} liveQ={liveQ} currentUser={currentUser} onUpdate={onUpdate} users={users}/>;})()}
     </div>
@@ -2052,7 +2082,11 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
                       {!isSecret&&(s.location||s.note)&&(
                         <div style={{marginTop:5,display:"flex",flexDirection:"column",gap:2}}>
                           {s.location&&(
-                            s.locationUrl
+                            // A schedule stop's Maps URL is hand-typed, hand-editable JSONB --
+                            // React doesn't block a `javascript:` href, so this is stored XSS
+                            // on click without the same http(s)-only guard the trailer's URLs
+                            // already get (isSafeImageUrl, safeUrl.js).
+                            isSafeImageUrl(s.locationUrl)
                               ?<a href={s.locationUrl} target="_blank" rel="noreferrer" style={{fontSize:".74rem",color:"var(--amber)",textDecoration:"none",opacity:.8}}>📍 {s.location} ↗</a>
                               :<span style={{fontSize:".74rem",color:"var(--muted)"}}>📍 {s.location}</span>
                           )}
@@ -2151,7 +2185,7 @@ const normalizeQuiz=q=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // QUIZ DASHBOARD  (fullscreen modal — list + editor in one place)
 // ─────────────────────────────────────────────────────────────────────────────
-const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[]})=>{
+const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=null,onRetryTeamSets})=>{
   const quizzes=evt.quizzes||[];
   const saveQuizzes=q=>onUpdate({...evt,quizzes:q});
 
@@ -2338,6 +2372,8 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[]})=>{
                 existing={panel==="edit"?editTarget:null}
                 attendees={evt.attendees||[]}
                 team_sets={teamSets.filter(ts=>ts.status==="active")}
+                teamSetsError={teamSetsError}
+                onRetryTeamSets={onRetryTeamSets}
                 onSave={quiz=>{
                   if(panel==="new"){
                     saveQuizzes([...quizzes,{...quiz,id:`qz${Date.now()}`,status:"ready",scores:{}}]);
@@ -2440,7 +2476,7 @@ const TYPE_META={
   music:   {label:"Music",         icon:"🎵",color:"var(--purple)",bg:"rgba(155,127,232,.12)",border:"rgba(155,127,232,.28)"},
 };
 
-const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
+const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[],teamSetsError=null,onRetryTeamSets})=>{
   const [title,setTitle]=useState(existing?.title||"");
   const [defaultTime,setDefaultTime]=useState(existing?.defaultTime||30);
   const [introText,setIntroText]=useState(existing?.introText||"");
@@ -2847,6 +2883,7 @@ const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=[]})=>{
       {builderTab==="teams"&&(
         <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
           {/* Import saved teams */}
+          {team_sets.length===0&&teamSetsError&&<TeamSetsErrorNotice onRetry={onRetryTeamSets}/>}
           {team_sets.length>0&&(
             <div style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:"var(--radius-sm)",padding:".85rem"}}>
               <div style={{fontSize:".72rem",color:"var(--muted)",letterSpacing:".08em",textTransform:"uppercase",marginBottom:".5rem"}}>📥 Laad opgeslagen teams</div>
@@ -4539,8 +4576,9 @@ const PollsTab=({evt,onUpdate,currentUser,isPast,users=[],onSendNotif})=>{
                     </div>
                   )}
 
-                  {/* External link */}
-                  {poll.link?.url&&(
+                  {/* External link -- hand-typed, hand-editable JSONB, same
+                      javascript:-href guard as the schedule stop's Maps URL. */}
+                  {poll.link?.url&&isSafeImageUrl(poll.link.url)&&(
                     <a href={poll.link.url} target="_blank" rel="noreferrer"
                       style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderRadius:10,background:"rgba(232,148,58,.07)",border:"1px solid rgba(232,148,58,.2)",color:"var(--amber2)",textDecoration:"none",fontSize:".85rem",fontWeight:500}}>
                       <span style={{fontSize:"1rem"}}>🔗</span>
@@ -5689,16 +5727,35 @@ const AttendeeInput=({attendees,setAttendees,users=[]})=>{
 // must look like a video file (.mp4/.webm/.mov/.ogg) -- the same extension
 // set `PresentationMode` already treats as a video at its own
 // video-vs-image branch.
+// Accepted MIME types mirror the `<input accept>` below (that attribute is
+// only a picker *hint* -- some OS file dialogs let a lad pick "All files"
+// regardless, so it isn't itself a guard). Size cap is a generous few
+// minutes of trailer footage, not a hard technical limit -- picked to catch
+// the "accidentally selected a wrong, huge file" case before it burns a
+// full upload round trip.
+const TRAILER_VIDEO_MAX_BYTES=200*1024*1024;
+const TRAILER_VIDEO_TYPES=["video/mp4","video/webm","video/quicktime","video/ogg"];
 const TrailerVideoField=({value,onChange,error})=>{
   const [uploading,setUploading]=useState(false);
   const [uploadErr,setUploadErr]=useState("");
   const fileRef=useRef();
   const handleUpload=async e=>{
     const file=e.target.files[0];if(!file)return;
+    // Guard before the network round trip fires -- catches a bad pick for
+    // free, and (more importantly) prevents a file that WOULD upload fine
+    // but then fail this field's own `isSafeVideoUrl` extension check from
+    // ever reaching the bucket in the first place: nothing in this app ever
+    // deletes an object, so a file that got that far would sit there
+    // orphaned forever.
+    if(!TRAILER_VIDEO_TYPES.includes(file.type)){setUploadErr("Ongeldig bestandstype -- kies een .mp4, .webm, .mov of .ogg video.");e.target.value="";return;}
+    if(file.size>TRAILER_VIDEO_MAX_BYTES){setUploadErr(`Bestand is te groot (max ${Math.round(TRAILER_VIDEO_MAX_BYTES/1024/1024)}MB).`);e.target.value="";return;}
     setUploading(true);setUploadErr("");
     const path=`${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
     const{data,error:upErr}=await supabase.storage.from("event-videos").upload(path,file);
-    if(upErr){setUploadErr("Upload mislukt: "+upErr.message);setUploading(false);e.target.value="";return;}
+    // Generic, fixed message -- matches the write-error banner's convention
+    // (raw Supabase error text, e.g. an RLS policy string, goes to
+    // console.error only, never straight to the screen).
+    if(upErr){console.error("Trailer video upload failed:",upErr);setUploadErr("Upload mislukt -- probeer opnieuw.");setUploading(false);e.target.value="";return;}
     const{data:{publicUrl}}=supabase.storage.from("event-videos").getPublicUrl(data.path);
     onChange(publicUrl);setUploading(false);e.target.value="";
   };
@@ -6210,7 +6267,7 @@ const SaraJayOrJAI = () => {
 // TEAM CREATOR PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 const TEAM_COLORS=["var(--amber)","var(--blue)","var(--green)","var(--purple)","var(--orange)","var(--red)","#56b4a0","#e08050","#9b7fe8","#5b9bd5"];
-const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],onTeamSetsChanged})=>{
+const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsError=null,onRetryTeamSets,onTeamSetsChanged})=>{
   const [teamSize,setTeamSize]=useState(3);
   const [participants,setParticipants]=useState([]);
   const [input,setInput]=useState("");
@@ -6340,16 +6397,33 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],onTeamSetsC
     setSaved(false);setSaveError(false);
   };
   const cancelEdit=()=>{setEditingSetId(null);setSaved(false);};
+  // On failure, each of these used to do nothing at all -- no banner, no
+  // state change, the button just looked dead. Same bug class as
+  // `updateEvent`'s pre-fix write path; `saveToLibrary` above already got
+  // it right (`saveError`), this brings archive/unarchive/delete in line
+  // with one shared banner rather than three near-identical ones.
+  const [libraryActionError,setLibraryActionError]=useState(false);
   const doDelete=async ts=>{
     if(!window.confirm(`"${ts.name}" definitief verwijderen uit de bibliotheek? Dit kan niet ongedaan gemaakt worden.`))return;
+    setLibraryActionError(false);
     const result=await deleteTeamSet(ts.id);
     if(result.ok){
       onTeamSetsChanged?.(prev=>prev.filter(x=>x.id!==ts.id));
       if(editingSetId===ts.id)setEditingSetId(null);
-    }
+    } else setLibraryActionError(true);
   };
-  const doArchive=async ts=>{const result=await archiveTeamSet(ts);if(result.ok)onTeamSetsChanged?.(prev=>prev.map(x=>x.id===ts.id?result.teamSet:x));};
-  const doUnarchive=async ts=>{const result=await unarchiveTeamSet(ts);if(result.ok)onTeamSetsChanged?.(prev=>prev.map(x=>x.id===ts.id?result.teamSet:x));};
+  const doArchive=async ts=>{
+    setLibraryActionError(false);
+    const result=await archiveTeamSet(ts);
+    if(result.ok)onTeamSetsChanged?.(prev=>prev.map(x=>x.id===ts.id?result.teamSet:x));
+    else setLibraryActionError(true);
+  };
+  const doUnarchive=async ts=>{
+    setLibraryActionError(false);
+    const result=await unarchiveTeamSet(ts);
+    if(result.ok)onTeamSetsChanged?.(prev=>prev.map(x=>x.id===ts.id?result.teamSet:x));
+    else setLibraryActionError(true);
+  };
 
   const pickedNames=new Set(participants);
   const teamCount=participants.length>0?Math.ceil(participants.length/teamSize):0;
@@ -6571,7 +6645,10 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],onTeamSetsC
           </div>
         </div>
 
+        {libraryActionError&&<div role="alert" style={{color:"var(--red)",fontSize:".85rem",fontWeight:600,marginBottom:".7rem"}}>Actie mislukt — probeer opnieuw.</div>}
+
         {visibleSets.length===0?(
+          teamSetsError?<TeamSetsErrorNotice onRetry={onRetryTeamSets}/>:
           <div style={{textAlign:"center",padding:"2rem 1rem",color:"var(--muted)",fontSize:".85rem"}}>
             {libFilter==="archived"?"Nog geen gearchiveerde teamsets.":"Nog geen teamsets opgeslagen. Genereer teams hierboven en sla ze op."}
           </div>
@@ -6747,6 +6824,15 @@ export default function App(){
   // tab, QuizDashboard/QuizBuilder, TeamCreatorPage) -- same reasoning as
   // `events`/`users` above, unlike mens-games' own lazy-loaded state.
   const [teamSets,setTeamSets]=useState([]);
+  // Distinguishes "the library is genuinely empty" from "we couldn't reach
+  // it" (fetchTeamSets now reports {ok,error,teamSets} instead of a bare
+  // [] on failure -- teamlib/api.js). A short, fixed Dutch string when the
+  // last read failed, null once a read succeeds again. Threaded down to
+  // every read site (TeamsTab, TeamCreatorPage's library, QuizBuilder's
+  // team picker, EntrantPicker, HallOfFame's trophy cabinet) so none of
+  // them can show a false "nothing here yet" for a read that actually
+  // failed.
+  const [teamSetsError,setTeamSetsError]=useState(null);
   const [currentUser,setCurrentUser]=useState(null);
   const [authView,setAuthView]=useState("login");
   const [activeId,setActiveId]=useState(null);
@@ -6754,6 +6840,12 @@ export default function App(){
   const [showAdmin,setShowAdmin]=useState(false);
   const [newEvent,setNewEvent]=useState(false);
   const [loaded,setLoaded]=useState(false);
+  // Set only if the boot `Promise.all` (below) genuinely *rejects* -- a hard
+  // offline `fetch` throw, not a resolved `{error}` (those are handled per
+  // read and never block `loaded`). Pre-existing gap: without this, a
+  // rejection left `setLoaded(true)` uncalled forever and the app sat on
+  // the loading screen with no feedback and no way out.
+  const [bootError,setBootError]=useState(null);
   const [activeMemberId,setActiveMemberId]=useState(null);
   const [editingProfile,setEditingProfile]=useState(false);
   const [notifications,setNotifications]=useState([]);
@@ -6802,14 +6894,16 @@ export default function App(){
   const currentUserRef=useRef(null);
   useEffect(()=>{currentUserRef.current=currentUser;},[currentUser]);
 
-  useEffect(()=>{
+  const boot=()=>{
+    setBootError(null);
     Promise.all([
       supabase.from("events").select("*").order("date"),
       supabase.from("users").select("*"),
       supabase.from("announcements").select("*").order("created_at",{ascending:false}),
       fetchTeamSets(),
-    ]).then(async([{data:evts},{data:usrs},{data:anns},teamSetRows])=>{
-      setTeamSets(teamSetRows);
+    ]).then(async([{data:evts},{data:usrs},{data:anns},teamSetsRes])=>{
+      setTeamSets(teamSetsRes.ok?teamSetsRes.teamSets:[]);
+      setTeamSetsError(teamSetsRes.ok?null:"Kon de teams-bibliotheek niet laden. Controleer je verbinding.");
       const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});
       if(anns&&anns.length){
         const sjRow=anns.find(r=>r.id==="__sara_jay__");
@@ -6837,10 +6931,33 @@ export default function App(){
       const sessId=localStorage.getItem("md-session");
       if(sessId){const u=allUsers.find(u=>u.id===sessId);if(u)setCurrentUser(u);}
       setLoaded(true);
+    }).catch(err=>{
+      // A genuine rejection (hard offline `fetch` throw), not one of the
+      // four calls' own resolved {error} -- those are handled per read
+      // above and never reach here. Without this, `setLoaded(true)` never
+      // fires and the app sits on the loading screen forever with no
+      // feedback and no way to recover short of a hard refresh.
+      console.error("App boot failed:",err);
+      setBootError("Kon de app niet laden. Controleer je internetverbinding en probeer opnieuw.");
     });
+  };
+
+  // Manual retry for every teamSets read site's error state (TeamsTab,
+  // TeamCreatorPage's library, QuizBuilder's team picker, EntrantPicker,
+  // HallOfFame's trophy cabinet) -- same body the 30s poll below uses, so a
+  // lad who hits "Opnieuw proberen" doesn't have to wait out the interval.
+  const reloadTeamSets=()=>{
+    fetchTeamSets().then(res=>{
+      if(res.ok){setTeamSets(res.teamSets);setTeamSetsError(null);}
+      else setTeamSetsError("Kon de teams-bibliotheek niet laden. Controleer je verbinding.");
+    });
+  };
+
+  useEffect(()=>{
+    boot();
 
     const poll=setInterval(()=>{
-      fetchTeamSets().then(setTeamSets);
+      reloadTeamSets();
       supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data&&data.length){const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});const sjRow=data.find(r=>r.id==="__sara_jay__");if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}const delRow=data.find(r=>r.id==="__deleted_notifs__");if(delRow){try{const raw=JSON.parse(delRow.body||"null");if(raw){const ids=new Set(Array.isArray(raw)?raw:(raw.ids||[]));const cb=Array.isArray(raw)?"": (raw.cleared_before||"");setDeletedNotifIds(ids);if(cb)setClearedBefore(cb);setNotifications(prev=>{const next=prev.filter(n=>!ids.has(n.id)&&(!cb||n.timestamp>cb));const cu=currentUserRef.current;if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));return next;});}}catch{/* ignore malformed announcement JSON from Supabase */}}const SYSTEM_IDS=new Set(["__sara_jay__","__deleted_notifs__"]);const mapped=data.filter(r=>!SYSTEM_IDS.has(r.id)).map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}});
       supabase.from("users").select("*").then(({data})=>{
         if(data){
@@ -7139,7 +7256,22 @@ export default function App(){
   const activeEvent=events.find(e=>e.id===activeId);
   const activeMember=users.find(u=>u.id===activeMemberId);
 
-  if(!loaded)return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",color:"var(--muted)",fontFamily:"'DM Sans',sans-serif",background:"var(--bg)"}}><GS/>Loading…</div>;
+  if(!loaded){
+    // `bootError` only ever gets set by the boot Promise.all's `.catch` --
+    // a genuine rejection, not one of its four calls' own resolved
+    // {error} (each of those degrades gracefully on its own and still lets
+    // `loaded` flip true). Without this branch a hard-offline boot left the
+    // lad staring at "Loading…" forever with nothing to do about it.
+    if(bootError)return(
+      <div role="alert" style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14,height:"100vh",padding:"2rem",textAlign:"center",color:"var(--cream)",fontFamily:"'DM Sans',sans-serif",background:"var(--bg)"}}>
+        <GS/>
+        <span aria-hidden="true" style={{fontSize:"2rem"}}>⚠️</span>
+        <div style={{fontSize:".95rem",maxWidth:360,lineHeight:1.5}}>{bootError}</div>
+        <Btn onClick={boot}>Opnieuw proberen</Btn>
+      </div>
+    );
+    return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",color:"var(--muted)",fontFamily:"'DM Sans',sans-serif",background:"var(--bg)"}}><GS/>Loading…</div>;
+  }
   if(!currentUser){
     if(authView==="register")return<RegisterScreen users={users} onRegister={register} onGoLogin={()=>setAuthView("login")}/>;
     return<LoginScreen users={users} onLogin={login} onGoRegister={()=>setAuthView("register")}/>;
@@ -7166,14 +7298,14 @@ export default function App(){
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
         <AnnouncementBanner announcements={announcements} currentUser={currentUser} onArchive={archiveAnnouncement} onHardDelete={hardDeleteAnnouncement} onReactivate={reactivateAnnouncement} onEdit={ann=>{setEditingAnn(ann);setShowAnnounce(true);}} onNew={()=>{setEditingAnn(null);setShowAnnounce(true);}}/>
         {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users} onTeams={openTeams} onTimer={openTimer} onMensGames={openMensGames} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>}
-        {pageView==="hof"&&<HallOfFame events={events} users={users} teamSets={teamSets}/>}
+        {pageView==="hof"&&<HallOfFame events={events} users={users} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
-        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)} teamSets={teamSets} onTeamSetsChanged={setTeamSets}/>}
+        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} onTeamSetsChanged={setTeamSets}/>}
         {pageView==="updates"&&<UpdatesPage notifications={notifications.filter(n=>!deletedNotifIds.has(n.id)&&(!clearedBefore||n.timestamp>clearedBefore))} notifLastRead={notifLastRead} currentUser={currentUser} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={openEvent} onClearSelf={()=>{setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);}} onDeleteSelf={id=>{setNotifications(prev=>{const next=prev.filter(n=>n.id!==id);if(currentUser)localStorage.setItem(`md-notifs-${currentUser.id}`,JSON.stringify(next));return next;});}} onClearUpdates={async()=>{const cb=new Date().toISOString();const allIds=[...new Set([...deletedNotifIds,...notifications.map(n=>n.id)])];const newSet=new Set(allIds);setDeletedNotifIds(newSet);setClearedBefore(cb);setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);const body=JSON.stringify({ids:allIds,cleared_before:cb});await supabase.from("announcements").upsert({id:"__deleted_notifs__",title:"__deleted_notifs__",body,created_by:"system",created_at:new Date().toISOString(),active:false});supabase.channel("notif-ctrl").send({type:"broadcast",event:"clear-notifs",payload:{ids:allIds,cleared_before:cb}});}} onDeleteNotif={deleteNotifForAll}/>}
-        {pageView==="teams"&&<TeamCreatorPage users={users} events={events} currentUser={currentUser} teamSets={teamSets} onTeamSetsChanged={setTeamSets}/>}
+        {pageView==="teams"&&<TeamCreatorPage users={users} events={events} currentUser={currentUser} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} onTeamSetsChanged={setTeamSets}/>}
         {pageView==="timer"&&<TimerPage/>}
-        {pageView==="mensgames"&&<Suspense fallback={<div style={{padding:"3rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesPage events={events} teamSets={teamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={updateEvent} onTeamSetsChanged={setTeamSets}/></Suspense>}
+        {pageView==="mensgames"&&<Suspense fallback={<div style={{padding:"3rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesPage events={events} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={updateEvent} onTeamSetsChanged={setTeamSets}/></Suspense>}
         {pageView==="sarajay"&&<SaraJayOrJAI/>}
       </main>
       <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted2)",fontSize:".72rem",borderTop:"1px solid var(--border)",letterSpacing:".1em"}}>🍺 MensApp · Built for the lads</div>

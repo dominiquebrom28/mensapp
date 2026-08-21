@@ -44,6 +44,11 @@ function toRow(set) {
   };
 }
 
+// Shape mirrors mensgames/api.js's `fetchTournaments` ({ok, error, teamSets})
+// on purpose -- App.jsx and every other caller need a way to tell "the
+// table is empty" from "we couldn't reach it" apart (a bare [] used to
+// collapse both into the same, misleading "Nog geen teamsets opgeslagen").
+// Still never rejects -- the boot `Promise.all` in App.jsx depends on that.
 export async function fetchTeamSets() {
   const { data, error } = await supabase
     .from("team_sets")
@@ -51,9 +56,9 @@ export async function fetchTeamSets() {
     .order("created_at", { ascending: false });
   if (error) {
     console.error("fetchTeamSets failed:", error);
-    return [];
+    return { ok: false, error, teamSets: [] };
   }
-  return (Array.isArray(data) ? data : []).map(fromRow).filter(Boolean);
+  return { ok: true, error: null, teamSets: (Array.isArray(data) ? data : []).map(fromRow).filter(Boolean) };
 }
 
 export async function saveTeamSet(teamSet) {

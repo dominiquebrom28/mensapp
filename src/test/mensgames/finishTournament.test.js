@@ -3,7 +3,25 @@
 // directly (not via supabase.js) since finishTournament only ever talks to
 // the team library through that module -- same isolation level as
 // TournamentEditor.debounce.test.jsx mocking mensgames/api.js.
+//
+// `supabase.js` itself IS mocked here (unlike before this fix) --
+// finishTournament now re-reads the `events` row directly before writing
+// (security review: a full-row upsert off the possibly-stale `event`
+// object passed in could silently clobber a concurrent write to another
+// field, since the global Mens-Games page has no realtime subscription on
+// events). `mockTableData` is mutable per test, same pattern as
+// teamlib/api.test.js / mensgames/api.test.js.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+let mockTableData = {};
+vi.mock('../../supabase.js', async () => {
+  const { makeQueryBuilder } = await import('../mocks/supabaseMock.js');
+  return {
+    supabase: {
+      from: (table) => makeQueryBuilder(mockTableData[table] ?? { data: null, error: null }),
+    },
+  };
+});
 
 vi.mock('../../features/teamlib/api.js', () => ({
   addTeamAward: vi.fn(async (teamSet, award) => ({ ok: true, error: null, teamSet: { ...teamSet, awards: [...(teamSet.awards || []), award] } })),
@@ -16,6 +34,7 @@ import { winnerRowsFromTournament, buildTeamAwards, finishTournament } from '../
 beforeEach(() => {
   addTeamAward.mockClear();
   archiveTeamSet.mockClear();
+  mockTableData = {};
 });
 
 function tournament(overrides = {}) {
@@ -160,6 +179,10 @@ describe('finishTournament', () => {
         { id: 'mg-trn_1-ent_9', category: 'stale from a previous finish', winner: 'Old', detail: '', icon: '🥇' },
       ],
     };
+    // The fresh read (used instead of the `event` param, see below) returns
+    // the same row here -- this test is about the dedup/merge logic, not
+    // the freshness fix, which gets its own tests further down.
+    mockTableData.events = { data: event, error: null };
     await finishTournament({ tournament: tournament(), standings, event, onUpdateEvent, teamSets: TEAM_SETS });
     expect(onUpdateEvent).toHaveBeenCalledTimes(1);
     const savedEvent = onUpdateEvent.mock.calls[0][0];
@@ -168,6 +191,49 @@ describe('finishTournament', () => {
     expect(ids).not.toContain('mg-trn_1-ent_9'); // this tournament's stale row, replaced
     expect(ids).toContain('mg-trn_1-ent_1');
     expect(ids).toContain('mg-trn_1-ent_2');
+  });
+
+  // Regression for the security review's finding: finishing a tournament
+  // off a stale local `event` object could silently roll back a concurrent
+  // write to any other field. `finishTournament` must re-read the row and
+  // build the write off THAT, not off the object it was called with.
+  it('re-reads the event row before writing, so a concurrent write to another field (e.g. a live quiz score) survives the finish', async () => {
+    const onUpdateEvent = vi.fn(async () => {});
+    // The caller's local copy of the event -- stale, still shows the quiz
+    // mid-way through, and has no winners yet.
+    const staleLocalEvent = { id: 'evt-2026', quizzes: [{ id: 'q1', scores: { Doom: 3 } }], winners: [] };
+    // What's actually in the DB right now -- another device advanced the
+    // quiz (and it has an existing winner row) since this tab last polled.
+    const freshDbRow = { id: 'evt-2026', quizzes: [{ id: 'q1', scores: { Doom: 3, Bram: 5 } }], winners: [{ id: 'w-manual-1', category: 'Beer pong', winner: 'Doom', detail: '', icon: '🍺' }] };
+    mockTableData.events = { data: freshDbRow, error: null };
+
+    await finishTournament({ tournament: tournament(), standings, event: staleLocalEvent, onUpdateEvent, teamSets: TEAM_SETS });
+
+    expect(onUpdateEvent).toHaveBeenCalledTimes(1);
+    const savedEvent = onUpdateEvent.mock.calls[0][0];
+    // The fresh quiz score (Bram: 5) made it through -- a naive spread of
+    // the stale `event` param would have silently dropped it.
+    expect(savedEvent.quizzes[0].scores).toEqual({ Doom: 3, Bram: 5 });
+    // The pre-existing manual winner from the fresh row is kept, alongside
+    // this tournament's new medal rows.
+    const ids = savedEvent.winners.map((w) => w.id);
+    expect(ids).toContain('w-manual-1');
+    expect(ids).toContain('mg-trn_1-ent_1');
+    expect(ids).toContain('mg-trn_1-ent_2');
+  });
+
+  it('falls back to the passed-in `event` if the fresh read comes back empty (e.g. a transient blip), rather than dropping the finish entirely', async () => {
+    const onUpdateEvent = vi.fn(async () => {});
+    const event = { id: 'evt-2026', winners: [{ id: 'w-manual-1', category: 'Beer pong', winner: 'Doom', detail: '', icon: '🍺' }] };
+    mockTableData.events = { data: null, error: { message: 'temporary blip' } };
+
+    const result = await finishTournament({ tournament: tournament(), standings, event, onUpdateEvent, teamSets: TEAM_SETS });
+
+    expect(result.ok).toBe(true);
+    expect(onUpdateEvent).toHaveBeenCalledTimes(1);
+    const ids = onUpdateEvent.mock.calls[0][0].winners.map((w) => w.id);
+    expect(ids).toContain('w-manual-1');
+    expect(ids).toContain('mg-trn_1-ent_1');
   });
 
   it('a tournament with no event_id still writes team awards -- there is just nothing to decorate on the event side', async () => {

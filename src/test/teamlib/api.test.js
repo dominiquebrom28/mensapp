@@ -48,8 +48,10 @@ const ROW = {
 describe('teamlib/api row mapping', () => {
   it('fetchTeamSets maps snake_case rows to the camelCase TeamSet shape', async () => {
     mockTableData = { team_sets: { data: [ROW], error: null } }
-    const sets = await fetchTeamSets()
-    expect(sets).toEqual([
+    const res = await fetchTeamSets()
+    expect(res.ok).toBe(true)
+    expect(res.error).toBeNull()
+    expect(res.teamSets).toEqual([
       {
         id: 'ts_1',
         name: 'Groep A',
@@ -69,8 +71,9 @@ describe('teamlib/api row mapping', () => {
     mockTableData = {
       team_sets: { data: [{ id: 'ts_bad', name: null, teams: 'oops', event_ids: null, awards: undefined }], error: null },
     }
-    const sets = await fetchTeamSets()
-    expect(sets).toEqual([
+    const res = await fetchTeamSets()
+    expect(res.ok).toBe(true)
+    expect(res.teamSets).toEqual([
       {
         id: 'ts_bad',
         name: '',
@@ -86,9 +89,14 @@ describe('teamlib/api row mapping', () => {
     ])
   })
 
-  it('fetchTeamSets degrades to [] on a Supabase error rather than throwing', async () => {
+  // Regression for the "can't read" vs "nothing here" bug: a bare [] made
+  // every read site (TeamsTab, TeamCreatorPage, QuizBuilder, EntrantPicker,
+  // HallOfFame) render "no teams" even when the table genuinely couldn't be
+  // reached (e.g. PGRST205, table not migrated yet). Never rejects -- the
+  // App.jsx boot `Promise.all` depends on that.
+  it('fetchTeamSets reports ok:false with the real error on a Supabase error, rather than throwing or masking it as an empty result', async () => {
     mockTableData = { team_sets: { data: null, error: { message: 'boom' } } }
-    await expect(fetchTeamSets()).resolves.toEqual([])
+    await expect(fetchTeamSets()).resolves.toEqual({ ok: false, error: { message: 'boom' }, teamSets: [] })
   })
 
   it('saveTeamSet round-trips a JS-shape object back after upsert', async () => {

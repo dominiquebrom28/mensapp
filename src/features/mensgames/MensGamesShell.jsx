@@ -31,7 +31,7 @@ function TournamentRow({ t, eventName, onOpen }) {
   );
 }
 
-function NewTournamentModal({ onClose, onCreate, events, fixedEventId }) {
+function NewTournamentModal({ onClose, onCreate, error, events, fixedEventId }) {
   const [name, setName] = useState('');
   const [eventId, setEventId] = useState(fixedEventId || '');
   const headingId = 'mg-new-trn-title';
@@ -53,6 +53,10 @@ function NewTournamentModal({ onClose, onCreate, events, fixedEventId }) {
             </select>
           </div>
         )}
+        {/* Its own error, distinct from the list-load one -- and the modal
+            (with whatever the lad already typed) stays open on failure so
+            a flaky write doesn't also cost the input. */}
+        {error && <ErrorState message="Aanmaken van het toernooi is mislukt. Probeer het opnieuw." />}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <Btn variant="ghost" onClick={onClose}>Annuleren</Btn>
           <Btn disabled={!name.trim()} onClick={() => onCreate({ name: name.trim(), eventId: eventId || null })}>Aanmaken</Btn>
@@ -62,12 +66,17 @@ function NewTournamentModal({ onClose, onCreate, events, fixedEventId }) {
   );
 }
 
-export default function MensGamesShell({ scope = 'page', evt, events = [], teamSets = [], currentUser, canManage = false, onUpdateEvent, onTeamSetsChanged }) {
+export default function MensGamesShell({ scope = 'page', evt, events = [], teamSets = [], teamSetsError = null, onRetryTeamSets, currentUser, canManage = false, onUpdateEvent, onTeamSetsChanged }) {
   const [tournaments, setTournaments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  // Separate from the list-load `error` above: reusing that flag for a
+  // failed *create* used to close the modal (losing the typed name) and
+  // show "Kon de toernooien niet laden" -- a message about the wrong
+  // operation entirely.
+  const [createError, setCreateError] = useState(false);
   const [statusFilter, setStatusFilter] = useState('alle');
 
   const load = () => {
@@ -91,10 +100,15 @@ export default function MensGamesShell({ scope = 'page', evt, events = [], teamS
   const eventNameFor = (t) => (scope === 'page' && t.eventId ? (events.find((e) => e.id === t.eventId)?.name || null) : null);
 
   const createTournament = async ({ name, eventId }) => {
+    setCreateError(false);
     const t = blankTournament({ name, eventId: scope === 'event' ? evt.id : eventId, createdBy: currentUser?.display_name || currentUser?.username || '' });
     const res = await saveTournament(t);
+    // On failure, keep the modal open (and its typed name) rather than
+    // discarding the lad's input -- and never borrow the list-load `error`
+    // flag for this, which would misreport a failed *create* as "kon de
+    // toernooien niet laden".
+    if (!res.ok) { setCreateError(true); return; }
     setShowNew(false);
-    if (!res.ok) { setError(true); return; }
     setTournaments((prev) => [res.tournament, ...prev]);
     setSelectedId(res.tournament.id);
   };
@@ -112,6 +126,8 @@ export default function MensGamesShell({ scope = 'page', evt, events = [], teamS
           tournament={selected}
           events={events}
           teamSets={teamSets}
+          teamSetsError={teamSetsError}
+          onRetryTeamSets={onRetryTeamSets}
           canManage={canManage}
           onBack={() => setSelectedId(null)}
           onDeleted={() => { setTournaments((prev) => prev.filter((t) => t.id !== selected.id)); setSelectedId(null); }}
@@ -124,12 +140,15 @@ export default function MensGamesShell({ scope = 'page', evt, events = [], teamS
           {scope === 'page' && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
               <H size="1.6rem" style={{ marginBottom: 0 }}>{heading}</H>
-              {canManage && <Btn onClick={() => setShowNew(true)}>+ Nieuw toernooi</Btn>}
+              {/* Disabled while the list itself couldn't load -- a backend
+                  already known to be down is not worth inviting a retry
+                  against for a create too. */}
+              {canManage && <Btn onClick={() => { setCreateError(false); setShowNew(true); }} disabled={error} title={error ? 'Toernooien konden niet geladen worden -- probeer eerst opnieuw te laden.' : undefined}>+ Nieuw toernooi</Btn>}
             </div>
           )}
           {scope === 'event' && canManage && (
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <Btn size="sm" onClick={() => setShowNew(true)}>+ Nieuw toernooi voor dit event</Btn>
+              <Btn size="sm" onClick={() => { setCreateError(false); setShowNew(true); }} disabled={error} title={error ? 'Toernooien konden niet geladen worden -- probeer eerst opnieuw te laden.' : undefined}>+ Nieuw toernooi voor dit event</Btn>
             </div>
           )}
 
@@ -165,7 +184,7 @@ export default function MensGamesShell({ scope = 'page', evt, events = [], teamS
         </div>
       )}
 
-      {showNew && <NewTournamentModal onClose={() => setShowNew(false)} onCreate={createTournament} events={events} fixedEventId={scope === 'event' ? evt?.id : null} />}
+      {showNew && <NewTournamentModal onClose={() => { setShowNew(false); setCreateError(false); }} onCreate={createTournament} error={createError} events={events} fixedEventId={scope === 'event' ? evt?.id : null} />}
     </div>
   );
 }

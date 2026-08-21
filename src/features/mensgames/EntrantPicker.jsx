@@ -12,7 +12,7 @@
 // unlike MatchRow/ConfigFields this one leans on ordinary tap targets
 // rather than steppers; nothing here is live score entry.
 import { useState } from 'react';
-import { Btn, Card, EmptyState, Inp, Lbl, Tag } from './ui/Kit.jsx';
+import { Btn, Card, EmptyState, ErrorState, Inp, Lbl, Tag } from './ui/Kit.jsx';
 import { entrantsFromAttendees, entrantsFromTeamSet } from './model.js';
 
 function slug(name) {
@@ -32,7 +32,7 @@ function EntrantChip({ entrant, onRemove, disabled }) {
   );
 }
 
-function TournamentEntrants({ entrants, teamSets, teamSetId, linkedEvent, onChangeEntrants, onSetTeamSetId, disabled }) {
+function TournamentEntrants({ entrants, teamSets, teamSetsError, onRetryTeamSets, teamSetId, linkedEvent, onChangeEntrants, onSetTeamSetId, disabled }) {
   const [manualName, setManualName] = useState('');
   const activeSets = (Array.isArray(teamSets) ? teamSets : []).filter((s) => s.status !== 'archived');
 
@@ -78,7 +78,14 @@ function TournamentEntrants({ entrants, teamSets, teamSetId, linkedEvent, onChan
                 {activeSets.map((s) => <option key={s.id} value={s.id}>{s.name} ({(s.teams || []).length} teams)</option>)}
               </select>
             </div>
-            {activeSets.length === 0 && <div style={{ fontSize: '.78rem', color: 'var(--muted)', marginTop: 4 }}>Nog geen teamsets in de bibliotheek — maak er een via Team Creator.</div>}
+            {activeSets.length === 0 && (
+              teamSetsError
+                // The library read failed -- there may well be teamsets, we
+                // simply couldn't reach them. Saying "nog geen teamsets" here
+                // would be exactly the false-empty bug this fixes.
+                ? <ErrorState message="Kon de teams-bibliotheek niet laden." onRetry={onRetryTeamSets} />
+                : <div style={{ fontSize: '.78rem', color: 'var(--muted)', marginTop: 4 }}>Nog geen teamsets in de bibliotheek — maak er een via Team Creator.</div>
+            )}
           </div>
           {linkedEvent && (
             <div>
@@ -148,7 +155,7 @@ export default function EntrantPicker(props) {
   const { mode = 'tournament' } = props;
   const body = mode === 'round'
     ? <RoundEntrants entrants={props.entrants || []} selectedIds={props.selectedIds} onChange={props.onChange} disabled={props.disabled} />
-    : <TournamentEntrants entrants={props.entrants || []} teamSets={props.teamSets || []} teamSetId={props.teamSetId} linkedEvent={props.linkedEvent} onChangeEntrants={props.onChange} onSetTeamSetId={props.onSetTeamSetId || (() => {})} disabled={props.disabled} />;
+    : <TournamentEntrants entrants={props.entrants || []} teamSets={props.teamSets || []} teamSetsError={props.teamSetsError} onRetryTeamSets={props.onRetryTeamSets} teamSetId={props.teamSetId} linkedEvent={props.linkedEvent} onChangeEntrants={props.onChange} onSetTeamSetId={props.onSetTeamSetId || (() => {})} disabled={props.disabled} />;
   if (props.bare) return body;
   return <Card style={props.cardStyle}>{body}</Card>;
 }
