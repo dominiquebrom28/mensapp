@@ -3,6 +3,8 @@ import { supabase, hashPin } from "./supabase.js";
 import { isSafeImageUrl, isSafeVideoUrl } from "./features/trailer/safeUrl.js";
 import { hasSeenTrailer } from "./features/trailer/seen.js";
 import { hasDismissedTeaser, dismissTeaser } from "./features/teaser/dismissed.js";
+import { fetchTeamSets, saveTeamSet, deleteTeamSet, archiveTeamSet, unarchiveTeamSet, unlinkTeamSetFromEvent } from "./features/teamlib/api.js";
+import { blankTeamSet, setCaptain, removeMember, teamSetSummary, namesFromUsers, mergeNames, generateTeams } from "./features/teamlib/model.js";
 
 // The app's first code split (technical spec `docs/trailer-technical-spec.md`
 // §3): keeps the trailer's weight out of the main chunk, loaded only when an
@@ -1401,20 +1403,33 @@ const TABS=["Overview","Polls","Quiz","Teams","Photos","Winners & Highlights","F
 // ─────────────────────────────────────────────────────────────────────────────
 // TEAMS TAB
 // ─────────────────────────────────────────────────────────────────────────────
-const TeamsTab=({evt,onUpdate,currentUser,users=[]})=>{
-  const team_sets=evt.team_sets||[];
+const TeamsTab=({evt,teamSets=[],onTeamSetsChanged,currentUser,users=[]})=>{
+  // Library sets, filtered down to "active and actually linked to this
+  // event" -- an archived set, or one only used elsewhere, has no business
+  // showing up on an event's Teams tab. §5.2 row 1.
+  const linked=teamSets.filter(ts=>ts.status!=="archived"&&(ts.eventIds||[]).includes(evt.id));
   const isAdmin=can.editEvent(currentUser);
-  const deleteSet=id=>onUpdate({...evt,team_sets:team_sets.filter(ts=>ts.id!==id)});
-  if(team_sets.length===0)return(
+  // "Verwijder" -> "Loskoppelen": this set lives in the shared library now,
+  // so destroying it from inside one event would take it away from every
+  // other event (and any tournament) that references it too. This only
+  // drops the link between this event and the set; the set itself, and its
+  // other links, are untouched.
+  const unlink=async ts=>{
+    const result=await unlinkTeamSetFromEvent(ts,evt.id);
+    if(result.ok)onTeamSetsChanged?.(prev=>prev.map(x=>x.id===ts.id?result.teamSet:x));
+  };
+  if(linked.length===0)return(
     <div style={{textAlign:"center",padding:"3rem 1rem",color:"var(--muted)"}}>
       <div style={{fontSize:"2.5rem",marginBottom:"1rem"}}>🎲</div>
-      <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",marginBottom:".5rem",color:"var(--cream)"}}>Geen teams opgeslagen</div>
-      <div style={{fontSize:".85rem"}}>Genereer teams via de Team Creator en sla ze op bij dit event.</div>
+      <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",marginBottom:".5rem",color:"var(--cream)"}}>Geen teams gekoppeld</div>
+      <div style={{fontSize:".85rem"}}>Genereer teams via de Team Creator en koppel ze aan dit event.</div>
     </div>
   );
   return(
     <div style={{display:"grid",gap:"1.2rem"}}>
-      {team_sets.map(ts=>(
+      {linked.map(ts=>{
+        const summary=teamSetSummary(ts);
+        return(
         <Card key={ts.id}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:8}}>
             <div>
@@ -1422,26 +1437,35 @@ const TeamsTab=({evt,onUpdate,currentUser,users=[]})=>{
                 <span style={{fontFamily:"var(--font-h)",fontSize:"1.05rem",color:"var(--amber2)"}}>{ts.name}</span>
                 {ts.category&&<span style={{background:"rgba(232,148,58,.15)",border:"1px solid rgba(232,148,58,.3)",borderRadius:20,padding:"2px 9px",fontSize:".7rem",fontFamily:"var(--font-b)",fontWeight:600,color:"var(--amber2)",letterSpacing:".04em"}}>{ts.category}</span>}
               </div>
-              <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{ts.teams.length} teams · {ts.teams.reduce((s,t)=>s+t.members.length,0)} deelnemers</div>
+              <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{summary.teamCount} teams · {summary.memberCount} deelnemers</div>
             </div>
-            {isAdmin&&<Btn onClick={()=>deleteSet(ts.id)} variant="danger" size="sm">Verwijder</Btn>}
+            {isAdmin&&(
+              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3}}>
+                <Btn onClick={()=>unlink(ts)} variant="danger" size="sm" title="Ontkoppelt dit team-overzicht van dit event -- de teams blijven bewaard in de bibliotheek (Team Creator) en bij andere events waar ze gekoppeld zijn.">Loskoppelen</Btn>
+                {/* Visible caption, not just a hover title -- this is scored
+                    at a bar on phones, where :hover/title never fires. */}
+                <span style={{fontSize:".64rem",color:"var(--muted2)",textAlign:"right",maxWidth:180}}>blijft in de bibliotheek</span>
+              </div>
+            )}
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(175px,1fr))",gap:".75rem"}}>
-            {ts.teams.map((team,i)=>{
+            {(ts.teams||[]).map((team,i)=>{
               const col=TEAM_COLORS[i%TEAM_COLORS.length];
+              const members=Array.isArray(team.members)?team.members:[];
               return(
                 <div key={team.id} style={{background:"var(--bg3)",border:`1px solid ${col}44`,borderRadius:"var(--radius-sm)",padding:".85rem"}}>
                   <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:".5rem"}}>
                     <span style={{fontSize:"1.2rem",lineHeight:1}}>{team.avatar||"🎯"}</span>
                     <span style={{fontFamily:"var(--font-h)",fontSize:".9rem",color:col}}>{team.name}</span>
+                    {team.captain&&<span style={{fontSize:".68rem",color:"var(--gold)",background:"rgba(201,146,42,.14)",border:"1px solid rgba(201,146,42,.4)",borderRadius:20,padding:"1px 8px",marginLeft:"auto"}}>👑 {team.captain}</span>}
                   </div>
                   <div style={{display:"flex",flexDirection:"column",gap:0}}>
-                    {team.members.map((name,j)=>{
+                    {members.map((name,j)=>{
                       const u=users.find(x=>(x.display_name||x.username)===name);
                       return(
                         <div key={j} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",borderTop:j>0?"1px solid var(--border)":"none"}}>
                           {u?<Avatar name={u.username} size={18} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>:<div style={{width:18,height:18,borderRadius:"50%",background:"var(--bg4)",border:"1px solid var(--border)",flexShrink:0}}/>}
-                          <span style={{fontSize:".82rem",color:"var(--cream)"}}>{name}</span>
+                          <span style={{fontSize:".82rem",color:"var(--cream)"}}>{name}{team.captain===name&&<span style={{color:"var(--gold)"}}> 👑</span>}</span>
                         </div>
                       );
                     })}
@@ -1451,12 +1475,13 @@ const TeamsTab=({evt,onUpdate,currentUser,users=[]})=>{
             })}
           </div>
         </Card>
-      ))}
+        );
+      })}
     </div>
   );
 };
 
-const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif,autoOpenTrailerId,onAutoTrailerConsumed})=>{
+const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif,autoOpenTrailerId,onAutoTrailerConsumed,teamSets=[],onTeamSetsChanged})=>{
   const [tab,setTab]=useState(initialTab||"Overview");
   useEffect(()=>{
     if(!scrollToId)return;
@@ -1648,7 +1673,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
         {tab==="Overview"             &&<OverviewTab evt={evt} onUpdate={onUpdate} isPast={isPast} currentUser={currentUser} users={users} onSendNotif={onSendNotif}/>}
         {tab==="Polls"                &&<PollsTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users} onSendNotif={onSendNotif}/>}
         {tab==="Quiz"                 &&<QuizTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users} onOpenQuizDash={()=>setQuizDash(true)}/>}
-        {tab==="Teams"                &&<TeamsTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} users={users}/>}
+        {tab==="Teams"                &&<TeamsTab evt={evt} teamSets={teamSets} onTeamSetsChanged={onTeamSetsChanged} currentUser={currentUser} users={users}/>}
         {tab==="Photos"               &&<PhotosTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast}/>}
         {tab==="FAQ"                  &&<FAQTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
@@ -1680,7 +1705,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
       {trailerOpen&&<Suspense fallback={null}>
         <EventTrailer input={trailerInput} onClose={()=>setTrailerOpen(false)}/>
       </Suspense>}
-      {quizDash&&<QuizDashboard evt={evt} onUpdate={onUpdate} users={users} onClose={()=>setQuizDash(false)}/>}
+      {quizDash&&<QuizDashboard evt={evt} onUpdate={onUpdate} users={users} teamSets={teamSets} onClose={()=>setQuizDash(false)}/>}
       {/* Live quiz participant view — shown to everyone when a quiz is being presented */}
       {(()=>{const liveQ=(evt.quizzes||[]).find(q=>q._liveState);return liveQ&&!quizDash&&<QuizParticipantView evt={evt} liveQ={liveQ} currentUser={currentUser} onUpdate={onUpdate} users={users}/>;})()}
     </div>
@@ -1967,7 +1992,7 @@ const normalizeQuiz=q=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // QUIZ DASHBOARD  (fullscreen modal — list + editor in one place)
 // ─────────────────────────────────────────────────────────────────────────────
-const QuizDashboard=({evt,onUpdate,onClose,users=[]})=>{
+const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[]})=>{
   const quizzes=evt.quizzes||[];
   const saveQuizzes=q=>onUpdate({...evt,quizzes:q});
 
@@ -2153,7 +2178,7 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[]})=>{
               <QuizBuilder
                 existing={panel==="edit"?editTarget:null}
                 attendees={evt.attendees||[]}
-                team_sets={evt.team_sets||[]}
+                team_sets={teamSets.filter(ts=>ts.status==="active")}
                 onSave={quiz=>{
                   if(panel==="new"){
                     saveQuizzes([...quizzes,{...quiz,id:`qz${Date.now()}`,status:"ready",scores:{}}]);
@@ -6045,7 +6070,7 @@ const SaraJayOrJAI = () => {
 // TEAM CREATOR PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 const TEAM_COLORS=["var(--amber)","var(--blue)","var(--green)","var(--purple)","var(--orange)","var(--red)","#56b4a0","#e08050","#9b7fe8","#5b9bd5"];
-const TeamCreatorPage=({users,events=[],onUpdateEvent})=>{
+const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],onTeamSetsChanged})=>{
   const [teamSize,setTeamSize]=useState(3);
   const [participants,setParticipants]=useState([]);
   const [input,setInput]=useState("");
@@ -6053,40 +6078,145 @@ const TeamCreatorPage=({users,events=[],onUpdateEvent})=>{
   const [generating,setGenerating]=useState(false);
   const [showPicker,setShowPicker]=useState(false);
   const [avatarPicker,setAvatarPicker]=useState(null);
+  // #7 -- pin: { [participantName]: teamId }. Set either by the assign
+  // dropdown (moving someone) or the 📌 toggle (locking them where they
+  // already landed). `generate()` seats every pinned name on its pinned
+  // team first, then shuffles only the unpinned pool into the remaining
+  // slots -- see teamlib/model.js `generateTeams`.
+  const [pins,setPins]=useState({});
+  const [attendeeEvtId,setAttendeeEvtId]=useState("");
   const [setName,setSetName]=useState("");
   const [setCategory,setSetCategory]=useState("");
-  const [selectedEvtId,setSelectedEvtId]=useState("");
+  const [linkEvtIds,setLinkEvtIds]=useState([]);
+  const [editingSetId,setEditingSetId]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const [saveError,setSaveError]=useState(false);
   const [saved,setSaved]=useState(false);
+  const [libFilter,setLibFilter]=useState("active");
   const appUsers=users.filter(u=>ACTIVE_ROLES.includes(u.role));
+  const allAppNames=namesFromUsers(appUsers);
   const activeEvents=events.filter(e=>!e.archived).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const attendeeNames=evt=>(evt.attendees||[]).filter(a=>["going","went"].includes(a.status)).map(a=>a.name).filter(Boolean);
+  const eventsWithAttendees=activeEvents.filter(e=>attendeeNames(e).length>0);
 
-  const add=name=>{const t=name.trim();if(!t||participants.includes(t))return;setParticipants(p=>[...p,t]);setTeams(null);};
+  // Bulk-remove: drops each name from the roster, from `pins`, and (if
+  // teams already exist) from whichever team it's on -- via `removeMember`,
+  // which is also what clears captaincy when the removed name was captain.
+  const dropParticipants=names=>{
+    const dropSet=new Set(names);
+    if(dropSet.size===0)return;
+    setParticipants(p=>p.filter(x=>!dropSet.has(x)));
+    setPins(prev=>{
+      let changed=false;const next={...prev};
+      names.forEach(n=>{if(n in next){delete next[n];changed=true;}});
+      return changed?next:prev;
+    });
+    setTeams(prev=>prev?prev.map(t=>{let nt=t;names.forEach(n=>{nt=removeMember(nt,n);});return nt;}):null);
+    setSaved(false);
+  };
+  // Deliberately does NOT reset `teams` to null (unlike the pre-#7
+  // behaviour): once teams are generated, adding one more person shouldn't
+  // blow away everyone else's pinned/manual placement. The new name sits
+  // in the roster but "not yet on a team" until the next Genereer/Opnieuw
+  // loten click, which fills them from the unpinned pool.
+  const add=name=>{const t=name.trim();if(!t||participants.includes(t))return;setParticipants(p=>[...p,t]);setSaved(false);};
   const addInput=()=>{input.split(",").map(s=>s.trim()).filter(Boolean).forEach(add);setInput("");};
-  const remove=name=>{setParticipants(p=>p.filter(x=>x!==name));setTeams(null);};
+  const remove=name=>dropParticipants([name]);
+  const selectAllAppUsers=()=>{setParticipants(p=>mergeNames(p,allAppNames));setSaved(false);};
+  const deselectAllAppUsers=()=>dropParticipants(allAppNames.filter(n=>participants.includes(n)));
+  const addEventAttendees=()=>{
+    const evt=events.find(e=>e.id===attendeeEvtId);
+    if(!evt)return;
+    setParticipants(p=>mergeNames(p,attendeeNames(evt)));
+    setAttendeeEvtId("");
+    setSaved(false);
+  };
+
   const generate=()=>{
     if(participants.length<2)return;
-    setGenerating(true);setTeams(null);setSaved(false);
+    setGenerating(true);setSaved(false);
     setTimeout(()=>{
-      const shuffled=[...participants].sort(()=>Math.random()-.5);
-      const result=[];
-      for(let i=0;i<shuffled.length;i+=teamSize){
-        const members=shuffled.slice(i,i+teamSize);
-        result.push({id:`tm_${Date.now()}_${i}`,name:`Team ${result.length+1}`,members,avatar:TEAM_AVATARS[result.length%TEAM_AVATARS.length]});
-      }
-      setTeams(result);setGenerating(false);
+      setTeams(prev=>generateTeams({participants,teamSize,existingTeams:prev||[],pins}));
+      setGenerating(false);
     },1800);
   };
+  const clearTeams=()=>{setTeams(null);setPins({});setSaved(false);setEditingSetId(null);};
   const renameTeam=(idx,name)=>setTeams(ts=>ts.map((t,i)=>i===idx?{...t,name}:t));
   const setAvatar=(idx,av)=>{setTeams(ts=>ts.map((t,i)=>i===idx?{...t,avatar:av}:t));setAvatarPicker(null);};
-  const saveToEvent=async()=>{
-    if(!selectedEvtId||!setName.trim())return;
-    const evt=events.find(e=>e.id===selectedEvtId);if(!evt)return;
-    const newSet={id:`ts_${Date.now()}`,name:setName.trim(),category:setCategory.trim(),createdAt:new Date().toISOString(),teams};
-    await onUpdateEvent({...evt,team_sets:[...(evt.team_sets||[]),newSet]});
+  // #8 -- captains. Reuses QuizBuilder's 👑-toggle visual language (opacity
+  // .3/1, gold when active) so the interaction feels identical wherever a
+  // lad meets it. `setCaptain` (teamlib/model.js) also already reads
+  // `team.captain` at quiz time -- this is the write side that was missing.
+  const toggleCaptain=(teamId,name)=>{setTeams(prev=>prev?prev.map(t=>t.id===teamId?setCaptain(t,name):t):prev);setSaved(false);};
+  const togglePin=(name,teamId)=>{setPins(prev=>{const next={...prev};if(next[name]===teamId)delete next[name];else next[name]=teamId;return next;});};
+  // #7 -- the "move to another team" dropdown; also pins the member to
+  // their new team so a later re-roll doesn't undo the manual move.
+  const assignMember=(name,toTeamId)=>{
+    setTeams(prev=>{
+      if(!prev)return prev;
+      return prev.map(t=>{
+        if(t.id===toTeamId){
+          if((t.members||[]).includes(name))return t;
+          return {...t,members:[...(t.members||[]),name]};
+        }
+        return removeMember(t,name);
+      });
+    });
+    setPins(prev=>({...prev,[name]:toTeamId}));
+    setSaved(false);
+  };
+
+  const toggleLinkEvt=id=>setLinkEvtIds(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
+
+  // #9 -- "save to library" replaces "save to event"; linking an event is
+  // now an optional multi-select rather than a required single one.
+  const saveToLibrary=async()=>{
+    const name=setName.trim();
+    if(!name||!teams||teams.length===0)return;
+    setSaving(true);setSaveError(false);
+    const existing=editingSetId?teamSets.find(ts=>ts.id===editingSetId):null;
+    const payload=existing
+      ?{...existing,name,category:setCategory.trim(),teams,eventIds:linkEvtIds}
+      :{...blankTeamSet(),name,category:setCategory.trim(),teams,eventIds:linkEvtIds,createdBy:currentUser?.display_name||currentUser?.username||""};
+    const result=await saveTeamSet(payload);
+    setSaving(false);
+    if(!result.ok){setSaveError(true);return;}
+    onTeamSetsChanged?.(prev=>{
+      const exists=prev.some(ts=>ts.id===result.teamSet.id);
+      return exists?prev.map(ts=>ts.id===result.teamSet.id?result.teamSet:ts):[result.teamSet,...prev];
+    });
+    setEditingSetId(result.teamSet.id);
     setSaved(true);
   };
+  const loadForEdit=ts=>{
+    const loadedTeams=(Array.isArray(ts.teams)?ts.teams:[]).map(t=>({id:t.id,name:t.name||"",avatar:t.avatar||"🎯",captain:t.captain||null,members:Array.isArray(t.members)?[...t.members]:[]}));
+    setEditingSetId(ts.id);
+    setSetName(ts.name||"");
+    setSetCategory(ts.category||"");
+    setLinkEvtIds(Array.isArray(ts.eventIds)?[...ts.eventIds]:[]);
+    setTeams(loadedTeams);
+    setParticipants(loadedTeams.flatMap(t=>t.members));
+    setPins({});
+    setSaved(false);setSaveError(false);
+  };
+  const cancelEdit=()=>{setEditingSetId(null);setSaved(false);};
+  const doDelete=async ts=>{
+    if(!window.confirm(`"${ts.name}" definitief verwijderen uit de bibliotheek? Dit kan niet ongedaan gemaakt worden.`))return;
+    const result=await deleteTeamSet(ts.id);
+    if(result.ok){
+      onTeamSetsChanged?.(prev=>prev.filter(x=>x.id!==ts.id));
+      if(editingSetId===ts.id)setEditingSetId(null);
+    }
+  };
+  const doArchive=async ts=>{const result=await archiveTeamSet(ts);if(result.ok)onTeamSetsChanged?.(prev=>prev.map(x=>x.id===ts.id?result.teamSet:x));};
+  const doUnarchive=async ts=>{const result=await unarchiveTeamSet(ts);if(result.ok)onTeamSetsChanged?.(prev=>prev.map(x=>x.id===ts.id?result.teamSet:x));};
+
   const pickedNames=new Set(participants);
   const teamCount=participants.length>0?Math.ceil(participants.length/teamSize):0;
+  const allAppSelected=allAppNames.length>0&&allAppNames.every(n=>pickedNames.has(n));
+  const unassignedNames=teams?participants.filter(p=>!teams.some(t=>(t.members||[]).includes(p))):[];
+  const visibleSets=teamSets.filter(ts=>libFilter==="archived"?ts.status==="archived":ts.status!=="archived");
+  const iconBtn=(active,color)=>({background:"none",border:"none",cursor:"pointer",fontSize:".82rem",padding:4,minWidth:24,minHeight:24,display:"flex",alignItems:"center",justifyContent:"center",opacity:active?1:.32,color:color||"var(--cream)",lineHeight:1,transition:"opacity .15s",borderRadius:6});
 
   return(
     <div className="fu">
@@ -6118,21 +6248,42 @@ const TeamCreatorPage=({users,events=[],onUpdateEvent})=>{
         </div>
 
         {showPicker&&(
-          <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".75rem",marginBottom:"1rem",display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))",gap:6}}>
-            {appUsers.map(u=>{
-              const name=u.display_name||u.username;
-              const picked=pickedNames.has(name);
-              return(
-                <div key={u.id} onClick={()=>picked?remove(name):add(name)}
-                  onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--amber2)";}}
-                  onMouseLeave={e=>{e.currentTarget.style.borderColor=picked?"var(--amber)":"var(--border)";}}
-                  style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:8,border:`1px solid ${picked?"var(--amber)":"var(--border)"}`,background:picked?"rgba(232,148,58,.12)":"var(--bg2)",cursor:"pointer",transition:"border-color .15s"}}>
-                  <Avatar name={u.username} size={24} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>
-                  <span style={{fontSize:".82rem",color:picked?"var(--amber2)":"var(--cream)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{name}</span>
-                  {picked&&<span style={{color:"var(--amber)",fontSize:".75rem",flexShrink:0}}>✓</span>}
-                </div>
-              );
-            })}
+          <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".75rem",marginBottom:"1rem"}}>
+            {/* #6 -- select all / deselect all, instead of clicking every tile */}
+            <div style={{display:"flex",justifyContent:"flex-end",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+              <Btn onClick={selectAllAppUsers} variant="ghost" size="sm" disabled={allAppSelected||allAppNames.length===0}>✓ Selecteer alles</Btn>
+              <Btn onClick={deselectAllAppUsers} variant="ghost" size="sm" disabled={!allAppNames.some(n=>pickedNames.has(n))}>✕ Deselecteer alles</Btn>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))",gap:6}}>
+              {appUsers.map(u=>{
+                const name=u.display_name||u.username;
+                const picked=pickedNames.has(name);
+                return(
+                  <div key={u.id} onClick={()=>picked?remove(name):add(name)}
+                    onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--amber2)";}}
+                    onMouseLeave={e=>{e.currentTarget.style.borderColor=picked?"var(--amber)":"var(--border)";}}
+                    style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:8,border:`1px solid ${picked?"var(--amber)":"var(--border)"}`,background:picked?"rgba(232,148,58,.12)":"var(--bg2)",cursor:"pointer",transition:"border-color .15s"}}>
+                    <Avatar name={u.username} size={24} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>
+                    <span style={{fontSize:".82rem",color:picked?"var(--amber2)":"var(--cream)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{name}</span>
+                    {picked&&<span style={{color:"var(--amber)",fontSize:".75rem",flexShrink:0}}>✓</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* #6 -- "everyone attending event X", since attendee lists already exist */}
+        {eventsWithAttendees.length>0&&(
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:"1rem"}}>
+            <select value={attendeeEvtId} onChange={e=>setAttendeeEvtId(e.target.value)}
+              style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"8px 10px",color:attendeeEvtId?"var(--cream)":"var(--muted)",fontFamily:"var(--font-b)",fontSize:".82rem",outline:"none",flex:1,minWidth:200}}>
+              <option value="">— Iedereen van event… —</option>
+              {eventsWithAttendees.map(e=>(
+                <option key={e.id} value={e.id}>{e.name} ({attendeeNames(e).length})</option>
+              ))}
+            </select>
+            <Btn onClick={addEventAttendees} variant="subtle" size="sm" disabled={!attendeeEvtId}>+ Voeg toe</Btn>
           </div>
         )}
 
@@ -6141,12 +6292,18 @@ const TeamCreatorPage=({users,events=[],onUpdateEvent})=>{
             {participants.map(name=>(
               <span key={name} style={{display:"flex",alignItems:"center",gap:5,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:20,padding:"4px 10px 4px 13px",fontSize:".83rem",color:"var(--cream)"}}>
                 {name}
-                <button onClick={()=>remove(name)} style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:".95rem",lineHeight:1,padding:"0 0 0 4px",display:"flex",alignItems:"center"}}>×</button>
+                <button onClick={()=>remove(name)} aria-label={`Verwijder ${name}`} style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:".95rem",lineHeight:1,padding:"0 0 0 4px",display:"flex",alignItems:"center"}}>×</button>
               </span>
             ))}
           </div>
         ):(
           <div style={{color:"var(--muted)",fontSize:".83rem"}}>Voeg deelnemers toe via de app of typ ze handmatig.</div>
+        )}
+
+        {unassignedNames.length>0&&(
+          <div style={{marginTop:10,fontSize:".78rem",color:"var(--amber2)",background:"rgba(232,148,58,.08)",border:"1px solid rgba(232,148,58,.25)",borderRadius:8,padding:"6px 10px"}}>
+            {unassignedNames.length} nog niet ingedeeld: {unassignedNames.join(", ")} — klik “Opnieuw loten” om te verdelen.
+          </div>
         )}
       </Card>
 
@@ -6169,11 +6326,15 @@ const TeamCreatorPage=({users,events=[],onUpdateEvent})=>{
         <div>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem",flexWrap:"wrap",gap:8}}>
             <H size="1.1rem" style={{marginBottom:0}}>🏁 Teams ({teams.length})</H>
-            <Btn onClick={generate} variant="ghost" size="sm">🔀 Opnieuw loten</Btn>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              <Btn onClick={generate} variant="ghost" size="sm">🔀 Opnieuw loten</Btn>
+              <Btn onClick={clearTeams} variant="ghost" size="sm">♻️ Opnieuw beginnen</Btn>
+            </div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))",gap:"1rem",marginBottom:"1.5rem"}}>
             {teams.map((team,i)=>{
               const col=TEAM_COLORS[i%TEAM_COLORS.length];
+              const members=Array.isArray(team.members)?team.members:[];
               return(
                 <div key={team.id} style={{background:"var(--bg2)",border:`1px solid ${col}44`,borderRadius:"var(--radius)",padding:"1.1rem",animation:"teamReveal .4s ease both",animationDelay:`${i*70}ms`}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:".75rem"}}>
@@ -6194,85 +6355,134 @@ const TeamCreatorPage=({users,events=[],onUpdateEvent})=>{
                       ))}
                     </div>
                   )}
+                  {team.captain&&<div style={{fontSize:".72rem",color:"var(--gold)",marginBottom:".4rem"}}>👑 Aanvoerder: <strong>{team.captain}</strong></div>}
                   <div style={{display:"flex",flexDirection:"column",gap:0}}>
-                    {team.members.map((name,j)=>{
+                    {members.map((name,j)=>{
                       const u=users.find(x=>(x.display_name||x.username)===name);
+                      const isCap=team.captain===name;
+                      const isPinned=pins[name]===team.id;
                       return(
-                        <div key={j} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderTop:j>0?"1px solid var(--border)":"none"}}>
+                        <div key={j} style={{display:"flex",alignItems:"center",gap:4,padding:"5px 0",borderTop:j>0?"1px solid var(--border)":"none"}}>
                           {u?<Avatar name={u.username} size={22} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>:<div style={{width:22,height:22,borderRadius:"50%",background:"var(--bg4)",border:"1px solid var(--border)",flexShrink:0}}/>}
-                          <span style={{fontSize:".88rem",color:"var(--cream)"}}>{name}</span>
+                          <span style={{fontSize:".88rem",color:isCap?"var(--gold)":"var(--cream)",fontWeight:isCap?700:400,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</span>
+                          <button onClick={()=>toggleCaptain(team.id,name)} aria-label={isCap?`${name} is aanvoerder — klik om te verwijderen`:`Maak ${name} aanvoerder`} title={isCap?"Aanvoerder verwijderen":"Maak aanvoerder"} style={iconBtn(isCap,"var(--gold)")}>👑</button>
+                          <button onClick={()=>togglePin(name,team.id)} aria-label={isPinned?`${name} losmaken (mag weer geloot worden)`:`${name} vastzetten op dit team`} title={isPinned?"Losmaken":"Vastzetten (blijft bij opnieuw loten)"} style={iconBtn(isPinned,"var(--blue)")}>📌</button>
+                          {teams.length>1&&(
+                            <select value={team.id} onChange={e=>assignMember(name,e.target.value)} aria-label={`Verplaats ${name} naar een ander team`}
+                              style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,color:"var(--cream)",fontSize:".7rem",padding:"3px 4px",minHeight:24,maxWidth:86}}>
+                              {teams.map(t=><option key={t.id} value={t.id}>{t.avatar} {t.name}</option>)}
+                            </select>
+                          )}
+                          <button onClick={()=>remove(name)} aria-label={`${name} verwijderen uit deelnemers`} style={iconBtn(true,"var(--muted)")}>✕</button>
                         </div>
                       );
                     })}
+                    {members.length===0&&<div style={{fontSize:".78rem",color:"var(--muted2)",fontStyle:"italic",padding:"4px 0"}}>Nog niemand ingedeeld</div>}
                   </div>
                 </div>
               );
             })}
           </div>
 
-          {/* ── Save to event ── */}
+          {/* #9 -- save to library (was: save to event) */}
           <Card style={{border:"1px solid var(--border2)"}}>
-            <H size=".95rem" style={{marginBottom:".8rem"}}>💾 Opslaan bij event</H>
+            <H size=".95rem" style={{marginBottom:".8rem"}}>💾 {editingSetId?"Wijzigingen opslaan in bibliotheek":"Opslaan in bibliotheek"}</H>
             <div style={{display:"grid",gap:".75rem"}}>
               <Inp value={setName} onChange={e=>{setSetName(e.target.value);setSaved(false);}} placeholder="Naam voor deze teaminvulling… (bv. Groep A)"/>
               <Inp value={setCategory} onChange={e=>{setSetCategory(e.target.value);setSaved(false);}} placeholder="Categorie / doel… (bv. Quiz ronde 1, Go-kart, Bowlen)"/>
-              <select value={selectedEvtId} onChange={e=>{setSelectedEvtId(e.target.value);setSaved(false);}}
-                style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"9px 10px",color:selectedEvtId?"var(--cream)":"var(--muted)",fontFamily:"var(--font-b)",fontSize:".88rem",outline:"none",width:"100%"}}>
-                <option value="">— Kies een event —</option>
-                {activeEvents.map(e=>(
-                  <option key={e.id} value={e.id}>{e.name} · {formatEventDateRange(e.date,e.end_date,{weekday:false,month:"short"})}</option>
-                ))}
-              </select>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <Btn onClick={saveToEvent} variant="gold" disabled={!setName.trim()||!selectedEvtId}>
-                  💾 Opslaan
+              <div>
+                <Lbl>Koppel aan event (optioneel)</Lbl>
+                {activeEvents.length===0?(
+                  <div style={{color:"var(--muted)",fontSize:".8rem"}}>Nog geen (actieve) events om aan te koppelen.</div>
+                ):(
+                  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                    {activeEvents.map(e=>{
+                      const linked=linkEvtIds.includes(e.id);
+                      return(
+                        <button key={e.id} type="button" onClick={()=>{toggleLinkEvt(e.id);setSaved(false);}} aria-pressed={linked}
+                          style={{background:linked?"rgba(232,148,58,.16)":"var(--bg3)",border:`1px solid ${linked?"var(--amber)":"var(--border)"}`,borderRadius:20,color:linked?"var(--amber2)":"var(--cream)",padding:"5px 12px",fontSize:".78rem",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:linked?600:400}}>
+                          {linked?"✓ ":""}{e.name} · {formatEventDateRange(e.date,e.end_date,{weekday:false,month:"short"})}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <Btn onClick={saveToLibrary} variant="gold" disabled={!setName.trim()||saving}>
+                  {saving?"Opslaan…":"💾 Opslaan"}
                 </Btn>
+                {editingSetId&&<Btn onClick={cancelEdit} variant="ghost" size="sm">Annuleer bewerken</Btn>}
                 {saved&&<span className="pop" style={{color:"var(--green)",fontSize:".85rem",fontWeight:600}}>✓ Opgeslagen!</span>}
+                {saveError&&<span role="alert" style={{color:"var(--red)",fontSize:".85rem",fontWeight:600}}>Opslaan mislukt — probeer opnieuw.</span>}
               </div>
             </div>
           </Card>
         </div>
       )}
 
-      {/* ── Saved team sets across events ── */}
-      {events.some(e=>(e.team_sets||[]).length>0)&&(
-        <div style={{marginTop:"2rem"}}>
-          <H size="1.1rem" style={{marginBottom:"1rem"}}>📂 Opgeslagen teams</H>
-          {events.filter(e=>(e.team_sets||[]).length>0).map(evt=>(
-            <div key={evt.id} style={{marginBottom:"1.2rem"}}>
-              <div style={{fontSize:".8rem",fontFamily:"var(--font-b)",fontWeight:700,color:"var(--amber2)",textTransform:"uppercase",letterSpacing:".05em",marginBottom:".5rem",opacity:.8}}>
-                {evt.name}
-              </div>
-              <div style={{display:"flex",flexDirection:"column",gap:".5rem"}}>
-                {(evt.team_sets||[]).map(ts=>(
-                  <div key={ts.id} style={{display:"flex",alignItems:"center",gap:10,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".65rem 1rem"}}>
-                    <div style={{flex:1,minWidth:0}}>
+      {/* #9/#10 -- the team library: every saved set, active or archived */}
+      <div style={{marginTop:"2rem"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:"1rem"}}>
+          <H size="1.1rem" style={{marginBottom:0}}>📂 Teambibliotheek</H>
+          <div style={{display:"flex",gap:6}}>
+            <Btn onClick={()=>setLibFilter("active")} variant={libFilter==="active"?"primary":"ghost"} size="sm">Actief</Btn>
+            <Btn onClick={()=>setLibFilter("archived")} variant={libFilter==="archived"?"primary":"ghost"} size="sm">Gearchiveerd</Btn>
+          </div>
+        </div>
+
+        {visibleSets.length===0?(
+          <div style={{textAlign:"center",padding:"2rem 1rem",color:"var(--muted)",fontSize:".85rem"}}>
+            {libFilter==="archived"?"Nog geen gearchiveerde teamsets.":"Nog geen teamsets opgeslagen. Genereer teams hierboven en sla ze op."}
+          </div>
+        ):(
+          <div style={{display:"flex",flexDirection:"column",gap:".6rem"}}>
+            {visibleSets.map(ts=>{
+              const summary=teamSetSummary(ts);
+              const linkedEvents=(ts.eventIds||[]).map(id=>events.find(e=>e.id===id)).filter(Boolean);
+              const archived=ts.status==="archived";
+              return(
+                <div key={ts.id} style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".75rem 1rem",opacity:archived?.8:1}}>
+                  <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                    <div style={{flex:1,minWidth:180}}>
                       <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginBottom:2}}>
-                        <span style={{fontFamily:"var(--font-b)",fontWeight:600,color:"var(--cream)",fontSize:".9rem"}}>{ts.name}</span>
+                        <span style={{fontFamily:"var(--font-b)",fontWeight:600,color:"var(--cream)",fontSize:".9rem"}}>{ts.name||"Naamloze teams"}</span>
                         {ts.category&&<span style={{background:"rgba(232,148,58,.15)",border:"1px solid rgba(232,148,58,.3)",borderRadius:20,padding:"1px 8px",fontSize:".68rem",fontFamily:"var(--font-b)",fontWeight:600,color:"var(--amber2)",letterSpacing:".04em"}}>{ts.category}</span>}
+                        {archived&&<span style={{background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:20,padding:"1px 8px",fontSize:".65rem",color:"var(--muted)",letterSpacing:".04em"}}>GEARCHIVEERD</span>}
                       </div>
                       <div style={{color:"var(--muted)",fontSize:".78rem"}}>
-                        {ts.teams.length} teams · {ts.teams.reduce((s,t)=>s+t.members.length,0)} personen
-                        <span style={{marginLeft:8,opacity:.7}}>{new Date(ts.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short"})}</span>
+                        {summary.teamCount} teams · {summary.memberCount} personen
+                        {ts.createdAt&&<span style={{marginLeft:8,opacity:.7}}>{new Date(ts.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short"})}</span>}
                       </div>
+                      {linkedEvents.length>0&&(
+                        <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:5}}>
+                          {linkedEvents.map(e=>(
+                            <span key={e.id} style={{fontSize:".68rem",color:"var(--muted)",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:20,padding:"1px 8px"}}>{e.name}</span>
+                          ))}
+                        </div>
+                      )}
+                      {(ts.awards||[]).length>0&&(
+                        <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:5}}>
+                          {ts.awards.map(a=>(
+                            <span key={a.id} style={{fontSize:".7rem",color:"var(--gold)",background:"rgba(201,146,42,.14)",border:"1px solid rgba(201,146,42,.4)",borderRadius:20,padding:"2px 9px"}}>{a.label||"🏆"}</span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                      {ts.teams.slice(0,4).map(t=>(
-                        <span key={t.id} style={{fontSize:".95rem"}} title={t.name}>{t.avatar}</span>
-                      ))}
-                      {ts.teams.length>4&&<span style={{fontSize:".75rem",color:"var(--muted)"}}>+{ts.teams.length-4}</span>}
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap",flexShrink:0}}>
+                      <Btn onClick={()=>loadForEdit(ts)} variant="ghost" size="sm">✏️ Bewerken</Btn>
+                      {archived
+                        ?<Btn onClick={()=>doUnarchive(ts)} variant="ghost" size="sm">♻️ Herstellen</Btn>
+                        :<Btn onClick={()=>doArchive(ts)} variant="ghost" size="sm">🗄️ Archiveren</Btn>}
+                      <Btn onClick={()=>doDelete(ts)} variant="ghost" size="sm" style={{color:"var(--red)",borderColor:"transparent"}} aria-label={`${ts.name||"Teamset"} verwijderen`}>🗑</Btn>
                     </div>
-                    <Btn onClick={()=>onUpdateEvent({...evt,team_sets:(evt.team_sets||[]).filter(x=>x.id!==ts.id)})}
-                      variant="ghost" size="sm" style={{color:"var(--red)",borderColor:"transparent",flexShrink:0,padding:"4px 8px"}}>
-                      🗑
-                    </Btn>
                   </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -6392,6 +6602,11 @@ const TimerPage=()=>{
 export default function App(){
   const [events,setEvents]=useState(SEED_EVENTS);
   const [users,setUsers]=useState(SEED_USERS);
+  // Team library (docs/mensgames-spec.md §2.3): eager, tiny, lives at the
+  // App root because it has three non-lazy consumers (EventPage's Teams
+  // tab, QuizDashboard/QuizBuilder, TeamCreatorPage) -- same reasoning as
+  // `events`/`users` above, unlike mens-games' own lazy-loaded state.
+  const [teamSets,setTeamSets]=useState([]);
   const [currentUser,setCurrentUser]=useState(null);
   const [authView,setAuthView]=useState("login");
   const [activeId,setActiveId]=useState(null);
@@ -6447,7 +6662,9 @@ export default function App(){
       supabase.from("events").select("*").order("date"),
       supabase.from("users").select("*"),
       supabase.from("announcements").select("*").order("created_at",{ascending:false}),
-    ]).then(async([{data:evts},{data:usrs},{data:anns}])=>{
+      fetchTeamSets(),
+    ]).then(async([{data:evts},{data:usrs},{data:anns},teamSetRows])=>{
+      setTeamSets(teamSetRows);
       const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});
       if(anns&&anns.length){
         const sjRow=anns.find(r=>r.id==="__sara_jay__");
@@ -6478,6 +6695,7 @@ export default function App(){
     });
 
     const poll=setInterval(()=>{
+      fetchTeamSets().then(setTeamSets);
       supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data&&data.length){const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});const sjRow=data.find(r=>r.id==="__sara_jay__");if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}const delRow=data.find(r=>r.id==="__deleted_notifs__");if(delRow){try{const raw=JSON.parse(delRow.body||"null");if(raw){const ids=new Set(Array.isArray(raw)?raw:(raw.ids||[]));const cb=Array.isArray(raw)?"": (raw.cleared_before||"");setDeletedNotifIds(ids);if(cb)setClearedBefore(cb);setNotifications(prev=>{const next=prev.filter(n=>!ids.has(n.id)&&(!cb||n.timestamp>cb));const cu=currentUserRef.current;if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));return next;});}}catch{}}const SYSTEM_IDS=new Set(["__sara_jay__","__deleted_notifs__"]);const mapped=data.filter(r=>!SYSTEM_IDS.has(r.id)).map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}});
       supabase.from("users").select("*").then(({data})=>{
         if(data){
@@ -6809,9 +7027,9 @@ export default function App(){
         {pageView==="hof"&&<HallOfFame events={events} users={users}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
-        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)}/>}
+        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)} teamSets={teamSets} onTeamSetsChanged={setTeamSets}/>}
         {pageView==="updates"&&<UpdatesPage notifications={notifications.filter(n=>!deletedNotifIds.has(n.id)&&(!clearedBefore||n.timestamp>clearedBefore))} notifLastRead={notifLastRead} currentUser={currentUser} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={openEvent} onClearSelf={()=>{setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);}} onDeleteSelf={id=>{setNotifications(prev=>{const next=prev.filter(n=>n.id!==id);if(currentUser)localStorage.setItem(`md-notifs-${currentUser.id}`,JSON.stringify(next));return next;});}} onClearUpdates={async()=>{const cb=new Date().toISOString();const allIds=[...new Set([...deletedNotifIds,...notifications.map(n=>n.id)])];const newSet=new Set(allIds);setDeletedNotifIds(newSet);setClearedBefore(cb);setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);const body=JSON.stringify({ids:allIds,cleared_before:cb});await supabase.from("announcements").upsert({id:"__deleted_notifs__",title:"__deleted_notifs__",body,created_by:"system",created_at:new Date().toISOString(),active:false});supabase.channel("notif-ctrl").send({type:"broadcast",event:"clear-notifs",payload:{ids:allIds,cleared_before:cb}});}} onDeleteNotif={deleteNotifForAll}/>}
-        {pageView==="teams"&&<TeamCreatorPage users={users} events={events} onUpdateEvent={updateEvent}/>}
+        {pageView==="teams"&&<TeamCreatorPage users={users} events={events} currentUser={currentUser} teamSets={teamSets} onTeamSetsChanged={setTeamSets}/>}
         {pageView==="timer"&&<TimerPage/>}
         {pageView==="sarajay"&&<SaraJayOrJAI/>}
       </main>
