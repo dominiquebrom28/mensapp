@@ -121,8 +121,20 @@ async function openEventPage() {
   })
 }
 
+// The 2026-08-24 nav rework (overcrowded top bar, silently clipped at
+// 768-1000px) moved the four feature links behind a "Tools" trigger and
+// Admin/Announce/Logout behind the avatar's "account menu" trigger -- see
+// App.jsx's Nav component. Desktop-only (`setDesktop()`'s 1024px is the
+// nav's "full" tier); the mobile hamburger's own flat list is unchanged
+// and needs neither of these helpers.
+function openToolsMenu() {
+  fireEvent.click(screen.getByRole('button', { name: /tools menu/i }))
+}
+
 async function openAdminFeaturesTab() {
-  fireEvent.click(screen.getAllByRole('button', { name: /admin/i })[0])
+  fireEvent.click(screen.getAllByRole('button', { name: /account menu/i })[0])
+  const adminItem = await screen.findByRole('button', { name: /admin/i })
+  fireEvent.click(adminItem)
   const featuresTab = await screen.findByRole('button', { name: /features/i })
   fireEvent.click(featuresTab)
 }
@@ -179,6 +191,7 @@ describe('mens-games admin toggle -- locked (default)', () => {
     const { default: App } = await import('../App.jsx')
     render(<App />)
     await goHome()
+    openToolsMenu()
 
     expect(screen.getByRole('button', { name: '🔒 Mens-Games' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '🏆 Mens-Games' })).not.toBeInTheDocument()
@@ -215,6 +228,7 @@ describe('mens-games admin toggle -- locked (default)', () => {
     const { default: App } = await import('../App.jsx')
     render(<App />)
     await goHome()
+    openToolsMenu()
 
     // Two distinct locked buttons, neither collapsing to the other's label.
     expect(screen.getByRole('button', { name: '🔒 Mens-Games' })).toBeInTheDocument()
@@ -278,6 +292,7 @@ describe('mens-games admin toggle -- unlocked via the system row', () => {
     const { default: App } = await import('../App.jsx')
     render(<App />)
     await goHome()
+    openToolsMenu()
 
     expect(screen.queryByRole('button', { name: '🔒 ???' })).not.toBeInTheDocument()
     const navBtn = screen.getByRole('button', { name: '🏆 Mens-Games' })
@@ -362,6 +377,7 @@ describe('mens-games admin toggle -- round-trips through localStorage and the sy
     const { default: App } = await import('../App.jsx')
     render(<App />)
     await goHome()
+    openToolsMenu()
 
     expect(screen.getByRole('button', { name: '🏆 Mens-Games' })).toBeInTheDocument()
   })

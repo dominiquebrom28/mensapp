@@ -715,10 +715,65 @@ const PendingScreen = ({user,onLogout}) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // NAV
 // ─────────────────────────────────────────────────────────────────────────────
+// Nav-only responsive tiers -- deliberately independent of `useIsMobile`
+// above (that hook drives several *other*, unrelated components at a 640px
+// threshold; this fix must not perturb those). Three tiers close the
+// 768-1000px dead zone where the old 10-button row silently clipped items
+// off-screen (measured in-browser 2026-08-24, nav rework brief): "full"
+// shows icon+label, "compact" drops labels to icon-only (with accessible
+// names via aria-label), "mobile" hands off to the existing hamburger,
+// unchanged.
+const NAV_MOBILE_BP=768, NAV_COMPACT_BP=1000;
+const useNavTier = () => {
+  // Duplicated (not shared via a helper referenced from the effect) on
+  // purpose, matching `useIsMobile` above -- a named helper closed over by
+  // the resize listener would trip `react-hooks/exhaustive-deps` since
+  // it's re-created every render.
+  const [tier,setTier]=useState(()=>{
+    if(typeof window==="undefined")return"full";
+    const w=window.innerWidth;
+    return w<NAV_MOBILE_BP?"mobile":w<NAV_COMPACT_BP?"compact":"full";
+  });
+  useEffect(()=>{
+    const h=()=>{
+      const w=window.innerWidth;
+      setTier(w<NAV_MOBILE_BP?"mobile":w<NAV_COMPACT_BP?"compact":"full");
+    };
+    window.addEventListener("resize",h);
+    return()=>window.removeEventListener("resize",h);
+  },[]);
+  return tier;
+};
+// Hand-rolled dropdown primitive for the Tools/Account menus (no menu
+// library per project constraints -- this is the APG "disclosure" pattern,
+// not a full ARIA menu, so plain Tab/Enter/Space already operates it):
+// closes on outside click and on Escape, and Escape returns focus to the
+// trigger so keyboard users don't lose their place.
+const useNavDropdown = () => {
+  const [open,setOpen]=useState(false);
+  const rootRef=useRef(null);
+  const triggerRef=useRef(null);
+  useEffect(()=>{
+    if(!open)return;
+    const onDocClick=e=>{if(rootRef.current&&!rootRef.current.contains(e.target))setOpen(false);};
+    const onKey=e=>{if(e.key==="Escape"){setOpen(false);triggerRef.current?.focus();}};
+    document.addEventListener("click",onDocClick);
+    document.addEventListener("keydown",onKey);
+    return()=>{document.removeEventListener("click",onDocClick);document.removeEventListener("keydown",onKey);};
+  },[open]);
+  return{open,setOpen,rootRef,triggerRef};
+};
 const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onUpdates,onProfile,onTeams,onTimer,onMensGames,mensGamesUnlocked,onSaraJay,saraJayUnlocked}) => {
   const [menuOpen,setMenuOpen]=useState(false);
-  const isMobile=useIsMobile();
+  const tier=useNavTier();
+  const compact=tier!=="full";
+  const tools=useNavDropdown();
+  const account=useNavDropdown();
   const unread=notifications.filter(n=>n.timestamp>notifLastRead).length;
+  const displayName=currentUser.display_name||currentUser.username;
+  const isAdmin=can.manageUsers(currentUser);
+  const canAnnounce=can.announce(currentUser);
+  const toolsActive=view==="teams"||view==="timer"||view==="mensgames"||view==="sarajay";
   useEffect(()=>{
     if(!menuOpen)return;
     const close=()=>setMenuOpen(false);
@@ -726,10 +781,24 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
     return()=>document.removeEventListener("click",close);
   },[menuOpen]);
   const bellBtn=(mobile=false)=>(
-    <button onClick={onUpdates} className="nav-btn" style={{position:"relative",background:view==="updates"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:mobile?"6px 10px":"5px 12px",cursor:"pointer",fontSize:mobile?"1rem":".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>
-      📬{unread>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}
+    <button onClick={onUpdates} aria-label="Updates" className="nav-btn" style={{position:"relative",background:view==="updates"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:mobile?"6px 10px":"0 10px",minHeight:mobile?undefined:44,minWidth:mobile?undefined:44,display:mobile?undefined:"inline-flex",alignItems:mobile?undefined:"center",justifyContent:mobile?undefined:"center",cursor:"pointer",fontSize:mobile?"1rem":".95rem",fontFamily:"var(--font-b)",fontWeight:600,flexShrink:0}}>
+      📬{unread>0&&<span style={{position:"absolute",top:-2,right:-2,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}
     </button>
   );
+  // Icon+label direct link, used for the two always-visible destinations
+  // (Lads, Hall of Fame). Drops its text label at the compact tier but
+  // keeps an aria-label so the accessible name never changes with width.
+  const navLink=(icon,label,active,onClick)=>(
+    <button key={label} onClick={onClick} aria-label={label} className="nav-btn" style={{background:active?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:compact?"0 10px":"0 12px",minHeight:44,minWidth:44,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,flexShrink:0}}>
+      <span aria-hidden="true">{icon}</span>{!compact&&<span>{label}</span>}
+    </button>
+  );
+  // Shared row style for items inside the Tools/Account dropdown panels --
+  // these always show full icon+text regardless of tier (the panel itself
+  // is only ever rendered on demand, so it never contributes to the
+  // 768-1000px clipping the rest of Nav had to solve for).
+  const menuItemStyle=(active,locked=false)=>({background:active?"rgba(232,148,58,.12)":"transparent",border:"none",borderRadius:8,color:locked?"var(--muted)":"var(--amber2)",padding:"10px 12px",minHeight:44,display:"flex",alignItems:"center",gap:8,cursor:locked?"not-allowed":"pointer",fontSize:".85rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",width:"100%",opacity:locked?.55:1});
+  const menuPanelStyle={position:"absolute",top:"calc(100% + 8px)",right:0,minWidth:210,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:6,display:"grid",gap:4,boxShadow:"0 12px 32px rgba(0,0,0,.5)",zIndex:210};
   return(
     <nav style={{position:"fixed",top:0,left:0,right:0,zIndex:200,background:"rgba(15,11,7,.94)",backdropFilter:"blur(14px)",borderBottom:"1px solid var(--border)"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 1.2rem",height:58,gap:12}}>
@@ -739,30 +808,50 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
             {view==="home"?"🍺 MensApp":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":view==="teams"?"🎲 Team Creator":view==="timer"?"⏱ Timer":view==="mensgames"?"🏆 Mens-Games":view==="sarajay"?"🤖 Sara Jay":eventName}
           </div>
         </div>
-        {!isMobile&&(
+        {tier!=="mobile"&&(
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-            <button onClick={onMembers} className="nav-btn" style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>👥 Lads</button>
-            <button onClick={onHof} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🏅 Hall of Fame</button>
-            <button onClick={onTeams} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>🎲 Teams</button>
-            <button onClick={onTimer} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⏱ Timer</button>
-            {/* Locked mens-games gets a recognisable "🔒 Mens-Games" label, not
-                the Sara Jay "🔒 ???" mystery treatment -- mens-games is just
-                a feature not yet switched on, Sara Jay is a deliberate
-                surprise. Owner-flagged ambiguity, 2026-08-21. */}
-            <button onClick={mensGamesUnlocked?onMensGames:undefined} className="nav-btn" style={{background:view==="mensgames"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:mensGamesUnlocked?"var(--amber2)":"var(--muted)",padding:"5px 12px",cursor:mensGamesUnlocked?"pointer":"not-allowed",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,opacity:mensGamesUnlocked?1:.55}}>{mensGamesUnlocked?"🏆 Mens-Games":"🔒 Mens-Games"}</button>
-            <button onClick={saraJayUnlocked?onSaraJay:undefined} className="nav-btn" style={{background:view==="sarajay"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:saraJayUnlocked?"var(--amber2)":"var(--muted)",padding:"5px 12px",cursor:saraJayUnlocked?"pointer":"not-allowed",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,opacity:saraJayUnlocked?1:.55}}>{saraJayUnlocked?"🤖 Sara Jay":"🔒 ???"}</button>
-            {can.announce(currentUser)&&<button onClick={onAnnounce} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>📢 Announce</button>}
-            {can.manageUsers(currentUser)&&<button onClick={onAdmin} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>⚙ Admin{pendingCount>0&&<span style={{position:"absolute",top:-7,right:-7,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}</button>}
-            {bellBtn()}
-            <div onClick={onProfile} onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--amber)";e.currentTarget.style.background="rgba(232,148,58,.08)";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--bg3)";}} style={{display:"flex",alignItems:"center",gap:7,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"5px 12px",cursor:"pointer",transition:"border-color .15s,background .15s"}}>
-              <Avatar name={currentUser.username} size={22} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/>
-              <span style={{fontSize:".8rem",color:"var(--cream)"}}>{currentUser.display_name||currentUser.username}</span>
-              <RoleBadge role={currentUser.role}/>
+            {navLink("👥","Lads",view==="members"||view==="member",onMembers)}
+            {navLink("🏅","Hall of Fame",view==="hof",onHof)}
+            <div ref={tools.rootRef} style={{position:"relative"}}>
+              <button ref={tools.triggerRef} onClick={e=>{e.stopPropagation();tools.setOpen(o=>!o);}} aria-expanded={tools.open} aria-controls="nav-tools-menu" aria-label="Tools menu" className="nav-btn" style={{background:toolsActive?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:compact?"0 10px":"0 12px",minHeight:44,minWidth:44,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600}}>
+                <span aria-hidden="true">🧰</span>{!compact&&<span>Tools</span>}<span aria-hidden="true" style={{fontSize:".65rem"}}>▾</span>
+              </button>
+              {tools.open&&(
+                <div id="nav-tools-menu" style={menuPanelStyle}>
+                  <button onClick={()=>{onTeams();tools.setOpen(false);}} className="nav-btn" style={menuItemStyle(view==="teams")}>🎲 Team Creator</button>
+                  <button onClick={()=>{onTimer();tools.setOpen(false);}} className="nav-btn" style={menuItemStyle(view==="timer")}>⏱ Timer</button>
+                  {/* Locked mens-games gets a recognisable "🔒 Mens-Games" label, not
+                      the Sara Jay "🔒 ???" mystery treatment -- mens-games is just
+                      a feature not yet switched on, Sara Jay is a deliberate
+                      surprise. Owner-flagged ambiguity, 2026-08-21; same
+                      distinction now lives inside Tools. */}
+                  <button onClick={mensGamesUnlocked?()=>{onMensGames();tools.setOpen(false);}:undefined} disabled={!mensGamesUnlocked} className={mensGamesUnlocked?"nav-btn":undefined} style={menuItemStyle(view==="mensgames",!mensGamesUnlocked)}>{mensGamesUnlocked?"🏆 Mens-Games":"🔒 Mens-Games"}</button>
+                  <button onClick={saraJayUnlocked?()=>{onSaraJay();tools.setOpen(false);}:undefined} disabled={!saraJayUnlocked} className={saraJayUnlocked?"nav-btn":undefined} style={menuItemStyle(view==="sarajay",!saraJayUnlocked)}>{saraJayUnlocked?"🤖 Sara Jay":"🔒 ???"}</button>
+                </div>
+              )}
             </div>
-            <button onClick={onLogout} className="nav-logout" style={{background:"transparent",border:"1px solid rgba(224,85,85,.3)",borderRadius:8,color:"var(--red)",padding:"5px 12px",cursor:"pointer",fontSize:".78rem",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s ease"}}>Uitloggen</button>
+            {bellBtn()}
+            <div ref={account.rootRef} style={{position:"relative"}}>
+              <button ref={account.triggerRef} onClick={e=>{e.stopPropagation();account.setOpen(o=>!o);}} aria-expanded={account.open} aria-controls="nav-account-menu" aria-label={`${displayName} — account menu`} className="nav-btn" style={{position:"relative",display:"flex",alignItems:"center",gap:7,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:compact?"0 8px":"0 10px",minHeight:44,cursor:"pointer"}}>
+                <Avatar name={currentUser.username} size={22} index={currentUser.animal_avatar??currentUser.avatar??0} photoUrl={currentUser.photo_url||""}/>
+                {!compact&&<span style={{fontSize:".8rem",color:"var(--cream)"}}>{displayName}</span>}
+                {!compact&&<RoleBadge role={currentUser.role}/>}
+                <span aria-hidden="true" style={{fontSize:".65rem",color:"var(--muted)"}}>▾</span>
+                {isAdmin&&pendingCount>0&&<span aria-hidden="true" style={{position:"absolute",top:-6,right:-6,background:"var(--red)",color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:".65rem",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{pendingCount}</span>}
+              </button>
+              {account.open&&(
+                <div id="nav-account-menu" style={menuPanelStyle}>
+                  <button onClick={()=>{onProfile();account.setOpen(false);}} className="nav-btn" style={menuItemStyle(false)}>👤 Profile</button>
+                  {canAnnounce&&<button onClick={()=>{onAnnounce();account.setOpen(false);}} className="nav-btn" style={menuItemStyle(false)}>📢 Announce</button>}
+                  {isAdmin&&<button onClick={()=>{onAdmin();account.setOpen(false);}} className="nav-btn" style={{...menuItemStyle(false),position:"relative"}}>⚙ Admin{pendingCount>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:"50%",minWidth:18,height:18,padding:"0 4px",fontSize:".65rem",fontWeight:700,display:"inline-flex",alignItems:"center",justifyContent:"center",marginLeft:"auto"}}>{pendingCount}</span>}</button>}
+                  <div style={{height:1,background:"var(--border)",margin:"2px 0"}}/>
+                  <button onClick={()=>{onLogout();account.setOpen(false);}} className="nav-logout" style={{...menuItemStyle(false),color:"var(--red)"}}>Uitloggen</button>
+                </div>
+              )}
+            </div>
           </div>
         )}
-        {isMobile&&(
+        {tier==="mobile"&&(
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
             {bellBtn(true)}
             <button onClick={e=>{e.stopPropagation();setMenuOpen(o=>!o);}} className="nav-btn" style={{position:"relative",background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",padding:"6px 11px",cursor:"pointer",fontSize:"1.1rem",lineHeight:1}}>
@@ -771,7 +860,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
           </div>
         )}
       </div>
-      {isMobile&&menuOpen&&(
+      {tier==="mobile"&&menuOpen&&(
         <div onClick={e=>e.stopPropagation()} style={{background:"rgba(15,11,7,.98)",borderBottom:"1px solid var(--border)",padding:".8rem 1.2rem",display:"grid",gap:".5rem"}}>
           <button onClick={()=>{onMembers();setMenuOpen(false);}} className="nav-btn" style={{background:(view==="members"||view==="member")?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>👥 Lads</button>
           <button onClick={()=>{onHof();setMenuOpen(false);}} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
