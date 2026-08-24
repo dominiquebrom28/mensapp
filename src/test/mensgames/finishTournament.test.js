@@ -29,7 +29,7 @@ vi.mock('../../features/teamlib/api.js', () => ({
 }));
 
 import { addTeamAward, archiveTeamSet } from '../../features/teamlib/api.js';
-import { winnerRowsFromTournament, buildTeamAwards, finishTournament } from '../../features/mensgames/finishTournament.js';
+import { winnerRowsFromTournament, buildTeamAwards, finishTournament, publishTournamentResults } from '../../features/mensgames/finishTournament.js';
 
 beforeEach(() => {
   addTeamAward.mockClear();
@@ -288,5 +288,82 @@ describe('finishTournament', () => {
 
   it('never throws on a malformed tournament/standings/teamSets combination', async () => {
     await expect(finishTournament({ tournament: null, standings: null, teamSets: null })).resolves.toBeTruthy();
+  });
+});
+
+// 2026-08-24: "let me create a tournament but make it secret" -- finishing a
+// secret tournament must NOT leak its result onto events.winners (Winners
+// tab / Hall of Fame) or team_sets.awards (Team Trophy Cabinet, also on
+// Hall of Fame), both of which every member can see regardless of whether
+// the tournament row itself is hidden from them elsewhere.
+describe('finishTournament — secret tournaments defer publishing (2026-08-24)', () => {
+  const standings = [
+    { entrantId: 'ent_1', points: 10, rank: 1 },
+    { entrantId: 'ent_2', points: 6, rank: 2 },
+  ];
+
+  it('still flips status to finished, but does not touch events.winners', async () => {
+    const onUpdateEvent = vi.fn(async () => {});
+    const event = { id: 'evt-2026', winners: [] };
+    const result = await finishTournament({
+      tournament: tournament({ settings: { secret: true } }),
+      standings,
+      event,
+      onUpdateEvent,
+      teamSets: TEAM_SETS,
+    });
+    expect(result.tournament.status).toBe('finished');
+    expect(result.deferred).toBe(true);
+    expect(result.ok).toBe(true);
+    expect(onUpdateEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not write any TeamAward while secret', async () => {
+    const result = await finishTournament({ tournament: tournament({ settings: { secret: true } }), standings, teamSets: TEAM_SETS });
+    expect(addTeamAward).not.toHaveBeenCalled();
+    expect(archiveTeamSet).not.toHaveBeenCalled();
+    expect(result.updatedTeamSets).toEqual([]);
+  });
+
+  it('still computes winners/teamAwards for the caller to use once revealed, it just does not write them', async () => {
+    const result = await finishTournament({ tournament: tournament({ settings: { secret: true } }), standings, teamSets: TEAM_SETS });
+    expect(result.winners.length).toBeGreaterThan(0);
+    expect(result.teamAwards.length).toBeGreaterThan(0);
+  });
+
+  it('a non-secret tournament is unaffected (deferred: false, publishes as before)', async () => {
+    const onUpdateEvent = vi.fn(async () => {});
+    const event = { id: 'evt-2026', winners: [] };
+    mockTableData.events = { data: event, error: null };
+    const result = await finishTournament({ tournament: tournament(), standings, event, onUpdateEvent, teamSets: TEAM_SETS });
+    expect(result.deferred).toBe(false);
+    expect(onUpdateEvent).toHaveBeenCalledTimes(1);
+    expect(addTeamAward).toHaveBeenCalled();
+  });
+});
+
+describe('publishTournamentResults — the reveal-time publish (2026-08-24)', () => {
+  const standings = [
+    { entrantId: 'ent_1', points: 10, rank: 1 },
+    { entrantId: 'ent_2', points: 6, rank: 2 },
+  ];
+
+  it('pushes winners onto the event and awards onto the team sets, exactly like a non-secret finish would', async () => {
+    const onUpdateEvent = vi.fn(async () => {});
+    const event = { id: 'evt-2026', winners: [] };
+    mockTableData.events = { data: event, error: null };
+    const result = await publishTournamentResults({ tournament: tournament({ settings: { secret: false } }), standings, event, onUpdateEvent, teamSets: TEAM_SETS });
+    expect(result.ok).toBe(true);
+    expect(onUpdateEvent).toHaveBeenCalledTimes(1);
+    const ids = onUpdateEvent.mock.calls[0][0].winners.map((w) => w.id);
+    expect(ids).toContain('mg-trn_1-ent_1');
+    expect(addTeamAward).toHaveBeenCalledTimes(2);
+    expect(result.updatedTeamSets).toHaveLength(1);
+  });
+
+  it('called with no event still publishes team awards (a standalone secret tournament, revealed)', async () => {
+    const result = await publishTournamentResults({ tournament: tournament({ eventId: null, settings: { secret: false } }), standings, event: null, onUpdateEvent: undefined, teamSets: TEAM_SETS });
+    expect(result.ok).toBe(true);
+    expect(addTeamAward).toHaveBeenCalledTimes(2);
   });
 });

@@ -17,7 +17,7 @@ import StandingsTable from './StandingsTable.jsx';
 import ScoreboardPanel from './ScoreboardPanel.jsx';
 import { blankRound } from './model.js';
 import { computeStandings, lockRound, unlockRound } from './standings.js';
-import { finishTournament } from './finishTournament.js';
+import { finishTournament, publishTournamentResults } from './finishTournament.js';
 import { listScoringTypes } from './scoring/index.js';
 import { deleteTournament, saveTournament, subscribeTournament } from './api.js';
 
@@ -34,7 +34,7 @@ function moveItem(arr, index, dir) {
   return next;
 }
 
-export default function TournamentEditor({ tournament: initialTournament, events, teamSets, teamSetsError = null, onRetryTeamSets, canManage, onBack, onDeleted, onLocalChange, onUpdateEvent, onTeamSetsChanged }) {
+export default function TournamentEditor({ tournament: initialTournament, events, teamSets, teamSetsError = null, onRetryTeamSets, canManage, onBack, onDeleted, onLocalChange, onUpdateEvent, onTeamSetsChanged, onSendNotif }) {
   const [tournament, setTournamentState] = useState(initialTournament);
   const [expandedRoundId, setExpandedRoundId] = useState(null);
   const [showNewRound, setShowNewRound] = useState(false);
@@ -47,6 +47,16 @@ export default function TournamentEditor({ tournament: initialTournament, events
   // is mislukt" (a message about saving), which is the wrong operation.
   const [deleteError, setDeleteError] = useState(false);
   const [saving, setSaving] = useState(false);
+  // 2026-08-24 -- secret tournaments. `revealError` is its own flag, not
+  // `saveError`/`finishError`: a failed reveal-time publish
+  // (`publishTournamentResults`) is neither a plain autosave failure nor a
+  // failed "Afronden" (the tournament may already have finished, secretly,
+  // long before this reveal is attempted).
+  const [revealError, setRevealError] = useState(false);
+  // Same "ask before telling everyone" banner OverviewTab/PollsTab already
+  // use for their own secret-reveal notifications -- set once the reveal
+  // actually happens, cleared on Verstuur/Niet nu.
+  const [notifyPending, setNotifyPending] = useState(null);
   const pendingRef = useRef(null);
   const timerRef = useRef(null);
   const idRef = useRef(initialTournament.id);
@@ -138,13 +148,22 @@ export default function TournamentEditor({ tournament: initialTournament, events
 
   const setStatus = (status) => update((t) => ({ ...t, status }), { immediate: true });
 
+  const applyUpdatedTeamSets = (updatedTeamSets) => {
+    if (updatedTeamSets.length && typeof onTeamSetsChanged === 'function') {
+      onTeamSetsChanged((prev) => (Array.isArray(prev) ? prev : []).map((ts) => updatedTeamSets.find((u) => u.id === ts.id) || ts));
+    }
+  };
+
   // WP-J: finishing a tournament writes medal winners onto the linked event
   // (reusing `events.winners` -- WinnersTab/HallOfFame pick them up with no
   // changes to either) and a TeamAward onto each medalled team's
   // originating team set (§3.1). A tournament with no linked event still
   // awards teams -- `finishTournament` treats `event` as optional. Archiving
   // the awarded team set(s) is the modal's own explicit opt-in, default off
-  // (§13 Q5) -- never automatic.
+  // (§13 Q5) -- never automatic. When the tournament is secret (2026-08-24),
+  // `finishTournament` itself defers both of those writes -- see its own
+  // comment -- so "Afronden" still locks scoring here, it just doesn't
+  // publish anything anywhere yet.
   const finalStandings = useMemo(() => computeStandings(tournament), [tournament]);
   const medalCount = useMemo(() => finalStandings.filter((s) => Number.isFinite(s.rank) && s.rank >= 1 && s.rank <= 3).length, [finalStandings]);
   const doFinish = async (archiveWinningSets) => {
@@ -154,11 +173,67 @@ export default function TournamentEditor({ tournament: initialTournament, events
     setFinishing(false);
     setShowFinish(false);
     if (!result.ok) { setFinishError(true); return; }
-    if (result.updatedTeamSets.length && typeof onTeamSetsChanged === 'function') {
-      onTeamSetsChanged((prev) => (Array.isArray(prev) ? prev : []).map((ts) => result.updatedTeamSets.find((u) => u.id === ts.id) || ts));
-    }
+    applyUpdatedTeamSets(result.updatedTeamSets);
     update(() => result.tournament, { immediate: true });
   };
+
+  // 2026-08-24 -- secret tournaments ("let me create a tournament but make
+  // it secret, same as other features"). Scoped to the whole tournament,
+  // stored in the same `settings` JSONB `tieBreak`/`showLivePreview` already
+  // live in (no migration).
+  const secret = !!tournament.settings?.secret;
+
+  // Reveal-time publish: if this tournament finished *while* secret,
+  // `finishTournament` deferred writing its medals anywhere visible (see
+  // finishTournament.js) -- this is what actually publishes them, run once
+  // the owner lifts the secrecy. Takes an explicit snapshot rather than
+  // reading the `tournament` state directly so it can be called with the
+  // just-toggled (no-longer-secret) object before that state update has
+  // necessarily committed.
+  const publishNow = async (tSnapshot) => {
+    if (tSnapshot.status !== 'finished') return true;
+    setRevealError(false);
+    const result = await publishTournamentResults({
+      tournament: tSnapshot,
+      standings: computeStandings(tSnapshot),
+      event: linkedEvent,
+      onUpdateEvent,
+      teamSets,
+    });
+    if (!result.ok) { setRevealError(true); return false; }
+    applyUpdatedTeamSets(result.updatedTeamSets);
+    return true;
+  };
+
+  // A structural toggle (like lock/unlock a round), flushed immediately --
+  // mirrors the schedule stop's 🔒/👁 toggle (`toggleSecretStop`, App.jsx)
+  // and PollsTab's "🤫 Geheim"/"👁 Toon": revealing sends a notification
+  // (via the same `onSendNotif` + confirm-banner pattern those two use), and
+  // -- the part with no schedule-stop equivalent -- also publishes any
+  // medals this tournament earned while it was still secret.
+  const toggleSecret = () => {
+    const revealing = secret;
+    const next = { ...tournament, settings: { ...(tournament.settings || {}), secret: !secret } };
+    update(() => next, { immediate: true });
+    if (revealing) {
+      publishNow(next);
+      if (onSendNotif) {
+        setNotifyPending({
+          message: `🏆 Toernooi onthuld: "${tournament.name}"`,
+          type: 'tournament',
+          tab: linkedEvent ? 'Mens-Games 🏆' : null,
+          targetId: null,
+          eventId: linkedEvent?.id || null,
+          event: linkedEvent?.name || tournament.name,
+        });
+      }
+    }
+  };
+  // `settings.secret` is already flipped off by the time a publish can
+  // fail -- retrying `toggleSecret` itself would flip it back to secret
+  // instead of retrying the write, so a failed reveal gets its own retry
+  // that just re-runs the publish half against the current tournament.
+  const retryPublish = () => publishNow(tournament);
 
   const doDelete = async () => {
     if (!window.confirm(`"${tournament.name}" definitief verwijderen? Dit kan niet ongedaan gemaakt worden.`)) return;
@@ -204,11 +279,22 @@ export default function TournamentEditor({ tournament: initialTournament, events
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
             <Tag color={STATUS_COLOR[tournament.status]}>{STATUS_LABEL[tournament.status]}</Tag>
             {linkedEvent && <Tag color="var(--blue)">📅 {linkedEvent.name}</Tag>}
+            {/* Only an editor ever reaches this screen for a secret
+                tournament at all (MensGamesShell keeps it off the list, and
+                out of a non-editor's reach even via a stale selectedId) --
+                so this tag is purely an editor's own reminder that it's
+                still hidden from everyone else. */}
+            {secret && <Tag color="var(--red)">🤫 Geheim</Tag>}
             {saving && <span style={{ fontSize: '.72rem', color: 'var(--muted)' }}>Opslaan…</span>}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Btn variant="subtle" onClick={() => setShowScoreboard(true)}>📺 Scorebord</Btn>
+          {canManage && (
+            <Btn variant={secret ? 'danger' : 'ghost'} onClick={toggleSecret} title={secret ? 'Maak dit toernooi zichtbaar voor iedereen' : 'Verberg dit toernooi tot je het onthult'}>
+              {secret ? '👁 Onthullen' : '🤫 Geheim maken'}
+            </Btn>
+          )}
           {canManage && tournament.status === 'draft' && <Btn onClick={() => setStatus('live')}>▶ Start toernooi</Btn>}
           {canManage && tournament.status === 'live' && <Btn variant="success" onClick={() => setShowFinish(true)}>🏁 Afronden</Btn>}
           {canManage && tournament.status === 'finished' && <Btn variant="ghost" onClick={() => setStatus('live')}>↺ Heropenen</Btn>}
@@ -216,9 +302,22 @@ export default function TournamentEditor({ tournament: initialTournament, events
         </div>
       </div>
 
+      {/* Same "ask before telling everyone" confirm banner OverviewTab's
+          schedule reveal and PollsTab's poll reveal already use. */}
+      {notifyPending && (
+        <div style={{ background: 'rgba(232,148,58,.08)', border: '1px solid rgba(232,148,58,.3)', borderRadius: 12, padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: '.83rem', color: 'var(--amber2)' }}>📣 Leden inlichten over deze reveal?</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Btn size="sm" onClick={() => { onSendNotif(notifyPending); setNotifyPending(null); }}>Verstuur</Btn>
+            <Btn size="sm" variant="ghost" onClick={() => setNotifyPending(null)}>Niet nu</Btn>
+          </div>
+        </div>
+      )}
+
       {saveError && <ErrorState message="Opslaan is mislukt — je laatste wijziging staat mogelijk niet online. Probeer het opnieuw." onRetry={() => persist(tournament)} />}
       {deleteError && <ErrorState message="Verwijderen is mislukt. Probeer het opnieuw." onRetry={doDelete} />}
       {finishError && <ErrorState message="Afronden is niet volledig gelukt — sommige awards zijn mogelijk niet opgeslagen. Probeer het opnieuw." onRetry={() => setShowFinish(true)} />}
+      {revealError && <ErrorState message="Onthullen is gelukt, maar het publiceren van de resultaten niet volledig — sommige awards staan mogelijk nog niet online. Probeer het opnieuw." onRetry={retryPublish} />}
 
       <Card>
         <H size="1.05rem">🧑‍🤝‍🧑 Deelnemers</H>
@@ -268,6 +367,7 @@ export default function TournamentEditor({ tournament: initialTournament, events
           tournamentName={tournament.name}
           medalCount={medalCount}
           linkedEventName={linkedEvent?.name || null}
+          secret={secret}
           busy={finishing}
           onClose={() => setShowFinish(false)}
           onConfirm={doFinish}
@@ -277,7 +377,7 @@ export default function TournamentEditor({ tournament: initialTournament, events
   );
 }
 
-function FinishTournamentModal({ tournamentName, medalCount, linkedEventName, busy, onClose, onConfirm }) {
+function FinishTournamentModal({ tournamentName, medalCount, linkedEventName, secret, busy, onClose, onConfirm }) {
   const [archive, setArchive] = useState(false);
   const headingId = 'mg-finish-title';
   return (
@@ -289,6 +389,14 @@ function FinishTournamentModal({ tournamentName, medalCount, linkedEventName, bu
             ? <>Dit kroont {medalCount} deelnemer{medalCount === 1 ? '' : 's'} met een medaille (op basis van de vergrendelde rondes). Elke medaillewinnaar krijgt een award{linkedEventName ? <> en verschijnt bij de Winners van <strong>{linkedEventName}</strong></> : ''}.</>
             : <>Er zijn nog geen vergrendelde rondes met een medaillewinnaar — er worden geen awards toegekend, maar het toernooi wordt wel afgesloten.</>}
         </div>
+        {/* This tournament is still secret -- finishTournament.js defers
+            both of those writes until it's revealed, so nobody sees the
+            result the instant scoring locks. */}
+        {secret && medalCount > 0 && (
+          <div style={{ fontSize: '.8rem', color: 'rgba(224,85,85,.85)', background: 'rgba(224,85,85,.06)', border: '1px solid rgba(224,85,85,.25)', borderRadius: 10, padding: '.6rem .8rem' }}>
+            🤫 Dit toernooi is nog geheim — de awards worden pas zichtbaar zodra je het onthult.
+          </div>
+        )}
         <Switch id="mg-finish-archive" checked={archive} onChange={setArchive} label="Archiveer de teamset(s) van de medaillewinnaars" />
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <Btn variant="ghost" onClick={onClose} disabled={busy}>Annuleren</Btn>

@@ -4,7 +4,7 @@ import { isSafeImageUrl, isSafeVideoUrl } from "./features/trailer/safeUrl.js";
 import { hasSeenTrailer } from "./features/trailer/seen.js";
 import { hasDismissedTeaser, dismissTeaser } from "./features/teaser/dismissed.js";
 import { fetchTeamSets, saveTeamSet, deleteTeamSet, archiveTeamSet, unarchiveTeamSet, unlinkTeamSetFromEvent } from "./features/teamlib/api.js";
-import { blankTeamSet, setCaptain, removeMember, teamSetSummary, namesFromUsers, mergeNames, generateTeams } from "./features/teamlib/model.js";
+import { blankTeamSet, setCaptain, removeMember, teamSetSummary, namesFromUsers, mergeNames, generateTeams, splitPreview } from "./features/teamlib/model.js";
 
 // The app's first code split (technical spec `docs/trailer-technical-spec.md`
 // §3): keeps the trailer's weight out of the main chunk, loaded only when an
@@ -1971,7 +1971,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
         {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast}/>}
         {tab==="FAQ"                  &&<FAQTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Kretjes 🍺"           &&<KretjesTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
-        {tab==="Mens-Games 🏆"&&mensGamesUnlocked&&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesTab evt={evt} events={events} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={onUpdate} onTeamSetsChanged={onTeamSetsChanged}/></Suspense>}
+        {tab==="Mens-Games 🏆"&&mensGamesUnlocked&&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesTab evt={evt} events={events} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={onUpdate} onTeamSetsChanged={onTeamSetsChanged} onSendNotif={onSendNotif}/></Suspense>}
       </div>
 
       {/* Live presentation banner — fixed at top of screen */}
@@ -6216,9 +6216,9 @@ const diffEvents=(prev,next)=>{
 // UPDATES PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 const UpdatesPage=({notifications,notifLastRead,onMarkAllRead,onOpenEvent,currentUser,onClearUpdates,onClearSelf,onDeleteNotif,onDeleteSelf})=>{
-  const typeIcon={rsvp:"📅",faq:"❓",answer:"💬",photo:"📷",poll:"📊",schedule:"🗓",quiz:"🧠",winners:"🏆"};
-  const typeLabel={rsvp:"RSVP",faq:"Nieuwe vraag",answer:"Vraag beantwoord",photo:"Foto",poll:"Poll",schedule:"Programma",quiz:"Quiz",winners:"Winnaars"};
-  const typeColor={rsvp:"var(--amber)",faq:"#7c6cfc",answer:"#56b4a0",photo:"#e08050",poll:"var(--amber2)",schedule:"var(--gold)",quiz:"#c46eff",winners:"var(--gold)"};
+  const typeIcon={rsvp:"📅",faq:"❓",answer:"💬",photo:"📷",poll:"📊",schedule:"🗓",quiz:"🧠",winners:"🏆",tournament:"🏆"};
+  const typeLabel={rsvp:"RSVP",faq:"Nieuwe vraag",answer:"Vraag beantwoord",photo:"Foto",poll:"Poll",schedule:"Programma",quiz:"Quiz",winners:"Winnaars",tournament:"Toernooi"};
+  const typeColor={rsvp:"var(--amber)",faq:"#7c6cfc",answer:"#56b4a0",photo:"#e08050",poll:"var(--amber2)",schedule:"var(--gold)",quiz:"#c46eff",winners:"var(--gold)",tournament:"var(--gold)"};
   const timeAgo=ts=>{const d=Date.now()-new Date(ts);if(d<60000)return"zojuist";if(d<3600000)return`${Math.floor(d/60000)}m geleden`;if(d<86400000)return`${Math.floor(d/3600000)}u geleden`;return`${Math.floor(d/86400000)}d geleden`;};
   const unread=notifications.filter(n=>n.timestamp>notifLastRead);
   const read=notifications.filter(n=>n.timestamp<=notifLastRead);
@@ -6523,6 +6523,14 @@ const SaraJayOrJAI = () => {
 // ─────────────────────────────────────────────────────────────────────────────
 const TEAM_COLORS=["var(--amber)","var(--blue)","var(--green)","var(--purple)","var(--orange)","var(--red)","#56b4a0","#e08050","#9b7fe8","#5b9bd5"];
 const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsError=null,onRetryTeamSets,onTeamSetsChanged})=>{
+  // "Pick the amount of teams, put members in there manually, fill the rest
+  // randomly" (2026-08-24) -- team COUNT is now the primary control,
+  // `teamSize` stays around as an opt-in secondary mode behind the ⇄ toggle
+  // below so the one-handed-use page doesn't grow a second permanently
+  // visible stepper. `generateTeams` (teamlib/model.js) picks its fill
+  // strategy off which of `teamCount`/`teamSize` gets passed at call time.
+  const [teamMode,setTeamMode]=useState("count");
+  const [teamCount,setTeamCount]=useState(4);
   const [teamSize,setTeamSize]=useState(3);
   const [participants,setParticipants]=useState([]);
   const [input,setInput]=useState("");
@@ -6588,7 +6596,11 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
     if(participants.length<2)return;
     setGenerating(true);setSaved(false);
     setTimeout(()=>{
-      setTeams(prev=>generateTeams({participants,teamSize,existingTeams:prev||[],pins}));
+      setTeams(prev=>generateTeams(
+        teamMode==="count"
+          ?{participants,teamCount,existingTeams:prev||[],pins}
+          :{participants,teamSize,existingTeams:prev||[],pins}
+      ));
       setGenerating(false);
     },1800);
   };
@@ -6681,7 +6693,13 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
   };
 
   const pickedNames=new Set(participants);
-  const teamCount=participants.length>0?Math.ceil(participants.length/teamSize):0;
+  const derivedTeamCount=participants.length>0?Math.ceil(participants.length/teamSize):0;
+  // "The UI should say what will happen before he commits" -- honest
+  // preview of how `generateTeams`'s balanced fill would split the current
+  // roster across `teamCount` teams, covering both awkward-arithmetic cases
+  // named in the ticket (an uneven split, and more teams than people).
+  const countSizes=participants.length>0?splitPreview(participants.length,teamCount):[];
+  const countEmptyTeams=countSizes.filter(s=>s===0).length;
   const allAppSelected=allAppNames.length>0&&allAppNames.every(n=>pickedNames.has(n));
   const unassignedNames=teams?participants.filter(p=>!teams.some(t=>(t.members||[]).includes(p))):[];
   const visibleSets=teamSets.filter(ts=>libFilter==="archived"?ts.status==="archived":ts.status!=="archived");
@@ -6696,16 +6714,39 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
       <H size="1.7rem" style={{marginBottom:"1.5rem"}}>🎲 Team Creator</H>
 
       <Card style={{marginBottom:"1.2rem"}}>
-        <H size="1rem" style={{marginBottom:".8rem"}}>Personen per team</H>
-        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-          <button onClick={()=>setTeamSize(t=>Math.max(1,t-1))} style={{width:38,height:38,borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border)",color:"var(--cream)",fontSize:"1.3rem",cursor:"pointer",fontFamily:"var(--font-b)",lineHeight:1}}>−</button>
-          <span style={{fontFamily:"var(--font-h)",fontSize:"2.2rem",color:"var(--amber)",minWidth:44,textAlign:"center",lineHeight:1}}>{teamSize}</span>
-          <button onClick={()=>setTeamSize(t=>Math.min(20,t+1))} style={{width:38,height:38,borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border)",color:"var(--cream)",fontSize:"1.3rem",cursor:"pointer",fontFamily:"var(--font-b)",lineHeight:1}}>+</button>
-          {participants.length>0&&<div style={{color:"var(--muted)",fontSize:".83rem",marginLeft:6}}>
-            → <strong style={{color:"var(--cream)"}}>{teamCount}</strong> {teamCount===1?"team":"teams"}
-            {participants.length%teamSize!==0&&<span style={{marginLeft:4,opacity:.7}}>(1 team met {participants.length%teamSize})</span>}
-          </div>}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:".8rem"}}>
+          <H size="1rem" style={{marginBottom:0}}>{teamMode==="count"?"Aantal teams":"Personen per team"}</H>
+          {/* Team count is the primary control (2026-08-24 -- "let me pick
+              the amount of teams... fill up the open spots randomly");
+              people-per-team stays reachable behind this toggle instead of
+              a second permanent stepper, so the one-handed-use layout
+              doesn't regress. */}
+          <button type="button" onClick={()=>setTeamMode(m=>m==="count"?"size":"count")}
+            style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 12px",fontSize:".74rem",color:"var(--muted)",cursor:"pointer",fontFamily:"var(--font-b)",minHeight:32}}>
+            {teamMode==="count"?"⇄ liever personen per team instellen":"⇄ liever aantal teams instellen"}
+          </button>
         </div>
+        {teamMode==="count"?(
+          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <button onClick={()=>setTeamCount(t=>Math.max(1,t-1))} style={{width:38,height:38,borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border)",color:"var(--cream)",fontSize:"1.3rem",cursor:"pointer",fontFamily:"var(--font-b)",lineHeight:1}}>−</button>
+            <span style={{fontFamily:"var(--font-h)",fontSize:"2.2rem",color:"var(--amber)",minWidth:44,textAlign:"center",lineHeight:1}}>{teamCount}</span>
+            <button onClick={()=>setTeamCount(t=>Math.min(20,t+1))} style={{width:38,height:38,borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border)",color:"var(--cream)",fontSize:"1.3rem",cursor:"pointer",fontFamily:"var(--font-b)",lineHeight:1}}>+</button>
+            {participants.length>0&&<div style={{color:"var(--muted)",fontSize:".83rem",marginLeft:6}}>
+              → {participants.length} {participants.length===1?"persoon":"personen"}: <strong style={{color:"var(--cream)"}}>{countSizes.join(", ")}</strong>
+              {countEmptyTeams>0&&<span style={{marginLeft:4,opacity:.7}}>({countEmptyTeams} team{countEmptyTeams===1?"":"s"} {countEmptyTeams===1?"blijft":"blijven"} leeg)</span>}
+            </div>}
+          </div>
+        ):(
+          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <button onClick={()=>setTeamSize(t=>Math.max(1,t-1))} style={{width:38,height:38,borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border)",color:"var(--cream)",fontSize:"1.3rem",cursor:"pointer",fontFamily:"var(--font-b)",lineHeight:1}}>−</button>
+            <span style={{fontFamily:"var(--font-h)",fontSize:"2.2rem",color:"var(--amber)",minWidth:44,textAlign:"center",lineHeight:1}}>{teamSize}</span>
+            <button onClick={()=>setTeamSize(t=>Math.min(20,t+1))} style={{width:38,height:38,borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border)",color:"var(--cream)",fontSize:"1.3rem",cursor:"pointer",fontFamily:"var(--font-b)",lineHeight:1}}>+</button>
+            {participants.length>0&&<div style={{color:"var(--muted)",fontSize:".83rem",marginLeft:6}}>
+              → <strong style={{color:"var(--cream)"}}>{derivedTeamCount}</strong> {derivedTeamCount===1?"team":"teams"}
+              {participants.length%teamSize!==0&&<span style={{marginLeft:4,opacity:.7}}>(1 team met {participants.length%teamSize})</span>}
+            </div>}
+          </div>
+        )}
       </Card>
 
       <Card style={{marginBottom:"1.2rem"}}>
@@ -7611,7 +7652,7 @@ export default function App(){
         {pageView==="updates"&&<UpdatesPage notifications={notifications.filter(n=>!deletedNotifIds.has(n.id)&&(!clearedBefore||n.timestamp>clearedBefore))} notifLastRead={notifLastRead} currentUser={currentUser} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={openEvent} onClearSelf={()=>{setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);}} onDeleteSelf={id=>{setNotifications(prev=>{const next=prev.filter(n=>n.id!==id);if(currentUser)localStorage.setItem(`md-notifs-${currentUser.id}`,JSON.stringify(next));return next;});}} onClearUpdates={async()=>{const cb=new Date().toISOString();const allIds=[...new Set([...deletedNotifIds,...notifications.map(n=>n.id)])];const newSet=new Set(allIds);setDeletedNotifIds(newSet);setClearedBefore(cb);setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);const body=JSON.stringify({ids:allIds,cleared_before:cb});await supabase.from("announcements").upsert({id:"__deleted_notifs__",title:"__deleted_notifs__",body,created_by:"system",created_at:new Date().toISOString(),active:false});supabase.channel("notif-ctrl").send({type:"broadcast",event:"clear-notifs",payload:{ids:allIds,cleared_before:cb}});}} onDeleteNotif={deleteNotifForAll}/>}
         {pageView==="teams"&&<TeamCreatorPage users={users} events={events} currentUser={currentUser} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} onTeamSetsChanged={setTeamSets}/>}
         {pageView==="timer"&&<TimerPage/>}
-        {pageView==="mensgames"&&mensGamesUnlocked&&<Suspense fallback={<div style={{padding:"3rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesPage events={events} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={updateEvent} onTeamSetsChanged={setTeamSets}/></Suspense>}
+        {pageView==="mensgames"&&mensGamesUnlocked&&<Suspense fallback={<div style={{padding:"3rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesPage events={events} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={updateEvent} onTeamSetsChanged={setTeamSets} onSendNotif={sendNotifToAll}/></Suspense>}
         {pageView==="sarajay"&&<SaraJayOrJAI/>}
       </main>
       <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted2)",fontSize:".72rem",borderTop:"1px solid var(--border)",letterSpacing:".1em"}}>🍺 MensApp · Built for the lads</div>

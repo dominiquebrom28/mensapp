@@ -46,7 +46,12 @@ export const blankTournament = ({ name = '', eventId = null, createdBy = '', now
   status: 'draft',
   entrants: [],
   rounds: [],
-  settings: { showLivePreview: true, tieBreak: [...DEFAULT_TIE_BREAK_ORDER] },
+  // `secret` (2026-08-24): "let me create a tournament but make it secret,
+  // same as other features" -- scoped to the whole tournament (not
+  // per-round), stored in this same `settings` JSONB so no migration is
+  // needed. Explicit `false` here rather than just leaving the key absent,
+  // so every freshly-created tournament's settings shape is predictable.
+  settings: { showLivePreview: true, tieBreak: [...DEFAULT_TIE_BREAK_ORDER], secret: false },
   teamSetId: null,
   createdBy: typeof createdBy === 'string' ? createdBy : '',
   createdAt: isoOf(now),

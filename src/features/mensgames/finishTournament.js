@@ -135,47 +135,40 @@ export function buildTeamAwards(tournament, standings, teamSets, { now = Date.no
   return out;
 }
 
-/**
- * The write-back itself (WP-J). Sets `tournament.status` to `'finished'`,
- * pushes deduped winner rows onto `event.winners` (skipped entirely when
- * there's no linked `event` or no `onUpdateEvent` — a standalone tournament
- * still awards teams, it just has nothing to decorate), and adds a
- * `TeamAward` to each medalled team's originating team set. Never throws:
- * a failed write for one team set is collected in `errors` rather than
- * aborting the rest.
- */
-export async function finishTournament({ tournament, standings, event = null, onUpdateEvent, teamSets = [], archiveWinningSets = false, now = Date.now() }) {
-  const finishedTournament = { ...tournament, status: 'finished', updatedAt: isoOf(now) };
-  const winners = winnerRowsFromTournament(tournament, standings);
-  const teamAwards = buildTeamAwards(tournament, standings, teamSets, { now });
-  const errors = [];
+function isSecretTournament(tournament) {
+  return !!(tournament && tournament.settings && tournament.settings.secret);
+}
 
-  if (event && typeof event === 'object' && typeof onUpdateEvent === 'function') {
-    const tId = (tournament && typeof tournament.id === 'string' && tournament.id) || 'trn';
-    const prefix = `mg-${tId}-`;
-    try {
-      // Re-read the event row immediately before writing rather than
-      // trusting the possibly-stale `event` object passed in. The global
-      // Mens-Games page has no realtime subscription on events (only a 30s
-      // poll), so building the write off that stale object and letting
-      // `onUpdateEvent` do its usual full-row upsert could silently discard
-      // a concurrent write to any other field on the same event -- live
-      // quiz scores, RSVPs, kretjes, photos. Same idiom App.jsx's own quiz
-      // handlers use (`writeAnswer`, `changeTeamAvatar`, "End Session"):
-      // fetch fresh, merge, write off the fresh copy. Falls back to the
-      // passed-in `event` only if the fresh read itself comes back empty
-      // (e.g. a transient blip) so a finish still completes rather than
-      // silently dropping the awards.
-      const { data: fresh } = await supabase.from('events').select('*').eq('id', event.id).single();
-      const base = (fresh && typeof fresh === 'object') ? fresh : event;
-      const existing = Array.isArray(base.winners) ? base.winners : [];
-      const kept = existing.filter((w) => !(w && typeof w.id === 'string' && w.id.startsWith(prefix)));
-      await onUpdateEvent({ ...base, winners: [...kept, ...winners] });
-    } catch (error) {
-      errors.push({ scope: 'event', error });
-    }
+async function pushWinnersToEvent(tournament, winners, event, onUpdateEvent) {
+  if (!(event && typeof event === 'object' && typeof onUpdateEvent === 'function')) return null;
+  const tId = (tournament && typeof tournament.id === 'string' && tournament.id) || 'trn';
+  const prefix = `mg-${tId}-`;
+  try {
+    // Re-read the event row immediately before writing rather than
+    // trusting the possibly-stale `event` object passed in. The global
+    // Mens-Games page has no realtime subscription on events (only a 30s
+    // poll), so building the write off that stale object and letting
+    // `onUpdateEvent` do its usual full-row upsert could silently discard
+    // a concurrent write to any other field on the same event -- live
+    // quiz scores, RSVPs, kretjes, photos. Same idiom App.jsx's own quiz
+    // handlers use (`writeAnswer`, `changeTeamAvatar`, "End Session"):
+    // fetch fresh, merge, write off the fresh copy. Falls back to the
+    // passed-in `event` only if the fresh read itself comes back empty
+    // (e.g. a transient blip) so a finish still completes rather than
+    // silently dropping the awards.
+    const { data: fresh } = await supabase.from('events').select('*').eq('id', event.id).single();
+    const base = (fresh && typeof fresh === 'object') ? fresh : event;
+    const existing = Array.isArray(base.winners) ? base.winners : [];
+    const kept = existing.filter((w) => !(w && typeof w.id === 'string' && w.id.startsWith(prefix)));
+    await onUpdateEvent({ ...base, winners: [...kept, ...winners] });
+    return null;
+  } catch (error) {
+    return { scope: 'event', error };
   }
+}
 
+async function writeTeamAwards(teamAwards, { archiveWinningSets = false } = {}) {
+  const errors = [];
   // Two medalled entrants can share one team set (e.g. gold and silver both
   // coming out of the same 4-team library set) -- writes for the same set
   // must chain off each other's result, not off the original stale object,
@@ -201,6 +194,57 @@ export async function finishTournament({ tournament, standings, event = null, on
     }
   }
 
-  const updatedTeamSets = [...latestById.values()];
-  return { ok: errors.length === 0, tournament: finishedTournament, winners, teamAwards, updatedTeamSets, errors };
+  return { errors, updatedTeamSets: [...latestById.values()] };
+}
+
+/**
+ * The actual publish: pushes deduped winner rows onto `event.winners`
+ * (skipped entirely when there's no linked `event` or no `onUpdateEvent` --
+ * a standalone tournament still awards teams, it just has nothing to
+ * decorate) and adds a `TeamAward` to each medalled team's originating team
+ * set. Split out from `finishTournament` (2026-08-24) so a tournament that
+ * finished while still secret can call exactly this again, later, from its
+ * "onthullen" (reveal) action -- see that function's own comment for why
+ * finishing and publishing are two different moments for a secret one.
+ * Never throws: a failed write for one team set (or the event) is collected
+ * in `errors` rather than aborting the rest.
+ */
+export async function publishTournamentResults({ tournament, standings, event = null, onUpdateEvent, teamSets = [], archiveWinningSets = false, now = Date.now() }) {
+  const winners = winnerRowsFromTournament(tournament, standings);
+  const teamAwards = buildTeamAwards(tournament, standings, teamSets, { now });
+  const errors = [];
+
+  const eventError = await pushWinnersToEvent(tournament, winners, event, onUpdateEvent);
+  if (eventError) errors.push(eventError);
+
+  const { errors: awardErrors, updatedTeamSets } = await writeTeamAwards(teamAwards, { archiveWinningSets });
+  errors.push(...awardErrors);
+
+  return { ok: errors.length === 0, winners, teamAwards, updatedTeamSets, errors };
+}
+
+/**
+ * The write-back itself (WP-J). Always sets `tournament.status` to
+ * `'finished'` -- "afronden" locks scoring in either case. But when the
+ * tournament is secret (`settings.secret`, 2026-08-24), publishing is
+ * deferred: `events.winners` (read by every member via WinnersTab/
+ * HallOfFame) and `team_sets.awards` (read by every member via the Team
+ * Trophy Cabinet, also on Hall of Fame) are both visible surfaces that
+ * would spoil the reveal the instant "Afronden" is clicked, regardless of
+ * whether the tournament's own row/standings/scoreboard stay hidden
+ * elsewhere. `TournamentEditor`'s reveal ("onthullen") action calls
+ * `publishTournamentResults` itself once the owner actually lifts the
+ * secrecy, using the (by-then-current) standings at that moment.
+ */
+export async function finishTournament({ tournament, standings, event = null, onUpdateEvent, teamSets = [], archiveWinningSets = false, now = Date.now() }) {
+  const finishedTournament = { ...tournament, status: 'finished', updatedAt: isoOf(now) };
+
+  if (isSecretTournament(tournament)) {
+    const winners = winnerRowsFromTournament(tournament, standings);
+    const teamAwards = buildTeamAwards(tournament, standings, teamSets, { now });
+    return { ok: true, tournament: finishedTournament, winners, teamAwards, updatedTeamSets: [], errors: [], deferred: true };
+  }
+
+  const published = await publishTournamentResults({ tournament, standings, event, onUpdateEvent, teamSets, archiveWinningSets, now });
+  return { ...published, tournament: finishedTournament, deferred: false };
 }

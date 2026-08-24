@@ -48,8 +48,9 @@ describe('TeamCreatorPage wiring (#6 select-all)', () => {
 })
 
 describe('TeamCreatorPage wiring (#7 pin + manual assign + random fill)', () => {
-  it('generate() seeds generateTeams with the current pins and existing team shells', () => {
-    expect(teamCreator).toMatch(/generateTeams\(\{participants,teamSize,existingTeams:prev\|\|\[\],pins\}\)/)
+  it('generate() seeds generateTeams with the current pins and existing team shells, from either a team count or a team size', () => {
+    expect(teamCreator).toMatch(/\{participants,teamCount,existingTeams:prev\|\|\[\],pins\}/)
+    expect(teamCreator).toMatch(/\{participants,teamSize,existingTeams:prev\|\|\[\],pins\}/)
   })
 
   it('has a per-member pin toggle and an assign-to-another-team control', () => {

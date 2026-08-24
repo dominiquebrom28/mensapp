@@ -107,27 +107,47 @@ export function mergeNames(existing, incoming) {
 //
 // `shuffle` is injectable purely for deterministic tests; production calls
 // omit it and get the default Math.random shuffle.
+//
+// Team Creator ticket (2026-08-24): the owner wants to drive this off "how
+// many teams" rather than "how many people per team" -- pick `teamCount`
+// explicitly and everyone gets balanced as evenly as possible across that
+// many teams (round-robin: whoever has the fewest members so far gets the
+// next unpinned name), which is a different fill *shape* than the legacy
+// `teamSize` chunking below (fill team 0 to capacity, then team 1, ...).
+// Passing `teamCount` selects the balanced fill; passing only `teamSize`
+// keeps the exact pre-existing chunking behaviour (and its tests). If both
+// are given, `teamCount` wins -- there is no sane "size AND count" combo to
+// reconcile, and the UI never sends both at once.
 export function generateTeams({
   participants = [],
   teamSize = 1,
+  teamCount,
   existingTeams = [],
   pins = {},
   shuffle,
 } = {}) {
   const names = (Array.isArray(participants) ? participants : []).filter(Boolean);
   if (names.length === 0) return [];
-  const size = Math.max(1, Number(teamSize) || 1);
   const shells0 = Array.isArray(existingTeams) ? existingTeams : [];
   const pinMap = pins && typeof pins === "object" ? pins : {};
 
   const pinnedTeamIds = new Set(
     names.filter(n => pinMap[n]).map(n => pinMap[n]),
   );
-  const teamCount = shells0.length > 0
-    ? shells0.length
-    : Math.max(1, Math.ceil(names.length / size), pinnedTeamIds.size);
 
-  const shells = Array.from({ length: teamCount }, (_, i) => {
+  // Which fill strategy applies is decided purely by whether `teamCount`
+  // was explicitly passed -- not by whether this happens to be a first
+  // generation or a re-roll (`existingTeams` only ever fixes the *number*
+  // of shells, never which fill shape to use), so a re-roll of a
+  // count-driven set stays balanced too.
+  const balanced = teamCount != null;
+  const count = shells0.length > 0
+    ? shells0.length
+    : balanced
+      ? Math.max(1, Math.round(Number(teamCount)) || 1, pinnedTeamIds.size)
+      : Math.max(1, Math.ceil(names.length / Math.max(1, Number(teamSize) || 1)), pinnedTeamIds.size);
+
+  const shells = Array.from({ length: count }, (_, i) => {
     const prev = shells0[i];
     return prev && typeof prev === "object"
       ? { id: prev.id, name: prev.name, avatar: prev.avatar, captain: prev.captain ?? null, members: [] }
@@ -150,20 +170,36 @@ export function generateTeams({
   const doShuffle = typeof shuffle === "function" ? shuffle : arr => [...arr].sort(() => Math.random() - 0.5);
   const shuffled = doShuffle(rest);
 
-  // 3. Fill remaining capacity team-by-team, in order (matches the
-  // pre-#7 chunking behaviour when nothing is pinned).
-  let cursor = 0;
-  for (const team of shells) {
-    while (team.members.length < size && cursor < shuffled.length) {
-      team.members.push(shuffled[cursor++]);
+  if (balanced) {
+    // Team-count mode: hand each unpinned name to whichever team currently
+    // has the fewest members (earliest team wins a tie) -- handles uneven
+    // splits (7 people / 3 teams -> 3/2/2) and pin-skewed starting points
+    // sensibly, and simply leaves extra teams empty when there are more
+    // teams than people rather than erroring.
+    for (const name of shuffled) {
+      let target = shells[0];
+      for (const t of shells) {
+        if (t.members.length < target.members.length) target = t;
+      }
+      target.members.push(name);
     }
-  }
-  // Defensive overflow (shouldn't happen given the teamCount calc above,
-  // but a hand-edited pins map could reference a team id that no longer
-  // matches the shell count): dump any leftovers on the last team rather
-  // than silently dropping people.
-  while (cursor < shuffled.length) {
-    shells[shells.length - 1].members.push(shuffled[cursor++]);
+  } else {
+    // Legacy people-per-team mode: fill remaining capacity team-by-team, in
+    // order (matches the pre-#7 chunking behaviour when nothing is pinned).
+    const size = Math.max(1, Number(teamSize) || 1);
+    let cursor = 0;
+    for (const team of shells) {
+      while (team.members.length < size && cursor < shuffled.length) {
+        team.members.push(shuffled[cursor++]);
+      }
+    }
+    // Defensive overflow (shouldn't happen given the teamCount calc above,
+    // but a hand-edited pins map could reference a team id that no longer
+    // matches the shell count): dump any leftovers on the last team rather
+    // than silently dropping people.
+    while (cursor < shuffled.length) {
+      shells[shells.length - 1].members.push(shuffled[cursor++]);
+    }
   }
 
   // 4. A captain who got reshuffled off their team is no longer captain
@@ -173,4 +209,21 @@ export function generateTeams({
   });
 
   return shells;
+}
+
+// "Here's what will happen" preview -- shown next to the team-count
+// stepper before the owner commits to Genereer (2026-08-24 ticket: "the UI
+// should say what will happen before he commits"). Deliberately ignorant of
+// pins (there's nothing to pin before a first generation exists); it's just
+// the plain base+remainder split `generateTeams`'s balanced fill converges
+// on for a fresh, unpinned roster of this size. Pure and defensive -- never
+// throws, always returns exactly `count` numbers (0 for a 0-person roster,
+// so "3 teams, 0 personen" still renders three honest zeroes rather than
+// nothing).
+export function splitPreview(total, count) {
+  const n = Math.max(0, Math.round(Number(total)) || 0);
+  const c = Math.max(1, Math.round(Number(count)) || 1);
+  const base = Math.floor(n / c);
+  const remainder = n % c;
+  return Array.from({ length: c }, (_, i) => base + (i < remainder ? 1 : 0));
 }
