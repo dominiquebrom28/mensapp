@@ -32,7 +32,15 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: '20'
+  # Must satisfy jsdom@30's engines: "^22.22.2 || ^24.15.0 || >=26.0.0".
+  # jsdom pulls undici@8, whose engines are ">=22.19.0" and which calls
+  # webidl.util.markAsUncloneable at import time. On Node 20 that function
+  # does not exist, so every one of the 60 test files died on collection
+  # with `TypeError: webidl.util.markAsUncloneable is not a function` and
+  # the "Run tests" step reported "no tests / 60 errors". This job had
+  # therefore never passed since CI was added in c267e9b. 24 matches the
+  # Node the app is developed on locally (v24.16.0).
+  NODE_VERSION: '24'
 
 jobs:
   test-and-build:
