@@ -1,62 +1,150 @@
 // Live quiz view for everyone who isn't presenting (docs/
-// quiz-unification-spec.md §8.1, App.jsx 4215-4679). Pure move (§8.3, Q3) --
-// body is byte-identical to the App.jsx original; only the imports below
-// are new. `can` (App.jsx's un-exported permissions helper, docs/
-// mensgames-spec.md §5.4) can't be imported, so it's threaded in as a prop
-// from `EventPage` instead -- the one signature-line change this move
-// requires; the `can.hostQuiz(currentUser)` call site inside stays
-// untouched. Still polls/writes `evt.quizzes` directly -- WP-Q4 rewires
-// this onto `quiz_live`/`quiz_answers`, out of scope here.
-import { useState, useEffect, useRef } from 'react';
-import { supabase } from '../../supabase.js';
-import { normalizeQuiz, TEAM_AVATARS } from './model.js';
+// quiz-unification-spec.md §4, §8.1 -- WP-Q4). Rewired off
+// `evt.quizzes[]._liveState` onto the narrow `quiz_live` row + one-row-per-
+// answer `quiz_answers` table (§3.2, §3.3): this is one half of the
+// production bug fix in §2. A tap now costs one `quiz_answers` upsert
+// (`answers.js`'s `upsertAnswer`, ~150 bytes, **no read first**) instead of
+// a read-modify-write of the 39 kB event row. `evt`/`onUpdate` are gone
+// from this component's signature entirely -- nothing in here writes to
+// `events`, ever (see `src/test/quiz/liveProtocol.test.jsx`, which spies on
+// every table `upsertAnswer`'s call chain touches and asserts `events`
+// isn't one of them).
+//
+// Team-avatar picker dropped on purpose (spec §14 decision 3, default: the
+// team library sets avatars now). That's not just tidying: it was the only
+// other participant write besides an answer, so dropping it is what makes
+// "one write, ever" (§4.1) literally true rather than true-in-the-common-
+// case.
+//
+// `liveQ` is still the full quiz *definition* (rounds, teams, id, rev,
+// title) -- the same prop shape this component took from `evt.quizzes[]`
+// before this rewire, so a caller that already has the definition object in
+// hand (today's App.jsx, until WP-Q8 rewires its discovery -- see that
+// work package's report for exactly what's needed there) can keep passing
+// it unchanged. Internally the definition is only ever a *seed*:
+// `quiz_live.quiz_rev` is watched, and the definition is refetched via
+// `fetchQuiz` only when it bumps (§4.3), so a mid-quiz builder typo-fix
+// reaches every phone without re-shipping the 33 kB `rounds` blob on every
+// slide change the way polling the whole event used to.
+import { useEffect, useRef, useState } from 'react';
+import { normalizeQuiz, clampAnswerValue } from './model.js';
 import { getYouTubeId } from './urls.js';
 import { getDisplayName } from './users.js';
+import { fetchQuiz, patchQuiz } from './api.js';
+import { fetchQuizLive, subscribeQuizLive, deleteQuizLive } from './live.js';
+import { fetchOwnAnswer, upsertAnswer, deleteAnswersForQuiz } from './answers.js';
 
 const ALPHA_P=["A","B","C","D","E","F"];
-const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[],can,onHide})=>{
-  const ls=liveQ._liveState||{};
-  const quiz=normalizeQuiz(liveQ);
+const QuizParticipantView=({liveQ,currentUser,users=[],can,onHide})=>{
+  const quizId=liveQ.id;
+
+  // Quiz *definition* (rounds/teams/title/rev) -- seeded from the prop,
+  // refreshed only on a `rev` bump (§4.3 effect below).
+  const [quizDef,setQuizDef]=useState(()=>normalizeQuiz(liveQ));
+  // Re-seed when a genuinely *different* quiz is opened. Not on every
+  // render: App.jsx recomputes its `liveQuiz` object on each render, and
+  // re-seeding then would clobber a definition this component already
+  // refreshed for itself via the rev-watch effect.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately keyed on `liveQ.id`, not `liveQ` itself; see the comment above.
+  useEffect(()=>{setQuizDef(normalizeQuiz(liveQ));},[liveQ.id]);
+  const quiz=quizDef;
+
+  // `quiz_live` -- the hot, narrow broadcast row (§3.2, §4.2).
+  const [quizLive,setQuizLive]=useState(null);
+  const [liveLoaded,setLiveLoaded]=useState(false);
+  const [liveError,setLiveError]=useState(null);
+  const ls=quizLive||{};
   const currentRound=quiz.rounds[ls.roundIdx]||quiz.rounds[0];
-  const currentQ=currentRound?.questions[ls.qIdx];
+  const currentQ=currentRound?.questions?.[ls.qIdx];
+
   const [myAnswer,setMyAnswer]=useState([]); // always an array
   const [submitted,setSubmitted]=useState(false);
-  const [showAvatarPicker,setShowAvatarPicker]=useState(false);
+  const submittedRef=useRef(false);
+  submittedRef.current=submitted;
   const [localTimer,setLocalTimer]=useState(null);
   const localTimerRef=useRef(null);
-  const evtRef=useRef(evt);
-  evtRef.current=evt;
 
-  // Determine if this user is in a team (use live teams which may have updated avatars)
-  const myTeam=(ls.teams||[]).find(t=>(t.members||[]).some(m=>m.toLowerCase()===currentUser.username.toLowerCase()));
-  const answerKey=ls.isTeamQuiz?(myTeam?.name||null):currentUser.username;
+  // Determine if this user is in a team, from the *definition* (§3.1
+  // `quizzes.teams` is a library snapshot -- teams don't live in
+  // `quiz_live`, they barely ever change mid-quiz, and putting them there
+  // would just be more bytes on every broadcast for nothing).
+  const myTeam=(quiz.teams||[]).find(t=>(t.members||[]).some(m=>m.toLowerCase()===currentUser.username.toLowerCase()));
+  // Stable answer key (§3.3): `t:<sourceTeamId>` or `p:<username lowercased>`.
+  // `sourceTeamId` is set for a library snapshot (`teamsFromTeamSet`); a
+  // team built the old way (or migrated from `events.quizzes[]`, §10.2)
+  // only has `id` -- both are stable across a rename, unlike the old
+  // name-keyed answer.
+  const answerKey=ls.isTeamQuiz
+    ?(myTeam?`t:${myTeam.sourceTeamId||myTeam.id}`:null)
+    :`p:${currentUser.username.toLowerCase()}`;
   // Captain gate: if a team has a captain set, only that person can submit answers
   const isCaptain=!ls.isTeamQuiz||!myTeam?.captain||myTeam.captain.toLowerCase()===currentUser.username.toLowerCase();
   const canAnswer=!!answerKey&&isCaptain;
 
-  // Reset submission state when question changes
+  // ── `quiz_live`: realtime UPDATE/DELETE + 5s safety poll (§4.2) ─────────
+  useEffect(()=>{
+    let cancelled=false;
+    const load=()=>{
+      fetchQuizLive(quizId).then(res=>{
+        if(cancelled)return;
+        setLiveLoaded(true);
+        if(res.ok){setQuizLive(res.quizLive);setLiveError(null);}
+        else setLiveError(res.error);
+      });
+    };
+    load();
+    const unsubscribe=subscribeQuizLive(quizId,next=>{if(!cancelled)setQuizLive(next);});
+    const poll=setInterval(load,5000);
+    return()=>{cancelled=true;unsubscribe();clearInterval(poll);};
+  },[quizId]);
+
+  // ── Definition refresh, only on a `rev` bump (§4.3) ─────────────────────
+  // Gated on the SEED carrying a finite `rev`, which is what tells us the
+  // definition came from the `quizzes` table. Until WP-Q5/Q7 move the
+  // builder, quizzes are still authored into `events.quizzes` and reach us
+  // as a prop with no `rev` at all -- and for those, the `quizzes` row is
+  // either missing (built after §10.2's one-time migration) or a stale
+  // pre-migration snapshot. Refetching in that state is worse than not: on
+  // a missing row it's a 404 on every mount, and on a stale one it would
+  // silently replace the questions the presenter is actually showing with
+  // the ones the quiz had weeks ago. The prop is authoritative until the
+  // table is.
+  const seedRev=Number.isFinite(liveQ&&liveQ.rev)?liveQ.rev:null;
+  useEffect(()=>{
+    if(seedRev===null)return;
+    if(!quizLive||!Number.isFinite(quizLive.quizRev)||quizLive.quizRev===quiz.rev)return;
+    let cancelled=false;
+    fetchQuiz(quizId).then(res=>{if(!cancelled&&res.ok&&res.quiz)setQuizDef(normalizeQuiz(res.quiz));});
+    return()=>{cancelled=true;};
+    // `quiz.rev` intentionally excluded -- this must fire only when the
+    // *live row's* rev changes, not when our own refetch above changes
+    // `quiz.rev` to match it (that would be a fetch loop).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[quizId,quizLive?.quizRev,seedRev]);
+
+  // ── Own-answer only: one shot + 3s while unsubmitted (§4.2) ─────────────
+  // Never fetches (or could return) anyone else's answer -- `fetchOwnAnswer`
+  // is scoped to exactly one `answer_key`, which structurally can't be
+  // someone else's. That, plus never subscribing to `quiz_answers` at all,
+  // is what closes the pre-reveal leak (§4.2): today's `_liveState.answers`
+  // ships every answer to every phone before the reveal.
   useEffect(()=>{
     setMyAnswer([]);
     setSubmitted(false);
-    setShowAvatarPicker(false);
-  },[ls.qIdx,ls.roundIdx,ls.phase]);
-
-  // Reflect existing answer (e.g. team member already answered)
-  useEffect(()=>{
-    const existing=(ls.answers||{})[answerKey];
-    if(existing!=null){setMyAnswer(Array.isArray(existing)?existing:[existing]);setSubmitted(true);}
-  },[ls.answers,answerKey]);
-
-  // Fast-poll for fresh liveState every 2s
-  useEffect(()=>{
-    const evtId=evtRef.current.id;
-    const poll=setInterval(async()=>{
-      const {data}=await supabase.from("events").select("*").eq("id",evtId).single();
-      if(data)onUpdate(data);
-    },2000);
-    return()=>clearInterval(poll);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[evt.id]);
+    if(!answerKey||ls.phase!=="question")return;
+    let cancelled=false,timer=null;
+    const ri=ls.roundIdx??0,qi=ls.qIdx??0;
+    const tick=()=>{
+      fetchOwnAnswer(quizId,ri,qi,answerKey).then(res=>{
+        if(cancelled)return;
+        if(res.ok&&res.answer){setMyAnswer(res.answer.value);setSubmitted(true);return;}
+        if(submittedRef.current)return; // answered locally meanwhile -- stop polling
+        timer=setTimeout(tick,3000);
+      });
+    };
+    tick();
+    return()=>{cancelled=true;clearTimeout(timer);};
+  },[quizId,answerKey,ls.roundIdx,ls.qIdx,ls.phase]);
 
   // Escape leaves the overlay without ending the session for anyone else.
   // Mirrors PresentationMode's viewer behaviour (App.jsx `viewerDismissed`):
@@ -80,21 +168,7 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[],can,onHide})
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[ls.phase,ls.slidePhase,ls.qIdx,ls.roundIdx,ls.timerStartedAt,ls.timerLimit]);
 
-  const writeAnswer=async(newAns)=>{
-    const {data:fresh}=await supabase.from("events").select("*").eq("id",evtRef.current.id).single();
-    if(!fresh)return;
-    const freshLiveQ=(fresh.quizzes||[]).find(q=>q.id===liveQ.id);
-    if(!freshLiveQ?._liveState)return;
-    const updatedQuizzes=(fresh.quizzes||[]).map(q=>q.id===liveQ.id
-      ?{...q,_liveState:{...q._liveState,answers:{...(q._liveState.answers||{}),[answerKey]:newAns}}}
-      :q
-    );
-    const updated={...fresh,quizzes:updatedQuizzes};
-    await supabase.from("events").upsert([updated]);
-    onUpdate(updated);
-  };
-
-  const toggleAnswer=async(optIdx)=>{
+  const toggleAnswer=optIdx=>{
     if(!canAnswer||ls.slidePhase==="answer")return;
     const correctSet=Array.isArray(currentQ?.answer)?currentQ.answer:[currentQ?.answer??0];
     const isMulti=correctSet.length>1;
@@ -103,20 +177,8 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[],can,onHide})
       :[optIdx];
     setMyAnswer(newAns);
     setSubmitted(newAns.length>0);
-    await writeAnswer(newAns);
-  };
-
-  const changeTeamAvatar=async(emoji)=>{
-    setShowAvatarPicker(false);
-    const {data:fresh}=await supabase.from("events").select("*").eq("id",evtRef.current.id).single();
-    if(!fresh)return;
-    const updatedQuizzes=(fresh.quizzes||[]).map(q=>q.id===liveQ.id?{
-      ...q,_liveState:{...q._liveState,
-        teams:(q._liveState?.teams||[]).map(t=>t.name===myTeam?.name?{...t,avatar:emoji}:t)
-      }}:q);
-    const updated={...fresh,quizzes:updatedQuizzes};
-    await supabase.from("events").upsert([updated]);
-    onUpdate(updated);
+    // §2/§4.1's whole point: one row, one upsert, no read before it.
+    upsertAnswer({quizId,roundIdx:ls.roundIdx??0,qIdx:ls.qIdx??0,answerKey,value:newAns});
   };
 
   const scores=ls.scores||{};
@@ -144,8 +206,7 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[],can,onHide})
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             {ls.isTeamQuiz&&myTeam?(
               <div style={{display:"flex",alignItems:"center",gap:6}}>
-                <div onClick={()=>setShowAvatarPicker(p=>!p)} title="Change team avatar"
-                  style={{fontSize:"1.4rem",cursor:"pointer",lineHeight:1,padding:"2px 4px",borderRadius:6,border:"1px solid rgba(255,255,255,.12)",background:"rgba(255,255,255,.05)",userSelect:"none"}}>
+                <div style={{fontSize:"1.4rem",lineHeight:1,padding:"2px 4px",borderRadius:6,border:"1px solid rgba(255,255,255,.12)",background:"rgba(255,255,255,.05)"}}>
                   {myTeam.avatar||"🎯"}
                 </div>
                 <div>
@@ -180,37 +241,35 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[],can,onHide})
               </button>
             )}
             {can.hostQuiz(currentUser)&&(
-              <button onClick={async()=>{
-                const {data:fresh}=await supabase.from("events").select("*").eq("id",evtRef.current.id).single();
-                if(!fresh)return;
-                const cleaned=(fresh.quizzes||[]).map(q=>q.id===liveQ.id?{...q,_liveState:null}:q);
-                const updated={...fresh,quizzes:cleaned};
-                await supabase.from("events").upsert([updated]);
-                onUpdate(updated);
+              <button onClick={()=>{
+                deleteQuizLive(quizId);
+                deleteAnswersForQuiz(quizId);
+                patchQuiz(quizId,{status:"ready"});
               }} style={{background:"rgba(224,85,85,.15)",border:"1px solid rgba(224,85,85,.35)",borderRadius:7,color:"rgba(224,85,85,.9)",padding:"4px 10px",cursor:"pointer",fontSize:".65rem",fontFamily:"var(--font-b)",fontWeight:700,letterSpacing:".04em",whiteSpace:"nowrap"}}>
                 ✕ End Session
               </button>
             )}
           </div>
         </div>
-        {/* Avatar picker dropdown */}
-        {showAvatarPicker&&myTeam&&(
-          <div style={{padding:".4rem .8rem .6rem",borderTop:"1px solid rgba(255,255,255,.07)"}}>
-            <div style={{fontSize:".6rem",color:"rgba(255,255,255,.3)",marginBottom:5,letterSpacing:".06em",textTransform:"uppercase"}}>Choose team avatar</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-              {TEAM_AVATARS.map(e=>(
-                <div key={e} onClick={()=>changeTeamAvatar(e)}
-                  style={{fontSize:"1.3rem",cursor:"pointer",padding:"4px 5px",borderRadius:6,border:myTeam.avatar===e?"2px solid var(--amber)":"1px solid transparent",background:myTeam.avatar===e?"rgba(232,148,58,.12)":"transparent",userSelect:"none"}}>
-                  {e}
-                </div>
-              ))}
-            </div>
+        {liveError&&liveLoaded&&(
+          <div style={{padding:"2px 1.2rem 5px",textAlign:"center",fontSize:".62rem",color:"rgba(255,255,255,.35)"}}>
+            Verbinding wankel — laatst bekende status wordt getoond
           </div>
         )}
       </div>
 
       {/* Content */}
       <div style={{paddingTop:"4rem",paddingBottom:"2rem",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+
+        {/* ── Loading / ended (loading, empty states) ── */}
+        {!liveLoaded&&(
+          <Waiting icon="⏳" title="Quiz laden…" sub="Een moment geduld"/>
+        )}
+        {liveLoaded&&!quizLive&&(
+          <Waiting icon="🏁" title="Geen actieve sessie" sub="De quizmaster is nog niet begonnen, of heeft de sessie beëindigd."/>
+        )}
+
+        {liveLoaded&&quizLive&&(<>
 
         {/* ── Intro ── */}
         {ls.phase==="intro"&&(
@@ -299,7 +358,7 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[],can,onHide})
             </div>
             <div style={{display:"grid",gap:".5rem"}}>
               {sortedScores.map(([name,score],i)=>{
-                const team=ls.isTeamQuiz?(ls.teams||[]).find(t=>t.name===name):null;
+                const team=ls.isTeamQuiz?(quiz.teams||[]).find(t=>t.name===name):null;
                 const teamMembers=team?.members||[];
                 return(
                   <div key={name} style={{display:"flex",alignItems:"center",gap:10,background:"rgba(255,255,255,.05)",border:i===0?"1px solid rgba(232,148,58,.35)":"1px solid rgba(255,255,255,.07)",borderRadius:10,padding:"10px 14px"}}>
@@ -330,7 +389,7 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[],can,onHide})
             </div>
             <div style={{display:"grid",gap:".5rem"}}>
               {sortedScores.map(([name,score],i)=>{
-                const team=ls.isTeamQuiz?(ls.teams||[]).find(t=>t.name===name):null;
+                const team=ls.isTeamQuiz?(quiz.teams||[]).find(t=>t.name===name):null;
                 const teamMembers=team?.members||[];
                 return(
                   <div key={name} style={{display:"flex",alignItems:"center",gap:10,background:i===0?"rgba(232,148,58,.12)":"rgba(255,255,255,.05)",border:i===0?"1px solid rgba(232,148,58,.45)":"1px solid rgba(255,255,255,.07)",borderRadius:10,padding:i===0?"13px 16px":"10px 14px"}}>
@@ -398,12 +457,13 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[],can,onHide})
             {/* ── Answer phase: show correct answer ── */}
             {ls.slidePhase==="answer"&&currentQ.type==="multiple"&&(()=>{
               const correctSet=Array.isArray(currentQ.answer)?currentQ.answer:[currentQ.answer??0];
-              const isMyCorrect=correctSet.length>0&&correctSet.every(c=>myAnswer.includes(c))&&myAnswer.length===correctSet.length;
+              const myAnswerClamped=clampAnswerValue(myAnswer,currentQ.options.length);
+              const isMyCorrect=correctSet.length>0&&correctSet.every(c=>myAnswerClamped.includes(c))&&myAnswerClamped.length===correctSet.length;
               return(
                 <div style={{display:"grid",gap:".7rem"}}>
                   {currentQ.options.map((opt,i)=>{
                     const isCorrect=correctSet.includes(i);
-                    const iMine=myAnswer.includes(i);
+                    const iMine=myAnswerClamped.includes(i);
                     return(
                       <div key={i} style={{borderRadius:10,padding:"12px 16px",border:isCorrect?"2px solid var(--green)":iMine?"1px solid rgba(224,85,85,.5)":"1px solid rgba(255,255,255,.08)",background:isCorrect?"rgba(76,175,125,.15)":iMine?"rgba(224,85,85,.07)":"rgba(255,255,255,.04)",transition:"all .3s"}}>
                         <div style={{fontSize:".95rem",fontWeight:600,color:isCorrect?"var(--green)":iMine?"rgba(224,85,85,.8)":"rgba(255,255,255,.7)"}}>{ALPHA_P[i]}. {opt}</div>
@@ -490,6 +550,8 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[],can,onHide})
             )}
           </div>
         )}
+
+        </>)}
       </div>
     </div>
   );

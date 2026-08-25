@@ -1,18 +1,31 @@
 // Full-screen, second-screen-style quiz presenter (docs/
-// quiz-unification-spec.md §8.1, App.jsx 3339-4210). Pure move (§8.3, Q3) --
-// body is byte-identical to the App.jsx original; only the imports below
-// are new, replacing what used to be same-file `const`s/App.jsx primitives.
-// Still reads/writes `evt.quizzes` directly (`onUpdate`) -- WP-Q4 rewires
-// this onto `quiz_live`/`quiz_answers`, out of scope here.
+// quiz-unification-spec.md §4, §8.1 -- WP-Q4). Rewired off publishing
+// `evt.quizzes[]._liveState` (a 39 kB event upsert broadcast to every
+// connected phone, §2) onto the narrow `quiz_live` row (§3.2, ≈0.5-1 kB)
+// and per-team/per-player rows in `quiz_answers` (§3.3) -- the other half
+// of the production bug fix in §2. `onUpdate`/`evt`-mutation are gone: this
+// component no longer writes to `events` at all.
+//
+// `answers`/`teams` are deliberately absent from every `quiz_live` payload
+// below (unlike the old `_liveState`) -- teams come from the quiz
+// *definition* (`quiz.teams`, a library snapshot per §5.3, essentially
+// static for the night) and answers come from `quiz_answers`
+// (`fetchAnswersForSlide`/`subscribeAnswers`), never broadcast pre-reveal
+// (§4.2's closed leak). Some call sites below still pass `answers:{}` in
+// their `publishLive(...)` overrides from the pre-Q4 code -- harmless,
+// `publishLive` only reads the fields it knows about; left as-is rather
+// than touched at every one of those ~10 call sites for a no-op field.
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase } from '../../supabase.js';
-import { ALPHA, normalizeQuiz, fmtTime } from './model.js';
+import { ALPHA, normalizeQuiz, fmtTime, clampAnswerValue } from './model.js';
 import { getYouTubeId, getSpotifyTrackId } from './urls.js';
 import { Avatar } from './ui/Kit.jsx';
 import { getDisplayName } from './users.js';
 import { MusicPlayer } from './MusicPlayer.jsx';
+import { patchQuiz } from './api.js';
+import { upsertQuizLive, deleteQuizLive, subscribeQuizLive } from './live.js';
+import { fetchAnswersForSlide, subscribeAnswers, deleteAnswersForQuiz } from './answers.js';
 
-export const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]})=>{
+export const QuizPresenter=({quiz:rawQuiz,evt,onClose,onFinish,users=[]})=>{
   const quiz=normalizeQuiz(rawQuiz);
   const totalRounds=quiz.rounds.length;
   const isTeamQuiz=(quiz.teams||[]).length>0;
@@ -29,11 +42,21 @@ export const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]
     ?Object.fromEntries((quiz.teams||[]).map(t=>[t.name,0]))
     :Object.fromEntries((evt.attendees||[]).map(a=>[a.name,0]))
   );
-  const [answers,setAnswers]=useState({}); // participant answers: key→optionIdx (synced from liveState)
+  const [answers,setAnswers]=useState({}); // answer_key→value, fetched/subscribed from quiz_answers for the current slide
   const [timer,setTimer]=useState(0);
   const [fading,setFading]=useState(false);
   const timerRef=useRef(null);
   const timerStartedAtRef=useRef(null);
+
+  // Presenter claim (§4.4): a random per-mount session id, upserted into
+  // `quiz_live.presenter_id` on every publish. No locking, no takeover --
+  // if a *different* id shows up on the row (another tab/device presenting
+  // the same quiz), we just show a non-blocking amber notice.
+  const presenterIdRef=useRef(null);
+  if(!presenterIdRef.current){
+    presenterIdRef.current=(typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():`p${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  }
+  const [presenterConflict,setPresenterConflict]=useState(false);
 
   // Pause timer
   const [prevPhase,setPrevPhase]=useState(null);
@@ -60,40 +83,47 @@ export const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]
   const currentRound=quiz.rounds[roundIdx];
 
   // ── Live publishing helpers ───────────────────────────────────────────────
-  // Publish current presenter state into quiz._liveState so participants can follow
+  // Publish current presenter state into the narrow `quiz_live` row (§3.2,
+  // §4.1: ~120x/night, ≈1 kB) -- one upsert, no `events` involved, and no
+  // `answers`/`teams` riding along (see the file-header comment for why).
   const publishLive=(overrides={})=>{
-    const e=evtRef.current;
     const newQIdx=overrides.qIdx!==undefined?overrides.qIdx:qIdx;
     const newRoundIdx=overrides.roundIdx!==undefined?overrides.roundIdx:roundIdx;
     const newPhase=overrides.phase!==undefined?overrides.phase:phase;
     // Clear timer whenever we navigate to a different question or phase so
     // participants never inherit a stale timerStartedAt from the previous question.
     const navigating=newQIdx!==qIdx||newRoundIdx!==roundIdx||newPhase!==phase;
-    const liveState={
+    upsertQuizLive({
+      quizId:quiz.id,
+      quizRev:quiz.rev,
+      eventId:evtRef.current?.id??null,
       phase:newPhase,
       roundIdx:newRoundIdx,
       qIdx:newQIdx,
       slidePhase:overrides.slidePhase??slidePhase,
       scores:overrides.scores??scores,
-      answers:overrides.answers!==undefined?overrides.answers:answers,
-      teams:quiz.teams||[],
-      isTeamQuiz,
       summaryRevealed:overrides.summaryRevealed??summaryRevealed,
       pauseConfig,
       timerStartedAt:overrides.timerStartedAt!==undefined?overrides.timerStartedAt:(navigating?null:timerStartedAtRef.current),
       timerLimit:overrides.timerLimit!==undefined?overrides.timerLimit:timeLimit,
-    };
-    const updatedQuizzes=(e.quizzes||[]).map(q=>q.id===quiz.id?{...q,_liveState:liveState}:q);
-    onUpdate({...e,quizzes:updatedQuizzes});
+      isTeamQuiz,
+      presenterId:presenterIdRef.current,
+    });
   };
 
+  // Ephemeral live-play state must not survive Exit or Finish (§3.2 "exists
+  // only while a quiz is live" / §4.1 "End Session / reset"). Deliberately
+  // does *not* touch `quizzes.status` -- that's the exit path's job below
+  // (revert to `ready`) or the eventual `finishQuiz` adapter's job (WP-Q6,
+  // not built yet: set `finished` alongside the archived scores). Setting
+  // `finished` from here with no scores persisted would corrupt
+  // `fetchQuizResults()`'s `status='finished'` filter.
   const clearLive=()=>{
-    const e=evtRef.current;
-    const updatedQuizzes=(e.quizzes||[]).map(q=>q.id===quiz.id?{...q,_liveState:null}:q);
-    onUpdate({...e,quizzes:updatedQuizzes});
+    deleteQuizLive(quiz.id);
+    deleteAnswersForQuiz(quiz.id);
   };
 
-  const handleClose=()=>{clearLive();onClose();};
+  const handleClose=()=>{clearLive();patchQuiz(quiz.id,{status:"ready"});onClose();};
   const currentQ=currentRound?.questions[qIdx];
   const totalQInRound=currentRound?.questions?.length||0;
   const timeLimit=currentQ?(currentQ.timeLimit||quiz.defaultTime||30):30;
@@ -224,28 +254,104 @@ export const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[phase,roundIdx,qIdx,slidePhase,scores,summaryRevealed,fading]);
 
-  // Poll for fresh participant answers every 2s (fast sync)
+  // Going live (§4.1/§4.5): flip `quizzes.status` so `fetchLiveQuizzes()`/
+  // `liveWatch.js` (already built, Q2) can find this quiz, and flip it back
+  // on an unfinished exit (`handleClose`, above). A narrow `.update()`
+  // (`patchQuiz`), never the full-row `saveQuiz` -- this must never re-send
+  // the 33 kB `rounds` blob. A quiz that only exists in the legacy
+  // `events.quizzes[]` column (every quiz today, until QuizBuilder/
+  // QuizDashboard are rewired -- see this work package's report) has no
+  // matching row yet; `.update()` on zero rows is a silent no-op, not a
+  // failure.
   useEffect(()=>{
-    const evtId=evtRef.current.id;
-    const qid=quiz.id;
-    const poll=setInterval(async()=>{
-      const {data}=await supabase.from("events").select("quizzes").eq("id",evtId).single();
-      if(!data)return;
-      const ls=data.quizzes?.find(q=>q.id===qid)?._liveState;
-      if(ls?.qIdx===qIdx&&ls?.roundIdx===roundIdx)setAnswers(ls.answers||{});
-    },2000);
-    return()=>clearInterval(poll);
-  },[quiz.id,qIdx,roundIdx]);
+    patchQuiz(quiz.id,{status:"live"});
+  },[quiz.id]);
+
+  // Presenter claim (§4.4): realtime-only (best-effort, no safety poll --
+  // this is a social nicety, not a correctness boundary; §16 "no locking,
+  // no takeover"). A different `presenter_id` arriving means someone else
+  // is presenting the same quiz; show a non-blocking amber notice.
+  useEffect(()=>{
+    const unsubscribe=subscribeQuizLive(quiz.id,live=>{
+      if(live&&live.presenterId&&live.presenterId!==presenterIdRef.current)setPresenterConflict(true);
+    });
+    return unsubscribe;
+  },[quiz.id]);
+
+  // Current slide's answers from `quiz_answers` (§4.1/§4.2): reset on
+  // navigation, one fetch, then a 3s safety poll while this slide is shown.
+  // `currentQ`/`timeLimit` intentionally excluded from deps for the same
+  // non-memoized-`quiz`-identity reason as the timer effect above --
+  // `currentQ` is read fresh from the closure each time this effect
+  // actually (re)runs, which is only on a real navigation.
+  useEffect(()=>{
+    let cancelled=false;
+    const qid=quiz.id,ri=roundIdx,qi=qIdx;
+    const optionCount=currentQ?.type==="multiple"?(currentQ.options?.length||0):Infinity;
+    const load=()=>{
+      fetchAnswersForSlide(qid,ri,qi).then(res=>{
+        if(cancelled||!res.ok)return;
+        const next={};
+        res.answers.forEach(a=>{next[a.answerKey]=clampAnswerValue(a.value,optionCount);});
+        setAnswers(next);
+      });
+    };
+    setAnswers({});
+    load();
+    const poll=setInterval(load,3000);
+    return()=>{cancelled=true;clearInterval(poll);};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[quiz.id,roundIdx,qIdx]);
+
+  // Realtime top-up for the same slide (§4.2) -- ignores rows for any other
+  // (round_idx,q_idx): a participant answering a question that isn't the
+  // one currently on screen must never appear here (§12: "answers for a
+  // slide that isn't the presenter's current one are ignored, so a client
+  // cannot pre-answer"). Kept in a ref (not effect deps) so the
+  // subscription itself doesn't tear down/reconnect on every navigation.
+  const slideRef=useRef({roundIdx,qIdx,optionCount:0});
+  slideRef.current={roundIdx,qIdx,optionCount:currentQ?.type==="multiple"?(currentQ.options?.length||0):Infinity};
+  useEffect(()=>{
+    const unsubscribe=subscribeAnswers(quiz.id,a=>{
+      const s=slideRef.current;
+      if(a.roundIdx!==s.roundIdx||a.qIdx!==s.qIdx)return;
+      setAnswers(prev=>({...prev,[a.answerKey]:clampAnswerValue(a.value,s.optionCount)}));
+    });
+    return unsubscribe;
+  },[quiz.id]);
 
   // ── Actions ──────────────────────────────────────────────────────────────────
   const fade=cb=>{setFading(true);setTimeout(()=>{cb();setFading(false);},220);};
+
+  // Maps a `quiz_answers.answer_key` (§3.3: `t:<sourceTeamId>` or
+  // `p:<username lowercased>`, stable) back to the `scores` object's key
+  // (a team *name* or attendee name -- unchanged, mutable, archive format,
+  // §3.3 "stable ids live, names archived"). Returns null for an
+  // unresolvable key (team since renamed away from its snapshot / removed,
+  // attendee no longer listed) so that answer is simply not scored, rather
+  // than silently scoring under a synthetic key.
+  const resolveScoreKey=useCallback(answerKey=>{
+    if(answerKey.startsWith("t:")){
+      const sourceId=answerKey.slice(2);
+      const team=(quiz.teams||[]).find(t=>t.sourceTeamId===sourceId||t.id===sourceId);
+      return team?team.name:null;
+    }
+    if(answerKey.startsWith("p:")){
+      const uname=answerKey.slice(2);
+      const attendee=(evt.attendees||[]).find(a=>(a.name||"").toLowerCase()===uname);
+      return attendee?attendee.name:uname;
+    }
+    return null;
+  },[quiz.teams,evt.attendees]);
 
   const doRevealAnswer=useCallback(()=>{
     clearInterval(timerRef.current);
     const correctSet=Array.isArray(currentQ?.answer)?currentQ.answer:[currentQ?.answer??0];
     let newScores={...scores};
     if(currentQ?.type==="multiple"){
-      Object.entries(answers).forEach(([key,picked])=>{
+      Object.entries(answers).forEach(([answerKey,picked])=>{
+        const key=resolveScoreKey(answerKey);
+        if(!key)return;
         const pickedArr=Array.isArray(picked)?picked:[picked];
         const isCorrect=correctSet.length===pickedArr.length&&correctSet.every(c=>pickedArr.includes(c));
         if(isCorrect)newScores[key]=(newScores[key]||0)+(currentQ.points||10);
@@ -253,9 +359,9 @@ export const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]
     }
     setScores(newScores);
     setSlidePhase("answer");
-    publishLive({slidePhase:"answer",scores:newScores,answers});
+    publishLive({slidePhase:"answer",scores:newScores});
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[currentQ,answers,scores]);
+  },[currentQ,answers,scores,resolveScoreKey]);
 
   const awardPoints=(key,delta)=>{
     const newScores={...scores,[key]:Math.max(0,(scores[key]||0)+delta)};
@@ -363,6 +469,8 @@ export const QuizPresenter=({quiz:rawQuiz,evt,onUpdate,onClose,onFinish,users=[]
           {phase==="question"&&<span style={{background:"rgba(232,148,58,.15)",border:"1px solid rgba(232,148,58,.3)",borderRadius:20,padding:"2px 10px",fontSize:".7rem",color:"var(--amber)",fontWeight:700}}>Q{qIdx+1}/{totalQInRound}</span>}
           {phase==="round-intro"&&<span style={{background:"rgba(255,255,255,.06)",borderRadius:20,padding:"2px 10px",fontSize:".7rem",color:"rgba(255,255,255,.45)"}}>Round {roundIdx+1}/{totalRounds}</span>}
           {phase==="round-summary"&&<span style={{background:"rgba(91,155,213,.15)",border:"1px solid rgba(91,155,213,.3)",borderRadius:20,padding:"2px 10px",fontSize:".7rem",color:"var(--blue)",fontWeight:700}}>Round {roundIdx+1} Summary</span>}
+          {/* Presenter claim (§4.4): non-blocking, no takeover -- just a heads-up. */}
+          {presenterConflict&&<span style={{background:"rgba(232,148,58,.18)",border:"1px solid rgba(232,148,58,.4)",borderRadius:20,padding:"2px 10px",fontSize:".7rem",color:"var(--amber2)",fontWeight:700}}>⚠️ Iemand anders presenteert deze quiz nu.</span>}
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           {phase!=="pause"&&phase!=="intro"&&<button onClick={enterPause} style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.12)",borderRadius:8,color:"rgba(255,255,255,.55)",padding:"6px 14px",cursor:"pointer",fontSize:".75rem",fontFamily:"var(--font-b)",backdropFilter:"blur(6px)"}}>⏸ Pause</button>}

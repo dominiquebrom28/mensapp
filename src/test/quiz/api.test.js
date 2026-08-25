@@ -83,15 +83,39 @@ describe('quiz/api row mapping', () => {
     expect(res.quiz.title).toBe('Pubquiz 12');
   });
 
-  it('fetchLiveQuizzes projects only id/title/event_id and filters malformed rows', async () => {
-    mockTableData.quizzes = { data: [{ id: 'qz1', title: 'Live One', event_id: 'evt-1' }, { id: null, title: 'bad' }], error: null };
+  // Discovery reads `quiz_live`, NOT `quizzes.status`. See the comment on
+  // fetchLiveQuizzes: `quiz_live` has no FK to `quizzes`, so it is the only
+  // source that finds a quiz which has never been written to the `quizzes`
+  // table -- which is every quiz built since the one-time §10.2 migration,
+  // because the builder still writes to `events.quizzes` until Q5/Q7.
+  it('fetchLiveQuizzes reads quiz_live and filters malformed rows', async () => {
+    mockTableData.quiz_live = { data: [{ quiz_id: 'qz1', event_id: 'evt-1' }, { quiz_id: null }], error: null };
+    mockTableData.quizzes = { data: [{ id: 'qz1', title: 'Live One' }], error: null };
     const res = await fetchLiveQuizzes();
     expect(res.ok).toBe(true);
     expect(res.liveQuizzes).toEqual([{ id: 'qz1', title: 'Live One', eventId: 'evt-1' }]);
   });
 
+  it('fetchLiveQuizzes finds an UNMIGRATED live quiz -- one with no `quizzes` row at all', async () => {
+    mockTableData.quiz_live = { data: [{ quiz_id: 'qz-legacy', event_id: 'evt-1' }], error: null };
+    mockTableData.quizzes = { data: [], error: null };
+    const res = await fetchLiveQuizzes();
+    expect(res.ok).toBe(true);
+    // Found, with an empty title -- the caller resolves the real one from
+    // its own copy of the definition. Querying `quizzes.status` instead
+    // would have returned [] here and no participant would see the quiz.
+    expect(res.liveQuizzes).toEqual([{ id: 'qz-legacy', title: '', eventId: 'evt-1' }]);
+  });
+
+  it('fetchLiveQuizzes returns [] when nothing is live, without reading quizzes at all', async () => {
+    mockTableData.quiz_live = { data: [], error: null };
+    const res = await fetchLiveQuizzes();
+    expect(res.ok).toBe(true);
+    expect(res.liveQuizzes).toEqual([]);
+  });
+
   it('fetchLiveQuizzes degrades to [] on error', async () => {
-    mockTableData.quizzes = { data: null, error: { message: 'boom' } };
+    mockTableData.quiz_live = { data: null, error: { message: 'boom' } };
     const res = await fetchLiveQuizzes();
     expect(res.ok).toBe(false);
     expect(res.liveQuizzes).toEqual([]);

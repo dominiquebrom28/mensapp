@@ -122,20 +122,50 @@ export async function fetchQuiz(id) {
 // purpose: no `rounds`, so a phone that isn't even on the quiz yet never
 // pays for the 33 kB definition just to learn one is live.
 export async function fetchLiveQuizzes() {
+  // Source of truth is `quiz_live`, NOT `quizzes.status`. A `quiz_live` row
+  // exists for exactly the quizzes that are live, is keyed on the quiz id
+  // string, and has no FK to `quizzes` (§3.2) -- so it finds a live quiz
+  // whether or not that quiz has a `quizzes` row yet.
+  //
+  // That distinction is not academic. §10.2's migration was a ONE-TIME copy
+  // of `events.quizzes[]`; the builder still writes only to the legacy
+  // column until WP-Q5/Q7 move it, so every quiz built between the
+  // migration and those work packages exists ONLY in `events.quizzes`.
+  // Querying `quizzes where status='live'` would find none of them -- and
+  // `patchQuiz(id,{status:'live'})` is a silent no-op on a row that isn't
+  // there, so nothing would even fail loudly. Discovery would just come
+  // back empty and no participant would ever see the quiz.
+  //
+  // Titles are enriched best-effort from `quizzes` and come back `''` for
+  // an unmigrated quiz; callers that hold the definition locally (today:
+  // `EventPage`, from `evt.quizzes`) resolve the real title themselves.
   const { data, error } = await supabase
-    .from('quizzes')
-    .select('id,title,event_id')
-    .eq('status', 'live');
+    .from('quiz_live')
+    .select('quiz_id,event_id');
   if (error) {
     console.error('fetchLiveQuizzes failed:', error);
     return { ok: false, error, liveQuizzes: [] };
   }
+  const rows = (Array.isArray(data) ? data : []).filter(r => r && typeof r === 'object' && r.quiz_id);
+  if (!rows.length) return { ok: true, error: null, liveQuizzes: [] };
+
+  const titles = {};
+  const { data: defs } = await supabase
+    .from('quizzes')
+    .select('id,title')
+    .in('id', rows.map(r => r.quiz_id));
+  for (const d of Array.isArray(defs) ? defs : []) {
+    if (d && d.id) titles[d.id] = d.title || '';
+  }
+
   return {
     ok: true,
     error: null,
-    liveQuizzes: (Array.isArray(data) ? data : [])
-      .filter(r => r && typeof r === 'object' && r.id)
-      .map(r => ({ id: r.id, title: r.title || '', eventId: r.event_id ?? null })),
+    liveQuizzes: rows.map(r => ({
+      id: r.quiz_id,
+      title: titles[r.quiz_id] || '',
+      eventId: r.event_id ?? null,
+    })),
   };
 }
 
@@ -152,6 +182,36 @@ export async function saveQuiz(quiz) {
     return { ok: false, error };
   }
   return { ok: true, error: null, quiz: fromRow(row) };
+}
+
+// Narrow status/score patch (docs/quiz-unification-spec.md §4.1: "Presenter
+// | quizzes.scores/member_scores/status | round end + finish | ≈1 kB") --
+// deliberately `.update()` with only the changed columns, never the
+// full-row `saveQuiz` upsert, so going live / a round ending / finishing
+// never re-sends the 33 kB `rounds` blob just to flip a status flag or
+// record a score. WP-Q4 also uses this for the initial `ready`->`live`
+// transition (on presenter mount) and the reverse on an unfinished exit
+// (`ready`) -- the spec's table only lists "round end + finish" for this
+// write, but something has to flip `status` to `'live'` for
+// `fetchLiveQuizzes()`/`liveWatch.js` (already built in Q2) to ever find a
+// running quiz, and the presenter mounting is the only place that happens
+// today. A quiz that only exists in the legacy `events.quizzes[]` column
+// (not yet migrated/rewired -- true for every quiz built via the
+// not-yet-rewired QuizBuilder/QuizDashboard, see WP-Q4's report) has no
+// matching row here; `.update().eq('id',…)` on zero rows is a silent,
+// harmless no-op, not an error.
+export async function patchQuiz(id, patch) {
+  const row = { updated_at: new Date().toISOString() };
+  if (patch.status !== undefined) row.status = STATUSES.includes(patch.status) ? patch.status : 'ready';
+  if (patch.scores !== undefined) row.scores = patch.scores && typeof patch.scores === 'object' ? patch.scores : {};
+  if (patch.memberScores !== undefined) row.member_scores = patch.memberScores && typeof patch.memberScores === 'object' ? patch.memberScores : {};
+  if (patch.finishedAt !== undefined) row.finished_at = patch.finishedAt;
+  const { error } = await supabase.from('quizzes').update(row).eq('id', id);
+  if (error) {
+    console.error('patchQuiz failed:', error);
+    return { ok: false, error };
+  }
+  return { ok: true, error: null };
 }
 
 export async function deleteQuiz(id) {

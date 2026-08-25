@@ -47,7 +47,8 @@ async function flush() {
 
 describe('useLiveQuizWatch', () => {
   it('loads live quizzes on mount', async () => {
-    mockTableData.quizzes = { data: [{ id: 'qz1', title: 'Live One', event_id: 'evt-1' }], error: null };
+    mockTableData.quiz_live = { data: [{ quiz_id: 'qz1', event_id: 'evt-1' }], error: null };
+    mockTableData.quizzes = { data: [{ id: 'qz1', title: 'Live One' }], error: null };
     const { result } = renderHook(() => useLiveQuizWatch());
     await flush();
     expect(result.current.liveQuizzes).toEqual([{ id: 'qz1', title: 'Live One', eventId: 'evt-1' }]);
@@ -55,13 +56,14 @@ describe('useLiveQuizWatch', () => {
   });
 
   it('subscribes to the unfiltered quiz_live INSERT/DELETE feed, and a fired event re-fetches', async () => {
-    mockTableData.quizzes = { data: [], error: null };
+    mockTableData.quiz_live = { data: [], error: null };
     const { result } = renderHook(() => useLiveQuizWatch());
     await flush();
     expect(result.current.liveQuizzes).toEqual([]);
     expect(mockChannelCalls).toHaveLength(1);
 
-    mockTableData.quizzes = { data: [{ id: 'qz2', title: 'Now Live', event_id: null }], error: null };
+    mockTableData.quiz_live = { data: [{ quiz_id: 'qz2', event_id: null }], error: null };
+    mockTableData.quizzes = { data: [{ id: 'qz2', title: 'Now Live' }], error: null };
     const { handlers } = mockChannelCalls[0];
     expect(handlers.some(h => h.event === 'postgres_changes' && h.filter.event === 'INSERT' && h.filter.filter === undefined)).toBe(true);
     expect(handlers.some(h => h.event === 'postgres_changes' && h.filter.event === 'DELETE' && h.filter.filter === undefined)).toBe(true);
@@ -71,24 +73,26 @@ describe('useLiveQuizWatch', () => {
   });
 
   it('falls back to a 30s safety poll -- still finds a live quiz if realtime never fires', async () => {
-    mockTableData.quizzes = { data: [], error: null };
+    mockTableData.quiz_live = { data: [], error: null };
     const { result } = renderHook(() => useLiveQuizWatch());
     await flush();
     expect(result.current.liveQuizzes).toEqual([]);
 
-    mockTableData.quizzes = { data: [{ id: 'qz3', title: 'Polled', event_id: null }], error: null };
+    mockTableData.quiz_live = { data: [{ quiz_id: 'qz3', event_id: null }], error: null };
+    mockTableData.quizzes = { data: [{ id: 'qz3', title: 'Polled' }], error: null };
     await act(async () => { vi.advanceTimersByTime(30000); await Promise.resolve(); await Promise.resolve(); });
 
     expect(result.current.liveQuizzes).toEqual([{ id: 'qz3', title: 'Polled', eventId: null }]);
   });
 
   it('surfaces a read failure without clearing an already-shown banner', async () => {
-    mockTableData.quizzes = { data: [{ id: 'qz1', title: 'Live One', event_id: null }], error: null };
+    mockTableData.quiz_live = { data: [{ quiz_id: 'qz1', event_id: null }], error: null };
+    mockTableData.quizzes = { data: [{ id: 'qz1', title: 'Live One' }], error: null };
     const { result } = renderHook(() => useLiveQuizWatch());
     await flush();
     expect(result.current.liveQuizzes).toHaveLength(1);
 
-    mockTableData.quizzes = { data: null, error: { message: 'boom' } };
+    mockTableData.quiz_live = { data: null, error: { message: 'boom' } };
     await act(async () => { vi.advanceTimersByTime(30000); await Promise.resolve(); await Promise.resolve(); });
 
     expect(result.current.error).toEqual({ message: 'boom' });
@@ -96,7 +100,7 @@ describe('useLiveQuizWatch', () => {
   });
 
   it('unmounting clears the poll interval and unsubscribes without throwing', async () => {
-    mockTableData.quizzes = { data: [], error: null };
+    mockTableData.quiz_live = { data: [], error: null };
     const { unmount } = renderHook(() => useLiveQuizWatch());
     await flush();
     expect(mockChannelCalls).toHaveLength(1);

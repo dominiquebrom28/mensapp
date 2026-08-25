@@ -26,6 +26,11 @@ const MensGamesTab  = lazy(() => import("./features/mensgames/MensGamesTab.jsx")
 // the main chunk, loaded only once a quiz tab/dashboard/live-overlay is
 // actually rendered. Still reads/writes `evt.quizzes` via props; WP-Q4
 // rewires the live protocol onto `quiz_live`/`quiz_answers`.
+// Eager, deliberately not in the lazy chunk (docs/quiz-unification-spec.md
+// §4.5/§8.1): discovery has to run for someone who never opens the quiz at
+// all, since finding a live quiz is what invites them in.
+import { useLiveQuizWatch } from "./features/quiz/liveWatch.js";
+import { fetchQuiz } from "./features/quiz/api.js";
 const QuizTab = lazy(() => import("./features/quiz/QuizTab.jsx"));
 const QuizDashboard = lazy(() => import("./features/quiz/QuizDashboard.jsx"));
 const QuizParticipantView = lazy(() => import("./features/quiz/QuizParticipantView.jsx"));
@@ -2023,7 +2028,28 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
   // read the same one. Hiding is per-session: when this quiz stops being live
   // (or a different quiz starts), the dismissal clears so the next session
   // isn't silently suppressed for whoever hid the last one.
-  const liveQuiz=(evt.quizzes||[]).find(q=>q._liveState)||null;
+  //
+  // Discovery moved off `evt.quizzes[]._liveState` when WP-Q4 stopped writing
+  // it (docs/quiz-unification-spec.md §4.5). `useLiveQuizWatch` watches the
+  // `quiz_live` table -- realtime, plus a 30 s poll for phones where realtime
+  // never connects.
+  const {liveQuizzes}=useLiveQuizWatch();
+  const liveHereId=(liveQuizzes.find(q=>q.eventId===evt.id)||{}).id||null;
+  // The definition normally resolves locally: the builder still writes to
+  // `evt.quizzes`, so the 33 kB of rounds is already in hand and refetching
+  // it would be the exact waste this refactor exists to remove. The fetch is
+  // the fallback for a quiz that lives only as a `quizzes` row -- which is
+  // what a standalone quiz becomes once Q5/Q7 move the builder.
+  const localLiveQuiz=liveHereId?((evt.quizzes||[]).find(q=>q.id===liveHereId)||null):null;
+  const [fetchedLiveQuiz,setFetchedLiveQuiz]=useState(null);
+  const needsFetch=!!liveHereId&&!localLiveQuiz;
+  useEffect(()=>{
+    if(!needsFetch){setFetchedLiveQuiz(null);return;}
+    let alive=true;
+    fetchQuiz(liveHereId).then(res=>{if(alive&&res.ok)setFetchedLiveQuiz(res.quiz);});
+    return()=>{alive=false;};
+  },[needsFetch,liveHereId]);
+  const liveQuiz=localLiveQuiz||(fetchedLiveQuiz&&fetchedLiveQuiz.id===liveHereId?fetchedLiveQuiz:null);
   const liveQuizId=liveQuiz?liveQuiz.id:null;
   useEffect(()=>{setQuizDismissed(false)},[liveQuizId]);
   const countdown=useCountdown(evt.date,evt.start_time);
@@ -2249,7 +2275,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
       </Suspense>}
       {quizDash&&<Suspense fallback={null}><QuizDashboard evt={evt} onUpdate={onUpdate} users={users} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} onClose={()=>setQuizDash(false)}/></Suspense>}
       {/* Live quiz participant view — shown to everyone when a quiz is being presented */}
-      {liveQuiz&&!quizDash&&!quizDismissed&&<Suspense fallback={null}><QuizParticipantView evt={evt} liveQ={liveQuiz} currentUser={currentUser} onUpdate={onUpdate} users={users} can={can} onHide={()=>setQuizDismissed(true)}/></Suspense>}
+      {liveQuiz&&!quizDash&&!quizDismissed&&<Suspense fallback={null}><QuizParticipantView liveQ={liveQuiz} currentUser={currentUser} users={users} can={can} onHide={()=>setQuizDismissed(true)}/></Suspense>}
     </div>
   );
 };

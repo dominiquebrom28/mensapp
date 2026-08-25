@@ -81,6 +81,21 @@ export const normalizeQuiz = q => {
   };
 };
 
+/**
+ * Defensive clamp for a `quiz_answers.value` array (docs/
+ * quiz-unification-spec.md §12 trust boundary: "a hand-crafted `[999]` must
+ * score zero, not throw"). No server-side authorization exists on this
+ * table (§12), so any client can write any JSONB into `value` -- this
+ * coerces whatever comes back over the wire (realtime payload, poll, or an
+ * own-answer read) into an array of option indices inside
+ * `[0, optionCount)`, silently dropping anything else, before it's used to
+ * render a count or decide a score.
+ */
+export const clampAnswerValue = (value, optionCount) =>
+  (Array.isArray(value) ? value : [])
+    .map(v => Number(v))
+    .filter(v => Number.isInteger(v) && v >= 0 && v < optionCount);
+
 function isoOf(now) {
   return new Date(now).toISOString();
 }
