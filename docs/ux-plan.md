@@ -489,7 +489,7 @@ Either way, the mechanism matters more than the choice: strings must stop being 
 
 And three corrections to existing tokens:
 - `--muted` → `rgba(240,230,211,.68)` (the existing `AA_MUTED`, 7.49:1). Retire `--muted2` or redefine it as the *disabled* colour only, never body text.
-- `--border` → `rgba(232,148,58,.30)` minimum, ideally `.35`, for a real 3:1 boundary.
+- `--border` → **`rgba(232,148,58,.55)`**. *(Corrected 2026-08-26: this line originally said `.30` minimum, ideally `.35`. That was wrong — measured by alpha-compositing the border over each of the four card backgrounds and computing WCAG relative-luminance contrast against that background, `.35` only reaches ~2:1. `.55` clears 3:1 on all four surfaces, 3.08–3.17:1, and shipped in `6670bf3`. Verified in the browser at 1280px and 375px: it still looks like the same app.)*
 - Replace the `outline:none` focus rule with a genuine ≥3:1 ring — mensgames already has one worth copying verbatim (`ui/styles.jsx:33-38`).
 
 Note that raising `--text-xs` to 12px means the 63 uses of `.72rem` (11.5px) all get slightly larger. That is a feature, not a regression, on the primary canvas.
