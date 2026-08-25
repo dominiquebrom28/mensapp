@@ -40,8 +40,31 @@ const GS = () => (
     :root{
       --bg:#0c0901;--bg2:#150e04;--bg3:#1d1408;--bg4:#27190c;
       --amber:#e8943a;--amber2:#f5b866;--gold:#c9922a;
-      --cream:#f0e6d3;--muted:#8a7460;--muted2:#6a5848;
-      --border:rgba(232,148,58,.12);--border2:rgba(232,148,58,.35);
+      --cream:#f0e6d3;
+      /* Contrast fix (docs/ux-plan.md §2.3/§5.7, 2026-08-26): the old
+         --muted (#8a7460) measured 4.50:1 on --bg but only 4.33/4.11/3.86:1
+         on --bg2/--bg3/--bg4 -- under the 4.5:1 AA text minimum on every
+         card, which is where secondary text actually lives. The fix already
+         existed in this file as AA_MUTED inside TeamCreatorPage-adjacent
+         code -- translucent cream instead of an opaque brown-grey -- and
+         measured 7.49-7.61:1 across every surface because alpha-blended
+         cream stays close to --cream's own ~14-16:1 headroom. Promoted here
+         so every var(--muted) call site gets it for free; --muted2 is
+         left alone (still fails AA everywhere, tracked as a later-phase
+         cleanup, not one of this pass's three measured failures).
+         --muted2 kept as-is intentionally -- do not "fix" it here. */
+      --muted:rgba(240,230,211,.68);--muted2:#6a5848;
+      /* Contrast fix (docs/ux-plan.md §2.3/§5.7): --border was
+         rgba(232,148,58,.12), which measures 1.17-1.23:1 against
+         --bg/--bg2/--bg3/--bg4 -- effectively invisible, and this is the
+         border on every Card/Inp/ghost Btn. WCAG 1.4.11 wants 3:1 for a UI
+         component boundary. .55 alpha of the same amber clears 3:1 on all
+         four surfaces (3.08-3.17:1) while staying the same hue -- verified
+         by alpha-compositing the border colour over each background and
+         computing WCAG relative-luminance contrast against that background
+         (not just comparing the two flat hex codes, which is what a naive
+         script would do and get wrong for any translucent colour). */
+      --border:rgba(232,148,58,.55);--border2:rgba(232,148,58,.35);
       --green:#4caf7d;--red:#e05555;--blue:#5b9bd5;--purple:#9b7fe8;--orange:#ff6b35;
       --font-h:'Playfair Display',serif;--font-b:'DM Sans',sans-serif;
       --radius:14px;--radius-sm:9px;
@@ -93,7 +116,16 @@ const GS = () => (
     .rsvp-btn:active{transform:scale(.97)}
     input:hover,textarea:hover{border-color:rgba(232,148,58,.38)!important}
     select:hover{border-color:rgba(232,148,58,.38)!important}
-    input:focus,textarea:focus,select:focus{border-color:var(--amber)!important;box-shadow:0 0 0 3px rgba(232,148,58,.13)!important;outline:none!important}
+    /* Contrast fix (docs/ux-plan.md §2.3/§5.7): this rule used to strip the
+       UA focus outline (outline:none!important) and replace it with a
+       translucent box-shadow, rgba(232,148,58,.13) -- alpha-composited over
+       --bg3 (the Inp background) that measures 1.24:1, worse than doing
+       nothing. Replaced with the same solid ring features/mensgames/ui/
+       styles.jsx already uses and documents as WCAG-verified (3px solid
+       var(--amber2), which measures 9.7-11.3:1 against every --bg*
+       surface) -- copied verbatim per §5.7 rather than inventing a new
+       ring. */
+    input:focus,textarea:focus,select:focus{border-color:var(--amber)!important;outline:3px solid var(--amber2)!important;outline-offset:2px!important}
     .nav-btn{transition:all .18s ease!important}
     .nav-btn:hover{background:rgba(232,148,58,.12)!important;border-color:rgba(232,148,58,.5)!important;color:var(--amber2)!important}
     .nav-btn:active{transform:scale(.95)!important}
@@ -122,8 +154,23 @@ const Card = ({children,style={},className="",id}) => (
 const H = ({children,size="1.35rem",style={}}) => (
   <h2 style={{fontFamily:"var(--font-h)",fontSize:size,color:"var(--amber2)",marginBottom:".9rem",lineHeight:1.2,...style}}>{children}</h2>
 );
+// NOTE (docs/ux-plan.md §2.1/§9): this is one half of a design-system fork.
+// `features/mensgames/ui/Kit.jsx:37` defines a second `Btn` -- same name,
+// same variant/size names, different values -- because App.jsx's own
+// components can never gain an `export` (§5.4 of docs/mensgames-spec.md;
+// the test-source extractors in src/test/extract*FromAppSource.js read this
+// file as text and would break). Merging the two is a later phase, blocked
+// on removing that constraint first. This pass only brings this Btn's
+// `minHeight`s up to the mensgames one's values (36/44/48) -- do not merge.
 const Btn = ({children,onClick,variant="primary",size="md",style={},disabled=false,type="button"}) => {
-  const sz={sm:{padding:"6px 14px",fontSize:".78rem"},md:{padding:"10px 22px",fontSize:".88rem"},lg:{padding:"13px 30px",fontSize:"1rem"}};
+  // Tap-target fix (docs/ux-plan.md §2.1/§2.9): these three sizes used to
+  // have no `minHeight` at all -- `sm` (97 of the app's 133 `<Btn>` uses)
+  // rendered at roughly 27px tall, `md` ~37px, `lg` ~42px, all under the
+  // WCAG 2.2 24px minimum and well under the app's own stated 44px bar.
+  // Values below match `features/mensgames/ui/Kit.jsx`'s `BTN_SIZES`
+  // exactly (36/44/48), justified there as "scored at a bar, on a phone,
+  // one-handed".
+  const sz={sm:{padding:"6px 14px",fontSize:".78rem",minHeight:36},md:{padding:"10px 22px",fontSize:".88rem",minHeight:44},lg:{padding:"13px 30px",fontSize:"1rem",minHeight:48}};
   const vr={
     primary:{background:"var(--amber)",color:"var(--bg)",border:"none"},
     ghost:{background:"transparent",color:"var(--cream)",border:"1px solid var(--border)"},
@@ -199,7 +246,13 @@ const Btn = ({children,onClick,variant="primary",size="md",style={},disabled=fal
   // Save the pre-press transform (may be a hover transform) so onUp restores to it
   const onDown=e=>{if(!disabled){const el=e.currentTarget;el._preTr=el.style.transform;el.style.transform="scale(.96)";}};
   const onUp=e=>{if(!disabled){const el=e.currentTarget;el.style.transform=el._preTr??"";}}
-  return <button ref={btnRef} type={type} onClick={onClick} disabled={disabled} onMouseEnter={onEnter} onMouseLeave={onLeave} onMouseDown={onDown} onMouseUp={onUp} style={{borderRadius:"var(--radius-sm)",cursor:disabled?"not-allowed":"pointer",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s",opacity:disabled?.5:1,...computed}}>{children}</button>;
+  // display/alignItems/justifyContent (added alongside the minHeight fix
+  // above, same values as `features/mensgames/ui/Kit.jsx`'s Btn): a plain
+  // <button> lays its text out top-aligned once minHeight makes the box
+  // taller than the text itself, so minHeight alone would enforce a taller
+  // tap target with the label stuck to the top of it. Still overridable via
+  // a caller's own `style` (spread last, in `computed`, same as always).
+  return <button ref={btnRef} type={type} onClick={onClick} disabled={disabled} onMouseEnter={onEnter} onMouseLeave={onLeave} onMouseDown={onDown} onMouseUp={onUp} style={{borderRadius:"var(--radius-sm)",cursor:disabled?"not-allowed":"pointer",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s",opacity:disabled?.5:1,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,...computed}}>{children}</button>;
 };
 // Shared tab-strip button, extracted out of the Admin Panel and EventPage
 // tab bars (2026-08-26 visible-controls audit): both had hand-rolled the
@@ -213,7 +266,15 @@ const Btn = ({children,onClick,variant="primary",size="md",style={},disabled=fal
 // `Btn`: never trust a snapshot, recompute the resting color/background from
 // this render's own `active` prop on every leave.
 const TabBtn = ({active,onClick,children,style={}}) => {
-  const computed={background:"none",border:"none",borderBottom:active?"2px solid var(--amber)":"2px solid transparent",color:active?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"8px 14px",fontFamily:"var(--font-b)",fontWeight:active?600:400,fontSize:".83rem",marginBottom:-1,transition:"color .15s,background .15s",borderRadius:"6px 6px 0 0",...style};
+  // Tap-target fix (docs/ux-plan.md §2.1/§2.9, same audit as `Btn` above):
+  // `padding:"8px 14px"` at `.83rem` with no `minHeight` renders at roughly
+  // 32-34px tall -- under the 44px bar this app already applies to member-
+  // facing controls elsewhere (Nav's 7 `minHeight:44` uses). `display`/
+  // `alignItems`/`justifyContent` added alongside it for the same reason as
+  // `Btn`: a plain <button>'s text top-aligns once `minHeight` makes the box
+  // taller than the label, so `minHeight` alone would just push the text to
+  // the top of a now-taller tab.
+  const computed={background:"none",border:"none",borderBottom:active?"2px solid var(--amber)":"2px solid transparent",color:active?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"8px 14px",fontFamily:"var(--font-b)",fontWeight:active?600:400,fontSize:".83rem",marginBottom:-1,transition:"color .15s,background .15s",borderRadius:"6px 6px 0 0",minHeight:44,display:"inline-flex",alignItems:"center",justifyContent:"center",...style};
   const onEnter=e=>{if(active)return;const el=e.currentTarget;el.style.color="var(--amber)";el.style.background="rgba(232,148,58,.06)";};
   const onLeave=e=>{const el=e.currentTarget;el.style.color=computed.color??"";el.style.background=computed.background??"";};
   return <button onClick={onClick} onMouseEnter={onEnter} onMouseLeave={onLeave} style={computed}>{children}</button>;
@@ -4629,17 +4690,16 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
   const unassignedNames=participants.filter(p=>!seatedNames.has(p));
   const totalPlaced=teams.reduce((sum,t)=>sum+(t.members||[]).length,0);
   const visibleSets=teamSets.filter(ts=>libFilter==="archived"?ts.status==="archived":ts.status!=="archived");
-  // Contrast audit (2026-08-25): `var(--muted)` measures 3.86–4.33:1 on
-  // this screen's card backgrounds (bg2/bg3/bg4) -- under the 4.5:1 body
-  // text minimum; `var(--muted2)` is worse still (2.5–2.9:1). Rather than
-  // retuning those tokens app-wide (204/33 call sites across the whole
-  // app, well outside this screen), secondary text here uses cream at a
-  // tuned opacity instead: it clears 4.5:1 on every background this page
-  // uses, with enough headroom to still clear it inside the archived
-  // library row's own `opacity:.8` dimming. Inactive icon-toggle opacity
-  // moves from .32 (1.6–2.6:1 -- under the 3:1 non-text-contrast minimum a
-  // real interactive control needs) to a matching .68.
-  const AA_MUTED="rgba(240,230,211,.68)";
+  // Contrast audit (2026-08-25), updated 2026-08-26 (docs/ux-plan.md
+  // §2.3/§5.7): this used to be a locally-scoped fix -- `var(--muted)`
+  // measured 3.86-4.33:1 on this screen's card backgrounds, under the
+  // 4.5:1 body text minimum, so this component alone switched its
+  // secondary text to translucent cream instead. That fix has now been
+  // promoted into `--muted` itself (GS block, App.jsx ~line 43) so every
+  // call site in the app gets it, not just this one -- kept as a local
+  // alias so the ~20 usages below don't all need editing. `--muted2` is
+  // still unfixed app-wide (tracked separately, not this pass).
+  const AA_MUTED="var(--muted)";
   // 44x44 minimum tap target (was 24x24) -- this is the row a slightly
   // drunk man needs to hit one-handed in a bar. Bumping the box without
   // shrinking the row required moving these off the name line -- see the
