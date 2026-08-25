@@ -1954,9 +1954,17 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
   const [presenting,setPresenting]=useState(false);
   const [soloOpen,setSoloOpen]=useState(false);
   const [quizDash,setQuizDash]=useState(false);
+  const [quizDismissed,setQuizDismissed]=useState(false);
   const [presenterDetected,setPresenterDetected]=useState(false);
   const [viewerDismissed,setViewerDismissed]=useState(false);
   const [schedLive,setSchedLive]=useState(null);
+  // The live quiz, hoisted so both the rejoin banner and the overlay below
+  // read the same one. Hiding is per-session: when this quiz stops being live
+  // (or a different quiz starts), the dismissal clears so the next session
+  // isn't silently suppressed for whoever hid the last one.
+  const liveQuiz=(evt.quizzes||[]).find(q=>q._liveState)||null;
+  const liveQuizId=liveQuiz?liveQuiz.id:null;
+  useEffect(()=>{setQuizDismissed(false)},[liveQuizId]);
   const countdown=useCountdown(evt.date,evt.start_time);
   const isPast=evt.archived;
   const isAdmin=can.editEvent(currentUser);
@@ -2153,6 +2161,20 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
         </div>
       )}
 
+      {/* Live quiz banner — the way back in after hiding the participant view */}
+      {liveQuiz&&quizDismissed&&!quizDash&&(
+        <div className="ann-banner" style={{position:"fixed",top:0,left:0,right:0,zIndex:999,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:"linear-gradient(90deg,rgba(15,10,2,.97),rgba(30,18,4,.97))",borderBottom:"1px solid rgba(232,148,58,.45)",padding:".7rem 1.4rem",backdropFilter:"blur(12px)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{width:8,height:8,borderRadius:"50%",background:"var(--red)",flexShrink:0,animation:"pulse 1s ease-in-out infinite",display:"inline-block"}}/>
+            <div>
+              <div style={{fontWeight:700,color:"var(--amber2)",fontSize:".88rem"}}>🧠 Quiz is live</div>
+              <div style={{fontSize:".73rem",color:"var(--muted)"}}>{liveQuiz.title||"A quiz"} is running right now</div>
+            </div>
+          </div>
+          <Btn onClick={()=>setQuizDismissed(false)} variant="primary" size="sm">▶ Rejoin</Btn>
+        </div>
+      )}
+
       {editing&&<EditEventModal evt={evt} users={users} onSave={u=>{onUpdate(u);setEditing(false)}} onClose={()=>setEditing(false)}/>}
       {presenting&&<PresentationMode evt={evt} onUpdate={onUpdate} isPresenter={true} onClose={()=>setPresenting(false)}/>}
       {!presenting&&presenterDetected&&!viewerDismissed&&<PresentationMode evt={evt} onUpdate={onUpdate} isPresenter={false} currentLive={schedLive} onHide={()=>setViewerDismissed(true)} onPresenterLeft={resetPresenter} onClose={()=>{}}/>}
@@ -2166,7 +2188,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
       </Suspense>}
       {quizDash&&<Suspense fallback={null}><QuizDashboard evt={evt} onUpdate={onUpdate} users={users} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} onClose={()=>setQuizDash(false)}/></Suspense>}
       {/* Live quiz participant view — shown to everyone when a quiz is being presented */}
-      {(()=>{const liveQ=(evt.quizzes||[]).find(q=>q._liveState);return liveQ&&!quizDash&&<Suspense fallback={null}><QuizParticipantView evt={evt} liveQ={liveQ} currentUser={currentUser} onUpdate={onUpdate} users={users} can={can}/></Suspense>;})()}
+      {liveQuiz&&!quizDash&&!quizDismissed&&<Suspense fallback={null}><QuizParticipantView evt={evt} liveQ={liveQuiz} currentUser={currentUser} onUpdate={onUpdate} users={users} can={can} onHide={()=>setQuizDismissed(true)}/></Suspense>}
     </div>
   );
 };

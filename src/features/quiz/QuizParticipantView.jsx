@@ -14,7 +14,7 @@ import { getYouTubeId } from './urls.js';
 import { getDisplayName } from './users.js';
 
 const ALPHA_P=["A","B","C","D","E","F"];
-const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[],can})=>{
+const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[],can,onHide})=>{
   const ls=liveQ._liveState||{};
   const quiz=normalizeQuiz(liveQ);
   const currentRound=quiz.rounds[ls.roundIdx]||quiz.rounds[0];
@@ -57,6 +57,16 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[],can})=>{
     return()=>clearInterval(poll);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[evt.id]);
+
+  // Escape leaves the overlay without ending the session for anyone else.
+  // Mirrors PresentationMode's viewer behaviour (App.jsx `viewerDismissed`):
+  // EventPage unmounts us and shows a rejoin banner instead.
+  useEffect(()=>{
+    if(!onHide)return;
+    const onKey=e=>{if(e.key==="Escape")onHide();};
+    window.addEventListener("keydown",onKey);
+    return()=>window.removeEventListener("keydown",onKey);
+  },[onHide]);
 
   useEffect(()=>{
     clearInterval(localTimerRef.current);
@@ -163,6 +173,12 @@ const QuizParticipantView=({evt,liveQ,currentUser,onUpdate,users=[],can})=>{
               {ls.phase==="round-summary"&&`Round ${(ls.roundIdx||0)+1} Summary`}
               {ls.phase==="final"&&"Final Results"}
             </div>
+            {onHide&&(
+              <button onClick={onHide} title="Hide the quiz — you can rejoin any time"
+                style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.18)",borderRadius:7,color:"var(--cream)",padding:"4px 10px",minHeight:32,cursor:"pointer",fontSize:".65rem",fontFamily:"var(--font-b)",fontWeight:700,letterSpacing:".04em",whiteSpace:"nowrap"}}>
+                ✕ Hide
+              </button>
+            )}
             {can.hostQuiz(currentUser)&&(
               <button onClick={async()=>{
                 const {data:fresh}=await supabase.from("events").select("*").eq("id",evtRef.current.id).single();
