@@ -7,9 +7,10 @@
 import { useState, useEffect } from 'react';
 import { normalizeQuiz } from './model.js';
 import { getDisplayName } from './users.js';
-import { Btn } from './ui/Kit.jsx';
+import { Btn, ErrorState } from './ui/Kit.jsx';
 import { QuizBuilder } from './QuizBuilder.jsx';
 import { QuizPresenter } from './QuizPresenter.jsx';
+import { computeMemberScores, finishQuiz } from './finishQuiz.js';
 
 const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=null,onRetryTeamSets})=>{
   const quizzes=evt.quizzes||[];
@@ -18,6 +19,18 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=nu
   const [panel,setPanel]=useState("welcome");   // "welcome" | "new" | "edit"
   const [editTarget,setEditTarget]=useState(null);
   const [presenterQuiz,setPresenterQuiz]=useState(null);
+  // WP-Q6 (docs/quiz-unification-spec.md §7.2): a failed publish after a
+  // quiz finished -- distinct from a rendering error, holds what's needed
+  // to retry the publish half without re-running the whole finish (which
+  // would be safe too, `finishQuiz`/`publishResults` are idempotent on
+  // every id they write, but retrying just the publish is the smaller ask).
+  const [finishError,setFinishError]=useState(null);
+  const retryFinishPublish=()=>{
+    if(!finishError)return;
+    finishQuiz({quiz:finishError.quiz,event:evt,onUpdateEvent:onUpdate,teamSets}).then(
+      result=>setFinishError(result.ok?null:{quiz:finishError.quiz})
+    );
+  };
 
   const openNew=()=>{setEditTarget(null);setPanel("new");};
   const openEdit=quiz=>{setEditTarget(normalizeQuiz(quiz));setPanel("edit");};
@@ -34,20 +47,31 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=nu
     <QuizPresenter quiz={presenterQuiz} evt={evt} users={users} onUpdate={onUpdate}
       onClose={()=>setPresenterQuiz(null)}
       onFinish={finalScores=>{
-        // For team quizzes: distribute team scores to individual members for stats
+        // WP-Q6 (docs/quiz-unification-spec.md §7.2): finishing a quiz used
+        // to write only into `evt.quizzes[]` (the legacy column) -- a result
+        // `fetchQuizResults()`/the Hall of Fame/the awards system could
+        // never see. `computeMemberScores` (team quiz: distribute each
+        // team's score across its members; individual: memberScores===
+        // scores) is the same logic that used to live inline here, moved to
+        // `finishQuiz.js` so there is exactly one copy of it.
         const pq=normalizeQuiz(presenterQuiz);
-        const hasTeams=(pq.teams||[]).length>0;
-        let memberScores={};
-        if(hasTeams){
-          pq.teams.forEach(t=>{
-            const pts=finalScores[t.name]||0;
-            (t.members||[]).forEach(m=>{memberScores[m]=(memberScores[m]||0)+pts;});
-          });
-        } else {
-          memberScores=finalScores;
-        }
-        saveQuizzes(quizzes.map(q=>q.id===presenterQuiz.id?{...q,status:"finished",scores:finalScores,memberScores,_liveState:null}:q));
-        setPresenterQuiz(null);
+        const memberScores=computeMemberScores(pq,finalScores);
+        const finishedQuiz={...pq,eventId:pq.eventId??evt.id,status:"finished",scores:finalScores,memberScores};
+        (async()=>{
+          // The legacy write is awaited (not fire-and-forget, unlike this
+          // dashboard's other `saveQuizzes` callers) and happens BEFORE
+          // `finishQuiz`'s own award publish below. Both ultimately
+          // full-row-upsert this same `events` row (`onUpdate`) -- `finishQuiz`
+          // re-reads it fresh immediately before writing winners
+          // (`awards/publishResults.js`'s `pushWinnersToEvent`), and that
+          // fresh read must see this quiz's finished status/scores, or a
+          // race between the two writes could silently drop whichever
+          // lands second.
+          await saveQuizzes(quizzes.map(q=>q.id===presenterQuiz.id?{...q,status:"finished",scores:finalScores,memberScores,_liveState:null}:q));
+          setPresenterQuiz(null);
+          const result=await finishQuiz({quiz:finishedQuiz,event:evt,onUpdateEvent:onUpdate,teamSets});
+          setFinishError(result.ok?null:{quiz:finishedQuiz});
+        })();
       }}/>
   );
 
@@ -81,6 +105,12 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=nu
           ✕ Close
         </button>
       </div>
+
+      {finishError&&(
+        <div style={{flexShrink:0,padding:".9rem 1.4rem 0"}}>
+          <ErrorState message="Quiz afgerond, maar niet alles is gepubliceerd -- sommige awards staan mogelijk nog niet online. Probeer het opnieuw." onRetry={retryFinishPublish}/>
+        </div>
+      )}
 
       {/* Body */}
       <div style={{flex:1,display:"grid",gridTemplateColumns:"270px 1fr",overflow:"hidden"}}>

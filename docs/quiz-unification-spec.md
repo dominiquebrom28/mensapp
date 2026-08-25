@@ -311,14 +311,17 @@ Not to be confused with the quiz's **existing** per-round `secret` flag (App.jsx
 
 `WinnersTab` derives an "AUTO" card per finished quiz (App.jsx:5014–5022). Once `finishQuiz` writes real `qz-…` rows, that double-renders.
 
-**Don't delete it, don't migrate old quizzes.** Filter it:
+**Don't delete it, don't migrate old quizzes.** Filter it with `isQuizAlreadyPublished(quiz, winners)` from `features/quiz/results.js` — a prefix match on `qz-<quiz.id>-`, the same prefix `pushWinnersToEvent` already dedupes on.
+
+*Corrected 2026-08-26.* This section originally proposed:
 
 ```js
-const storedQuizIds = new Set((evt.winners||[])
-  .map(w => /^qz-(.+?)-\d+$/.exec(w.id||"")?.[1]).filter(Boolean));
+/^qz-(.+?)-\d+$/          // wrong
 ```
 
-Three lines. Legacy quizzes keep their auto card; new ones get a real, editable award row.
+That assumes the id's trailing segment is digits. It isn't: `winnerRowsFromPlacements` puts the `slot` there, which is a team's `sourceTeamId` (`tm_3`) or a slugified player name (`solo-sven`). The regex silently fails to match the common real cases, which defeats the dedup it exists for — the double-rendered card this section is about would have kept double-rendering. Caught by a test written against both versions.
+
+Legacy quizzes keep their auto card; new ones get a real, editable award row.
 
 ---
 

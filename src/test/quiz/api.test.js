@@ -18,7 +18,7 @@ vi.mock('../../supabase.js', async () => {
   };
 });
 
-import { deleteQuiz, fetchLiveQuizzes, fetchQuiz, fetchQuizzes, fetchQuizzesForEvent, isMissingTableError, saveQuiz } from '../../features/quiz/api.js';
+import { deleteQuiz, fetchLiveQuizzes, fetchQuiz, fetchQuizzes, fetchQuizzesForEvent, isMissingTableError, quizRowExists, saveQuiz } from '../../features/quiz/api.js';
 
 beforeEach(() => {
   mockTableData = {};
@@ -155,6 +155,32 @@ describe('quiz/api row mapping', () => {
     mockTableData.quizzes = { data: null, error: { message: 'nope' } };
     const res = await deleteQuiz('qz1');
     expect(res.ok).toBe(false);
+  });
+
+  // WP-Q6 (docs/quiz-unification-spec.md §7.2's report): `finishQuiz.js`
+  // needs to know, before writing, whether a `quizzes` row exists at all --
+  // the builder still only writes `events.quizzes[]` (WP-Q5/Q7), so a quiz
+  // built since the one-time §10.2 migration has none, and `patchQuiz`'s
+  // narrow `.update()` against zero matching rows is a silent no-op.
+  describe('quizRowExists', () => {
+    it('is true when the row is found', async () => {
+      mockTableData.quizzes = { data: [{ id: 'qz1' }], error: null };
+      const res = await quizRowExists('qz1');
+      expect(res).toEqual({ ok: true, error: null, exists: true });
+    });
+
+    it('is false when nothing comes back -- not an error, just not migrated yet', async () => {
+      mockTableData.quizzes = { data: [], error: null };
+      const res = await quizRowExists('qz-legacy');
+      expect(res).toEqual({ ok: true, error: null, exists: false });
+    });
+
+    it('degrades to {ok:false,exists:false} on a genuine Supabase error, distinguishable from "not found"', async () => {
+      mockTableData.quizzes = { data: null, error: { message: 'boom' } };
+      const res = await quizRowExists('qz1');
+      expect(res.ok).toBe(false);
+      expect(res.exists).toBe(false);
+    });
   });
 
   describe('isMissingTableError', () => {

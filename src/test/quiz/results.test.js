@@ -23,7 +23,7 @@ vi.mock('../../supabase.js', async () => {
   };
 });
 
-import { fetchQuizResults, isMissingTableError } from '../../features/quiz/results.js';
+import { fetchQuizResults, isMissingTableError, isQuizAlreadyPublished } from '../../features/quiz/results.js';
 
 beforeEach(() => {
   mockTableData = {};
@@ -89,5 +89,53 @@ describe('fetchQuizResults', () => {
     const res = await fetchQuizResults();
     expect(res.quizResults).toHaveLength(1);
     expect(res.quizResults[0].id).toBe('qz1');
+  });
+
+  // 2026-08-26 (WP-Q6, §7.3): a still-secret quiz must not surface through
+  // this eager, every-boot fetch either -- it feeds `computeMemberStats`/
+  // `HallOfFame` once WP-Q8/Q9 wire it up, and a member's own stats bumping
+  // before the reveal is the same shape of leak §7.3 closes for
+  // `events.winners`/`team_sets.awards`.
+  it('excludes a finished quiz that is still secret', async () => {
+    mockTableData.quizzes = {
+      data: [
+        { id: 'qz-secret', status: 'finished', settings: { secret: true } },
+        { id: 'qz-public', status: 'finished', settings: { secret: false } },
+        { id: 'qz-no-settings', status: 'finished' },
+      ],
+      error: null,
+    };
+    const res = await fetchQuizResults();
+    expect(res.quizResults.map((q) => q.id)).toEqual(['qz-public', 'qz-no-settings']);
+  });
+});
+
+// The §7.4 "derived quiz-winner card" dedup check -- see this function's own
+// comment in results.js for why it doesn't reuse the spec's proposed regex.
+describe('isQuizAlreadyPublished', () => {
+  it('is true once a real Winner row for this quiz exists', () => {
+    const winners = [{ id: 'qz-qz1-tm_3', category: 'x', winner: 'y', detail: '', icon: '🥇' }];
+    expect(isQuizAlreadyPublished({ id: 'qz1' }, winners)).toBe(true);
+  });
+
+  it('is false for a quiz with no matching winner row', () => {
+    const winners = [{ id: 'qz-qz-other-tm_3' }];
+    expect(isQuizAlreadyPublished({ id: 'qz1' }, winners)).toBe(false);
+  });
+
+  it('is false when the id ends in a non-numeric slot (sourceTeamId/slugified name) -- the case the spec\'s own regex would silently miss', () => {
+    const winners = [{ id: 'qz-qz1-solo-sven' }];
+    expect(isQuizAlreadyPublished({ id: 'qz1' }, winners)).toBe(true);
+  });
+
+  it('never confuses a different quiz\'s id sharing a numeric prefix', () => {
+    const winners = [{ id: 'qz-qz10-tm_3' }];
+    expect(isQuizAlreadyPublished({ id: 'qz1' }, winners)).toBe(false);
+  });
+
+  it('is defensive against malformed input -- never throws', () => {
+    expect(isQuizAlreadyPublished(null, null)).toBe(false);
+    expect(isQuizAlreadyPublished({ id: 'qz1' }, 'garbage')).toBe(false);
+    expect(isQuizAlreadyPublished({}, [{ id: 'qz-qz1-x' }])).toBe(false);
   });
 });

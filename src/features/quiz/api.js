@@ -214,6 +214,24 @@ export async function patchQuiz(id, patch) {
   return { ok: true, error: null };
 }
 
+// The no-row check `finishQuiz.js`'s `persistFinishedQuiz` needs (docs/
+// quiz-unification-spec.md §7.2's report): a quiz built through the
+// not-yet-rewired builder (WP-Q5/Q7) has no row in this table at all, and
+// `patchQuiz`'s `.update().eq('id',…)` against zero matching rows is a
+// silent no-op -- so finishing such a quiz needs to know, before writing,
+// whether to patch or to seed with a full `saveQuiz` upsert instead. `select
+// id` (not `select *`), no `.single()` -- a missing row is a normal, common
+// outcome here, not an error (same "zero rows isn't an error" reasoning as
+// `live.js`'s `fetchQuizLive`/`answers.js`'s `fetchOwnAnswer`).
+export async function quizRowExists(id) {
+  const { data, error } = await supabase.from('quizzes').select('id').eq('id', id).limit(1);
+  if (error) {
+    console.error('quizRowExists failed:', error);
+    return { ok: false, error, exists: false };
+  }
+  return { ok: true, error: null, exists: Array.isArray(data) && data.length > 0 };
+}
+
 export async function deleteQuiz(id) {
   const { error } = await supabase.from('quizzes').delete().eq('id', id);
   if (error) {
