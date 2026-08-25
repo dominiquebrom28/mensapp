@@ -8,6 +8,7 @@ import {
   namesFromUsers,
   mergeNames,
   generateTeams,
+  resizeTeams,
   splitPreview,
 } from '../../features/teamlib/model.js'
 
@@ -118,10 +119,10 @@ describe('namesFromUsers / mergeNames (select-all, #6)', () => {
   })
 })
 
-describe('generateTeams (#7 — pin + fill)', () => {
+describe('generateTeams (2026-08-25 rebuild — brackets exist first, generate only fills empty seats)', () => {
   const noShuffle = arr => arr // deterministic: "shuffle" is the identity
 
-  it('with no pins, distributes everyone team-by-team up to teamSize (matches legacy chunking)', () => {
+  it('with no existing members, distributes everyone team-by-team up to teamSize (matches legacy chunking)', () => {
     const teams = generateTeams({
       participants: ['a', 'b', 'c', 'd', 'e'],
       teamSize: 2,
@@ -133,75 +134,69 @@ describe('generateTeams (#7 — pin + fill)', () => {
     expect(teams[2].members).toEqual(['e'])
   })
 
-  it('pinned members are seated on their pinned team first', () => {
+  it('a manually-placed member stays on their bracket and the rest fill in around them', () => {
     const existingTeams = [
-      { id: 'tm_A', name: 'Team A', avatar: '🦁', captain: null },
-      { id: 'tm_B', name: 'Team B', avatar: '🐻', captain: null },
+      { id: 'tm_A', name: 'Team A', avatar: '🦁', captain: null, members: ['d'] },
+      { id: 'tm_B', name: 'Team B', avatar: '🐻', captain: null, members: [] },
     ]
     const teams = generateTeams({
       participants: ['a', 'b', 'c', 'd'],
       teamSize: 2,
       existingTeams,
-      pins: { d: 'tm_A' },
       shuffle: noShuffle,
     })
     const teamA = teams.find(t => t.id === 'tm_A')
     expect(teamA.members).toContain('d')
+    expect(teams.flatMap(t => t.members).sort()).toEqual(['a', 'b', 'c', 'd'])
   })
 
-  it('pinned members stay put across a re-roll even when the shuffle order changes', () => {
+  it('placed members stay put across a re-roll even when the shuffle order changes (no pool left to reshuffle)', () => {
     const existingTeams = [
-      { id: 'tm_A', name: 'Team A', avatar: '🦁', captain: null },
-      { id: 'tm_B', name: 'Team B', avatar: '🐻', captain: null },
+      { id: 'tm_A', name: 'Team A', avatar: '🦁', captain: null, members: [] },
+      { id: 'tm_B', name: 'Team B', avatar: '🐻', captain: null, members: ['d'] },
     ]
-    const pins = { d: 'tm_B' }
     const participants = ['a', 'b', 'c', 'd']
 
-    const roll1 = generateTeams({ participants, teamSize: 2, existingTeams, pins, shuffle: arr => [...arr].reverse() })
-    const roll2 = generateTeams({ participants, teamSize: 2, existingTeams: roll1, pins, shuffle: arr => arr })
+    const roll1 = generateTeams({ participants, teamSize: 2, existingTeams, shuffle: arr => [...arr].reverse() })
+    const roll2 = generateTeams({ participants, teamSize: 2, existingTeams: roll1, shuffle: arr => arr })
 
-    const teamB1 = roll1.find(t => t.id === 'tm_B')
-    const teamB2 = roll2.find(t => t.id === 'tm_B')
-    expect(teamB1.members).toContain('d')
-    expect(teamB2.members).toContain('d')
+    expect(roll1.find(t => t.id === 'tm_B').members).toContain('d')
+    // Second roll is a no-op: everyone was already seated after roll1.
+    expect(roll2).toEqual(roll1)
   })
 
-  it('re-roll only reshuffles the unpinned pool -- pinned member count on their team never drops', () => {
+  it('re-rolling repeatedly never moves anyone already seated -- generate only ever fills empty seats', () => {
     const existingTeams = [
-      { id: 'tm_A', name: 'Team A', avatar: '🦁', captain: null },
-      { id: 'tm_B', name: 'Team B', avatar: '🐻', captain: null },
+      { id: 'tm_A', name: 'Team A', avatar: '🦁', captain: null, members: ['a', 'b'] },
+      { id: 'tm_B', name: 'Team B', avatar: '🐻', captain: null, members: [] },
     ]
-    const pins = { a: 'tm_A', b: 'tm_A' }
     const participants = ['a', 'b', 'c', 'd', 'e', 'f']
     for (let i = 0; i < 5; i++) {
-      const teams = generateTeams({ participants, teamSize: 3, existingTeams, pins })
+      const teams = generateTeams({ participants, teamSize: 3, existingTeams })
       const teamA = teams.find(t => t.id === 'tm_A')
       expect(teamA.members).toEqual(expect.arrayContaining(['a', 'b']))
     }
   })
 
-  it('a captain who gets reshuffled off their team loses captaincy', () => {
+  it('a captain keeps captaincy across a re-roll since generate never moves an already-seated member', () => {
     const existingTeams = [
-      { id: 'tm_A', name: 'Team A', avatar: '🦁', captain: 'a' },
-      { id: 'tm_B', name: 'Team B', avatar: '🐻', captain: null },
+      { id: 'tm_A', name: 'Team A', avatar: '🦁', captain: 'a', members: ['a'] },
+      { id: 'tm_B', name: 'Team B', avatar: '🐻', captain: null, members: [] },
     ]
-    // Force every unpinned participant onto team B by reversing after 'a'
-    // is pinned onto team B, pulling the captain slot away from team A.
     const teams = generateTeams({
       participants: ['a', 'b'],
       teamSize: 2,
       existingTeams,
-      pins: { a: 'tm_B' },
       shuffle: noShuffle,
     })
     const teamA = teams.find(t => t.id === 'tm_A')
-    expect(teamA.members).not.toContain('a')
-    expect(teamA.captain).toBeNull()
+    expect(teamA.members).toContain('a')
+    expect(teamA.captain).toBe('a')
   })
 
   it('is defensive: never throws on empty/garbage input', () => {
     expect(() => generateTeams({})).not.toThrow()
-    expect(() => generateTeams({ participants: null, pins: null, existingTeams: null })).not.toThrow()
+    expect(() => generateTeams({ participants: null, existingTeams: null })).not.toThrow()
     expect(generateTeams({ participants: [], teamSize: 0 })).toEqual([])
   })
 })
@@ -241,16 +236,16 @@ describe('generateTeams from a team count (2026-08-24 -- "pick the amount of tea
     expect(teams.filter(t => t.members.length === 0)).toHaveLength(3)
   })
 
-  it('pins are honoured under a fixed team count, and re-rolling only reshuffles the unpinned pool', () => {
+  it('a manually-placed member under a fixed team count is honoured, and re-rolling only fills the remaining pool', () => {
     const existingTeams = [
-      { id: 'tm_A', name: 'Team A', avatar: '🦁', captain: null },
-      { id: 'tm_B', name: 'Team B', avatar: '🐻', captain: null },
-      { id: 'tm_C', name: 'Team C', avatar: '🦊', captain: null },
+      { id: 'tm_A', name: 'Team A', avatar: '🦁', captain: null, members: [] },
+      { id: 'tm_B', name: 'Team B', avatar: '🐻', captain: null, members: [] },
+      { id: 'tm_C', name: 'Team C', avatar: '🦊', captain: null, members: ['a'] },
     ]
-    const pins = { a: 'tm_C' }
     const participants = ['a', 'b', 'c', 'd', 'e', 'f']
-    for (let i = 0; i < 5; i++) {
-      const teams = generateTeams({ participants, teamCount: 3, existingTeams, pins })
+    let teams = generateTeams({ participants, teamCount: 3, existingTeams })
+    for (let i = 0; i < 4; i++) {
+      teams = generateTeams({ participants, teamCount: 3, existingTeams: teams })
       expect(teams).toHaveLength(3)
       expect(teams.find(t => t.id === 'tm_C').members).toContain('a')
       expect(teams.flatMap(t => t.members).sort()).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
@@ -273,6 +268,64 @@ describe('generateTeams from a team count (2026-08-24 -- "pick the amount of tea
     expect(() => generateTeams({ participants: ['a'], teamCount: 'lots' })).not.toThrow()
     expect(generateTeams({ participants: ['a'], teamCount: 'lots' })).toHaveLength(1)
     expect(generateTeams({ participants: ['a'], teamCount: 0 })).toHaveLength(1)
+  })
+
+  it('a newly added participant fills into the emptiest bracket on the next generate, without disturbing anyone already seated', () => {
+    const existingTeams = [
+      { id: 'tm_A', name: 'Team A', avatar: '🦁', captain: null, members: ['a', 'b'] },
+      { id: 'tm_B', name: 'Team B', avatar: '🐻', captain: null, members: ['c'] },
+    ]
+    const teams = generateTeams({ participants: ['a', 'b', 'c', 'd'], teamCount: 2, existingTeams, shuffle: noShuffle })
+    expect(teams.find(t => t.id === 'tm_A').members).toEqual(['a', 'b'])
+    expect(teams.find(t => t.id === 'tm_B').members).toEqual(['c', 'd'])
+  })
+})
+
+describe('resizeTeams (2026-08-25 -- "creating the amount of selected brackets" live)', () => {
+  const shells = (...members) => members.map((m, i) => ({ id: `tm_${i}`, name: `Team ${i + 1}`, avatar: '🎯', captain: null, members: m }))
+
+  it('growing appends fresh empty brackets, keeping the existing ones untouched', () => {
+    const teams = shells(['a'], [])
+    const next = resizeTeams(teams, 4, ['🦁', '🐻', '🦊', '🐺'])
+    expect(next).toHaveLength(4)
+    expect(next[0]).toBe(teams[0])
+    expect(next[1]).toBe(teams[1])
+    expect(next[2].members).toEqual([])
+    expect(next[3].members).toEqual([])
+  })
+
+  it('assigns growth brackets avatars not already in use', () => {
+    const teams = [{ id: 'tm_0', name: 'Team 1', avatar: '🦁', captain: null, members: [] }]
+    const next = resizeTeams(teams, 3, ['🦁', '🐻', '🦊'])
+    expect(next.map(t => t.avatar)).toEqual(['🦁', '🐻', '🦊'])
+  })
+
+  it('shrinking drops brackets off the end without touching the survivors', () => {
+    const teams = shells(['a'], ['b'], ['c'])
+    const next = resizeTeams(teams, 2)
+    expect(next).toEqual([teams[0], teams[1]])
+  })
+
+  it('shrinking a populated bracket does not delete its members from existence -- the caller derives "unassigned" from participants minus who\'s still seated, so they resurface in the pool', () => {
+    const teams = shells(['a', 'b'], ['c'])
+    const next = resizeTeams(teams, 1)
+    expect(next).toHaveLength(1)
+    const stillSeated = new Set(next.flatMap(t => t.members))
+    const allParticipants = ['a', 'b', 'c']
+    const backInPool = allParticipants.filter(p => !stillSeated.has(p))
+    expect(backInPool).toEqual(['c'])
+  })
+
+  it('is a no-op (same reference) when the count already matches', () => {
+    const teams = shells(['a'])
+    expect(resizeTeams(teams, 1)).toBe(teams)
+  })
+
+  it('is defensive: never throws on garbage input', () => {
+    expect(() => resizeTeams(null, 3)).not.toThrow()
+    expect(resizeTeams(null, 2)).toHaveLength(2)
+    expect(resizeTeams(undefined, 'lots')).toHaveLength(0)
+    expect(resizeTeams([{ id: 'a' }], -1)).toEqual([])
   })
 })
 

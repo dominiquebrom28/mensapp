@@ -47,26 +47,57 @@ describe('TeamCreatorPage wiring (#6 select-all)', () => {
   })
 })
 
-describe('TeamCreatorPage wiring (#7 pin + manual assign + random fill)', () => {
-  it('generate() seeds generateTeams with the current pins and existing team shells, from either a team count or a team size', () => {
-    expect(teamCreator).toMatch(/\{participants,teamCount,existingTeams:prev\|\|\[\],pins\}/)
-    expect(teamCreator).toMatch(/\{participants,teamSize,existingTeams:prev\|\|\[\],pins\}/)
+describe('TeamCreatorPage wiring (2026-08-25 rebuild — brackets first, then fill)', () => {
+  it('the pin concept is gone: no pin state, no pin toggle, no cross-team "assign" dropdown', () => {
+    expect(teamCreator).not.toMatch(/pins/i)
+    expect(teamCreator).not.toMatch(/togglePin/)
+    expect(teamCreator).not.toMatch(/assignMember/)
+    expect(teamCreator).not.toMatch(/📌/)
   })
 
-  it('has a per-member pin toggle and an assign-to-another-team control', () => {
-    expect(teamCreator).toMatch(/onClick=\{\(\)=>togglePin\(name,team\.id\)\}/)
-    expect(teamCreator).toMatch(/onChange=\{e=>assignMember\(name,e\.target\.value\)\}/)
+  it('brackets exist before Generate is ever pressed -- `teams` starts populated via resizeTeams, not null', () => {
+    expect(teamCreator).toMatch(/const \[teams,setTeams\]=useState\(\(\)=>resizeTeams\(\[\],4,TEAM_AVATARS\)\)/)
   })
 
-  it('removing a participant goes through the shared removeMember (clears captaincy) rather than a bespoke filter', () => {
+  it('the count/size stepper keeps the live bracket count in sync via resizeTeams, not just on Generate', () => {
+    expect(teamCreator).toMatch(/setTeams\(prev=>resizeTeams\(prev,effectiveTeamCount,TEAM_AVATARS\)\)/)
+    expect(teamCreator).toMatch(/},\[effectiveTeamCount\]\)/)
+  })
+
+  it('generate() seeds generateTeams with the current roster and existing team shells, from either a team count or a team size', () => {
+    expect(teamCreator).toMatch(/\{participants,teamCount,existingTeams:prev\}/)
+    expect(teamCreator).toMatch(/\{participants,teamSize,existingTeams:prev\}/)
+  })
+
+  it('generate() is a no-op while nobody is unassigned', () => {
+    expect(teamCreator).toMatch(/if\(unassignedNames\.length===0\)return;/)
+  })
+
+  it('each bracket gets an explicit "add member" control fed from the unassigned pool -- the obvious way to place someone', () => {
+    expect(teamCreator).toMatch(/onChange=\{e=>\{if\(!e\.target\.value\)return;addToTeam\(team\.id,e\.target\.value\);e\.target\.value="";\}\}/)
+    expect(teamCreator).toMatch(/const addToTeam=\(teamId,name\)=>\{/)
+  })
+
+  it('removing someone from a bracket returns them to the pool via the shared removeMember, without dropping them from the roster', () => {
+    expect(teamCreator).toMatch(/onClick=\{\(\)=>removeFromTeam\(team\.id,name\)\}/)
+    expect(teamCreator).toMatch(/const removeFromTeam=\(teamId,name\)=>\{/)
+    expect(teamCreator).toMatch(/setTeams\(prev=>prev\.map\(t=>t\.id===teamId\?removeMember\(t,name\):t\)\)/)
+  })
+
+  it('removing a participant entirely goes through the shared removeMember (clears captaincy) rather than a bespoke filter', () => {
     expect(teamCreator).toMatch(/nt=removeMember\(nt,n\)/)
+  })
+
+  it('unassigned is derived from the roster minus who is actually seated on a bracket, not tracked as separate state', () => {
+    expect(teamCreator).toMatch(/const seatedNames=new Set\(teams\.flatMap\(t=>t\.members\|\|\[\]\)\)/)
+    expect(teamCreator).toMatch(/const unassignedNames=participants\.filter\(p=>!seatedNames\.has\(p\)\)/)
   })
 })
 
 describe('TeamCreatorPage wiring (#8 captains)', () => {
   it('each member row has a captain toggle wired to the shared setCaptain', () => {
     expect(teamCreator).toMatch(/onClick=\{\(\)=>toggleCaptain\(team\.id,name\)\}/)
-    expect(teamCreator).toMatch(/setTeams\(prev=>prev\?prev\.map\(t=>t\.id===teamId\?setCaptain\(t,name\):t\):prev\)/)
+    expect(teamCreator).toMatch(/setTeams\(prev=>prev\.map\(t=>t\.id===teamId\?setCaptain\(t,name\):t\)\)/)
   })
 
   it('renders a 👑 badge for the team captain', () => {

@@ -4,7 +4,7 @@ import { isSafeImageUrl, isSafeVideoUrl } from "./features/trailer/safeUrl.js";
 import { hasSeenTrailer } from "./features/trailer/seen.js";
 import { hasDismissedTeaser, dismissTeaser } from "./features/teaser/dismissed.js";
 import { fetchTeamSets, saveTeamSet, deleteTeamSet, archiveTeamSet, unarchiveTeamSet, unlinkTeamSetFromEvent } from "./features/teamlib/api.js";
-import { blankTeamSet, setCaptain, removeMember, teamSetSummary, namesFromUsers, mergeNames, generateTeams, splitPreview } from "./features/teamlib/model.js";
+import { blankTeamSet, setCaptain, removeMember, teamSetSummary, namesFromUsers, mergeNames, generateTeams, resizeTeams, splitPreview } from "./features/teamlib/model.js";
 
 // The app's first code split (technical spec `docs/trailer-technical-spec.md`
 // §3): keeps the trailer's weight out of the main chunk, loaded only when an
@@ -142,7 +142,7 @@ const Inp = ({value,onChange,placeholder,style={},type="text",multiline=false,on
     ? <textarea value={value} onChange={onChange} placeholder={placeholder} rows={rows} style={{...base,resize:"vertical",...style}}/>
     : <input type={type} value={value} onChange={onChange} placeholder={placeholder} onKeyDown={onKeyDown} autoFocus={autoFocus} style={{...base,...style}}/>;
 };
-const Lbl = ({children}) => <div style={{fontSize:".75rem",color:"var(--muted)",letterSpacing:".06em",textTransform:"uppercase",marginBottom:5}}>{children}</div>;
+const Lbl = ({children,style={}}) => <div style={{fontSize:".75rem",color:"var(--muted)",letterSpacing:".06em",textTransform:"uppercase",marginBottom:5,...style}}>{children}</div>;
 // Accessible on/off toggle -- a real `<button role="switch">` (native
 // Enter/Space activation + a visible focus ring for free), unlike the
 // ad-hoc `<div onClick>` `Toggle` scoped inside PollsTab (not reachable from
@@ -6612,27 +6612,26 @@ const SaraJayOrJAI = () => {
 // ─────────────────────────────────────────────────────────────────────────────
 const TEAM_COLORS=["var(--amber)","var(--blue)","var(--green)","var(--purple)","var(--orange)","var(--red)","#56b4a0","#e08050","#9b7fe8","#5b9bd5"];
 const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsError=null,onRetryTeamSets,onTeamSetsChanged})=>{
-  // "Pick the amount of teams, put members in there manually, fill the rest
-  // randomly" (2026-08-24) -- team COUNT is now the primary control,
-  // `teamSize` stays around as an opt-in secondary mode behind the ⇄ toggle
-  // below so the one-handed-use page doesn't grow a second permanently
-  // visible stepper. `generateTeams` (teamlib/model.js) picks its fill
-  // strategy off which of `teamCount`/`teamSize` gets passed at call time.
+  // Team Creator rebuild (2026-08-25 -- "brackets first, then fill"): picking
+  // a team count creates that many empty brackets on screen immediately;
+  // people get dropped into whichever bracket by hand, and Genereer only
+  // ever fills whatever's still empty. This replaces the old flow (flat
+  // pool -> Genereer -> teams appear -> retrofit placement via a pin icon)
+  // and retires the pin concept along with it: once someone is a member of
+  // a bracket -- manually placed or auto-filled, doesn't matter which --
+  // that IS "pinned" now, with no separate toggle needed, because
+  // `generateTeams` (teamlib/model.js) never moves anyone already seated.
+  // `resizeTeams` (also teamlib/model.js) is what makes the count/size
+  // stepper create/remove brackets live.
   const [teamMode,setTeamMode]=useState("count");
   const [teamCount,setTeamCount]=useState(4);
   const [teamSize,setTeamSize]=useState(3);
   const [participants,setParticipants]=useState([]);
   const [input,setInput]=useState("");
-  const [teams,setTeams]=useState(null);
+  const [teams,setTeams]=useState(()=>resizeTeams([],4,TEAM_AVATARS));
   const [generating,setGenerating]=useState(false);
   const [showPicker,setShowPicker]=useState(false);
   const [avatarPicker,setAvatarPicker]=useState(null);
-  // #7 -- pin: { [participantName]: teamId }. Set either by the assign
-  // dropdown (moving someone) or the 📌 toggle (locking them where they
-  // already landed). `generate()` seats every pinned name on its pinned
-  // team first, then shuffles only the unpinned pool into the remaining
-  // slots -- see teamlib/model.js `generateTeams`.
-  const [pins,setPins]=useState({});
   const [attendeeEvtId,setAttendeeEvtId]=useState("");
   const [setName,setSetName]=useState("");
   const [setCategory,setSetCategory]=useState("");
@@ -6648,26 +6647,35 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
   const attendeeNames=evt=>(evt.attendees||[]).filter(a=>["going","went"].includes(a.status)).map(a=>a.name).filter(Boolean);
   const eventsWithAttendees=activeEvents.filter(e=>attendeeNames(e).length>0);
 
-  // Bulk-remove: drops each name from the roster, from `pins`, and (if
-  // teams already exist) from whichever team it's on -- via `removeMember`,
-  // which is also what clears captaincy when the removed name was captain.
+  // How many brackets should exist right now. "Count" mode (the primary,
+  // owner-requested control) drives it directly and independently of
+  // roster size -- setting it to 4 makes 4 brackets exist even with nobody
+  // added yet. "Size" mode derives it from the roster instead, same number
+  // its preview line always showed.
+  const effectiveTeamCount=teamMode==="count"
+    ?Math.max(1,teamCount)
+    :(participants.length>0?Math.ceil(participants.length/Math.max(1,teamSize)):0);
+
+  // Brackets track live with the count/size control -- growing appends
+  // fresh empty ones (via `resizeTeams`), shrinking drops from the end.
+  // Shrinking never deletes a person: they simply stop being anyone's
+  // member and resurface in the unassigned pool below (`unassignedNames`
+  // is derived from participants minus who's still seated, not tracked
+  // separately), which is what makes it safe.
+  useEffect(()=>{
+    setTeams(prev=>resizeTeams(prev,effectiveTeamCount,TEAM_AVATARS));
+  },[effectiveTeamCount]);
+
+  // Bulk-remove: drops each name from the roster and (if seated anywhere)
+  // from that bracket -- via `removeMember`, which is also what clears
+  // captaincy when the removed name was captain.
   const dropParticipants=names=>{
     const dropSet=new Set(names);
     if(dropSet.size===0)return;
     setParticipants(p=>p.filter(x=>!dropSet.has(x)));
-    setPins(prev=>{
-      let changed=false;const next={...prev};
-      names.forEach(n=>{if(n in next){delete next[n];changed=true;}});
-      return changed?next:prev;
-    });
-    setTeams(prev=>prev?prev.map(t=>{let nt=t;names.forEach(n=>{nt=removeMember(nt,n);});return nt;}):null);
+    setTeams(prev=>prev.map(t=>{let nt=t;names.forEach(n=>{nt=removeMember(nt,n);});return nt;}));
     setSaved(false);
   };
-  // Deliberately does NOT reset `teams` to null (unlike the pre-#7
-  // behaviour): once teams are generated, adding one more person shouldn't
-  // blow away everyone else's pinned/manual placement. The new name sits
-  // in the roster but "not yet on a team" until the next Genereer/Opnieuw
-  // loten click, which fills them from the unpinned pool.
   const add=name=>{const t=name.trim();if(!t||participants.includes(t))return;setParticipants(p=>[...p,t]);setSaved(false);};
   const addInput=()=>{input.split(",").map(s=>s.trim()).filter(Boolean).forEach(add);setInput("");};
   const remove=name=>dropParticipants([name]);
@@ -6681,41 +6689,50 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
     setSaved(false);
   };
 
+  // Genereer only ever fills whatever's still empty -- anyone already
+  // seated (manually placed, or left there by an earlier generate) is
+  // untouched, on every call. See teamlib/model.js `generateTeams` for why
+  // that's true by construction rather than by tracking a pinned/unpinned
+  // split.
   const generate=()=>{
-    if(participants.length<2)return;
+    if(unassignedNames.length===0)return;
     setGenerating(true);setSaved(false);
     setTimeout(()=>{
       setTeams(prev=>generateTeams(
         teamMode==="count"
-          ?{participants,teamCount,existingTeams:prev||[],pins}
-          :{participants,teamSize,existingTeams:prev||[],pins}
+          ?{participants,teamCount,existingTeams:prev}
+          :{participants,teamSize,existingTeams:prev}
       ));
       setGenerating(false);
-    },1800);
+    },700);
   };
-  const clearTeams=()=>{setTeams(null);setPins({});setSaved(false);setEditingSetId(null);};
+  // "Start over" -- empties every bracket back into the pool without
+  // deleting the brackets themselves or the roster. There was no "empty
+  // bracket" state to return to before this rebuild, so this replaces the
+  // old ♻️ Opnieuw beginnen's "null out `teams` entirely" behaviour.
+  const resetPlacements=()=>{
+    setTeams(prev=>prev.map(t=>({...t,members:[],captain:null})));
+    setEditingSetId(null);
+    setSaved(false);
+  };
   const renameTeam=(idx,name)=>setTeams(ts=>ts.map((t,i)=>i===idx?{...t,name}:t));
   const setAvatar=(idx,av)=>{setTeams(ts=>ts.map((t,i)=>i===idx?{...t,avatar:av}:t));setAvatarPicker(null);};
   // #8 -- captains. Reuses QuizBuilder's 👑-toggle visual language (opacity
-  // .3/1, gold when active) so the interaction feels identical wherever a
-  // lad meets it. `setCaptain` (teamlib/model.js) also already reads
-  // `team.captain` at quiz time -- this is the write side that was missing.
-  const toggleCaptain=(teamId,name)=>{setTeams(prev=>prev?prev.map(t=>t.id===teamId?setCaptain(t,name):t):prev);setSaved(false);};
-  const togglePin=(name,teamId)=>{setPins(prev=>{const next={...prev};if(next[name]===teamId)delete next[name];else next[name]=teamId;return next;});};
-  // #7 -- the "move to another team" dropdown; also pins the member to
-  // their new team so a later re-roll doesn't undo the manual move.
-  const assignMember=(name,toTeamId)=>{
-    setTeams(prev=>{
-      if(!prev)return prev;
-      return prev.map(t=>{
-        if(t.id===toTeamId){
-          if((t.members||[]).includes(name))return t;
-          return {...t,members:[...(t.members||[]),name]};
-        }
-        return removeMember(t,name);
-      });
-    });
-    setPins(prev=>({...prev,[name]:toTeamId}));
+  // active/inactive, gold when active) so the interaction feels identical
+  // wherever a lad meets it.
+  const toggleCaptain=(teamId,name)=>{setTeams(prev=>prev.map(t=>t.id===teamId?setCaptain(t,name):t));setSaved(false);};
+  // Adds someone from the unassigned pool onto a specific bracket -- the
+  // "obvious way to add someone" the ticket asks for, same interaction
+  // language as QuizBuilder's per-team "+ Add member…" select.
+  const addToTeam=(teamId,name)=>{
+    if(!name)return;
+    setTeams(prev=>prev.map(t=>t.id===teamId&&!(t.members||[]).includes(name)?{...t,members:[...(t.members||[]),name]}:t));
+    setSaved(false);
+  };
+  // Removes someone from *this* bracket only -- they stay on the roster and
+  // simply fall back into the unassigned pool, ready to be placed again.
+  const removeFromTeam=(teamId,name)=>{
+    setTeams(prev=>prev.map(t=>t.id===teamId?removeMember(t,name):t));
     setSaved(false);
   };
 
@@ -6725,7 +6742,7 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
   // now an optional multi-select rather than a required single one.
   const saveToLibrary=async()=>{
     const name=setName.trim();
-    if(!name||!teams||teams.length===0)return;
+    if(!name||totalPlaced===0)return;
     setSaving(true);setSaveError(false);
     const existing=editingSetId?teamSets.find(ts=>ts.id===editingSetId):null;
     const payload=existing
@@ -6747,9 +6764,13 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
     setSetName(ts.name||"");
     setSetCategory(ts.category||"");
     setLinkEvtIds(Array.isArray(ts.eventIds)?[...ts.eventIds]:[]);
+    // Force "count" mode to exactly the loaded bracket count, so the live
+    // resize effect above lands on the same number and leaves what was
+    // just loaded alone.
+    setTeamMode("count");
+    setTeamCount(Math.max(1,loadedTeams.length));
     setTeams(loadedTeams);
     setParticipants(loadedTeams.flatMap(t=>t.members));
-    setPins({});
     setSaved(false);setSaveError(false);
   };
   const cancelEdit=()=>{setEditingSetId(null);setSaved(false);};
@@ -6782,21 +6803,33 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
   };
 
   const pickedNames=new Set(participants);
-  const derivedTeamCount=participants.length>0?Math.ceil(participants.length/teamSize):0;
   // "The UI should say what will happen before he commits" -- honest
-  // preview of how `generateTeams`'s balanced fill would split the current
-  // roster across `teamCount` teams, covering both awkward-arithmetic cases
-  // named in the ticket (an uneven split, and more teams than people).
+  // preview of how an even split across `teamCount` teams would look, next
+  // to the stepper. Still informational-only: once people are placed by
+  // hand the actual brackets can end up a different shape than this.
   const countSizes=participants.length>0?splitPreview(participants.length,teamCount):[];
   const countEmptyTeams=countSizes.filter(s=>s===0).length;
   const allAppSelected=allAppNames.length>0&&allAppNames.every(n=>pickedNames.has(n));
-  const unassignedNames=teams?participants.filter(p=>!teams.some(t=>(t.members||[]).includes(p))):[];
+  const seatedNames=new Set(teams.flatMap(t=>t.members||[]));
+  const unassignedNames=participants.filter(p=>!seatedNames.has(p));
+  const totalPlaced=teams.reduce((sum,t)=>sum+(t.members||[]).length,0);
   const visibleSets=teamSets.filter(ts=>libFilter==="archived"?ts.status==="archived":ts.status!=="archived");
+  // Contrast audit (2026-08-25): `var(--muted)` measures 3.86–4.33:1 on
+  // this screen's card backgrounds (bg2/bg3/bg4) -- under the 4.5:1 body
+  // text minimum; `var(--muted2)` is worse still (2.5–2.9:1). Rather than
+  // retuning those tokens app-wide (204/33 call sites across the whole
+  // app, well outside this screen), secondary text here uses cream at a
+  // tuned opacity instead: it clears 4.5:1 on every background this page
+  // uses, with enough headroom to still clear it inside the archived
+  // library row's own `opacity:.8` dimming. Inactive icon-toggle opacity
+  // moves from .32 (1.6–2.6:1 -- under the 3:1 non-text-contrast minimum a
+  // real interactive control needs) to a matching .68.
+  const AA_MUTED="rgba(240,230,211,.68)";
   // 44x44 minimum tap target (was 24x24) -- this is the row a slightly
   // drunk man needs to hit one-handed in a bar. Bumping the box without
   // shrinking the row required moving these off the name line -- see the
   // two-line member row below.
-  const iconBtn=(active,color)=>({background:"none",border:"none",cursor:"pointer",fontSize:".95rem",padding:4,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center",opacity:active?1:.32,color:color||"var(--cream)",lineHeight:1,transition:"opacity .15s",borderRadius:8});
+  const iconBtn=(active,color)=>({background:"none",border:"none",cursor:"pointer",fontSize:".95rem",padding:4,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center",opacity:active?1:.68,color:color||"var(--cream)",lineHeight:1,transition:"opacity .15s",borderRadius:8});
 
   return(
     <div className="fu">
@@ -6811,7 +6844,7 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
               a second permanent stepper, so the one-handed-use layout
               doesn't regress. */}
           <button type="button" onClick={()=>setTeamMode(m=>m==="count"?"size":"count")}
-            style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 12px",fontSize:".74rem",color:"var(--muted)",cursor:"pointer",fontFamily:"var(--font-b)",minHeight:32}}>
+            style={{background:"none",border:"1px solid var(--border)",borderRadius:20,padding:"6px 12px",fontSize:".74rem",color:AA_MUTED,cursor:"pointer",fontFamily:"var(--font-b)",minHeight:32}}>
             {teamMode==="count"?"⇄ liever personen per team instellen":"⇄ liever aantal teams instellen"}
           </button>
         </div>
@@ -6820,9 +6853,9 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
             <button onClick={()=>setTeamCount(t=>Math.max(1,t-1))} style={{width:38,height:38,borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border)",color:"var(--cream)",fontSize:"1.3rem",cursor:"pointer",fontFamily:"var(--font-b)",lineHeight:1}}>−</button>
             <span style={{fontFamily:"var(--font-h)",fontSize:"2.2rem",color:"var(--amber)",minWidth:44,textAlign:"center",lineHeight:1}}>{teamCount}</span>
             <button onClick={()=>setTeamCount(t=>Math.min(20,t+1))} style={{width:38,height:38,borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border)",color:"var(--cream)",fontSize:"1.3rem",cursor:"pointer",fontFamily:"var(--font-b)",lineHeight:1}}>+</button>
-            {participants.length>0&&<div style={{color:"var(--muted)",fontSize:".83rem",marginLeft:6}}>
+            {participants.length>0&&<div style={{color:AA_MUTED,fontSize:".83rem",marginLeft:6}}>
               → {participants.length} {participants.length===1?"persoon":"personen"}: <strong style={{color:"var(--cream)"}}>{countSizes.join(", ")}</strong>
-              {countEmptyTeams>0&&<span style={{marginLeft:4,opacity:.7}}>({countEmptyTeams} team{countEmptyTeams===1?"":"s"} {countEmptyTeams===1?"blijft":"blijven"} leeg)</span>}
+              {countEmptyTeams>0&&<span style={{marginLeft:4}}>({countEmptyTeams} team{countEmptyTeams===1?"":"s"} {countEmptyTeams===1?"blijft":"blijven"} leeg)</span>}
             </div>}
           </div>
         ):(
@@ -6830,9 +6863,9 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
             <button onClick={()=>setTeamSize(t=>Math.max(1,t-1))} style={{width:38,height:38,borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border)",color:"var(--cream)",fontSize:"1.3rem",cursor:"pointer",fontFamily:"var(--font-b)",lineHeight:1}}>−</button>
             <span style={{fontFamily:"var(--font-h)",fontSize:"2.2rem",color:"var(--amber)",minWidth:44,textAlign:"center",lineHeight:1}}>{teamSize}</span>
             <button onClick={()=>setTeamSize(t=>Math.min(20,t+1))} style={{width:38,height:38,borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border)",color:"var(--cream)",fontSize:"1.3rem",cursor:"pointer",fontFamily:"var(--font-b)",lineHeight:1}}>+</button>
-            {participants.length>0&&<div style={{color:"var(--muted)",fontSize:".83rem",marginLeft:6}}>
-              → <strong style={{color:"var(--cream)"}}>{derivedTeamCount}</strong> {derivedTeamCount===1?"team":"teams"}
-              {participants.length%teamSize!==0&&<span style={{marginLeft:4,opacity:.7}}>(1 team met {participants.length%teamSize})</span>}
+            {participants.length>0&&<div style={{color:AA_MUTED,fontSize:".83rem",marginLeft:6}}>
+              → <strong style={{color:"var(--cream)"}}>{effectiveTeamCount}</strong> {effectiveTeamCount===1?"team":"teams"}
+              {participants.length%teamSize!==0&&<span style={{marginLeft:4}}>(1 team met {participants.length%teamSize})</span>}
             </div>}
           </div>
         )}
@@ -6840,7 +6873,7 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
 
       <Card style={{marginBottom:"1.2rem"}}>
         <H size="1rem" style={{marginBottom:".8rem"}}>
-          Deelnemers{participants.length>0&&<span style={{color:"var(--muted)",fontFamily:"var(--font-b)",fontSize:".78rem",fontWeight:400,marginLeft:6}}>({participants.length})</span>}
+          Deelnemers{participants.length>0&&<span style={{color:AA_MUTED,fontFamily:"var(--font-b)",fontSize:".78rem",fontWeight:400,marginLeft:6}}>({participants.length})</span>}
         </H>
         <div style={{display:"flex",gap:8,marginBottom:"1rem",flexWrap:"wrap"}}>
           <div style={{flex:1,minWidth:180,display:"flex",gap:8}}>
@@ -6880,7 +6913,7 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
         {eventsWithAttendees.length>0&&(
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:"1rem"}}>
             <select value={attendeeEvtId} onChange={e=>setAttendeeEvtId(e.target.value)}
-              style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"8px 10px",color:attendeeEvtId?"var(--cream)":"var(--muted)",fontFamily:"var(--font-b)",fontSize:".82rem",outline:"none",flex:1,minWidth:200}}>
+              style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"8px 10px",color:attendeeEvtId?"var(--cream)":AA_MUTED,fontFamily:"var(--font-b)",fontSize:".82rem",outline:"none",flex:1,minWidth:200}}>
               <option value="">— Iedereen van event… —</option>
               {eventsWithAttendees.map(e=>(
                 <option key={e.id} value={e.id}>{e.name} ({attendeeNames(e).length})</option>
@@ -6895,57 +6928,59 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
             {participants.map(name=>(
               <span key={name} style={{display:"flex",alignItems:"center",gap:5,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:20,padding:"4px 10px 4px 13px",fontSize:".83rem",color:"var(--cream)"}}>
                 {name}
-                <button onClick={()=>remove(name)} aria-label={`Verwijder ${name}`} style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:".95rem",lineHeight:1,padding:"0 0 0 4px",display:"flex",alignItems:"center"}}>×</button>
+                <button onClick={()=>remove(name)} aria-label={`Verwijder ${name}`} style={{background:"none",border:"none",color:AA_MUTED,cursor:"pointer",fontSize:".95rem",lineHeight:1,padding:"0 0 0 4px",display:"flex",alignItems:"center",minHeight:24}}>×</button>
               </span>
             ))}
           </div>
         ):(
-          <div style={{color:"var(--muted)",fontSize:".83rem"}}>Voeg deelnemers toe via de app of typ ze handmatig.</div>
-        )}
-
-        {unassignedNames.length>0&&(
-          <div style={{marginTop:10,fontSize:".78rem",color:"var(--amber2)",background:"rgba(232,148,58,.08)",border:"1px solid rgba(232,148,58,.25)",borderRadius:8,padding:"6px 10px"}}>
-            {unassignedNames.length} nog niet ingedeeld: {unassignedNames.join(", ")} — klik “Opnieuw loten” om te verdelen.
-          </div>
+          <div style={{color:AA_MUTED,fontSize:".83rem"}}>Voeg deelnemers toe via de app of typ ze handmatig.</div>
         )}
       </Card>
 
-      <div style={{textAlign:"center",marginBottom:"1.5rem"}}>
-        <Btn onClick={generate} variant="gold" size="lg" disabled={participants.length<2||generating} style={{minWidth:220}}>
-          {generating?"🎲 Loten...":"🎲 Genereer Teams"}
-        </Btn>
-        {participants.length<2&&<div style={{color:"var(--muted)",fontSize:".78rem",marginTop:6}}>Voeg minimaal 2 deelnemers toe</div>}
-      </div>
-
-      {generating&&(
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:"1.2rem",padding:"3rem 1rem"}}>
-          <div style={{width:56,height:56,border:"4px solid var(--bg3)",borderTopColor:"var(--amber)",borderRadius:"50%",animation:"spin .75s linear infinite"}}/>
-          <div style={{fontFamily:"var(--font-h)",fontSize:"1.15rem",color:"var(--amber2)"}}>Teams worden geloot…</div>
-          <div style={{color:"var(--muted)",fontSize:".83rem"}}>Schud… schud… schud…</div>
-        </div>
-      )}
-
-      {teams&&!generating&&(
-        <div>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem",flexWrap:"wrap",gap:8}}>
-            <H size="1.1rem" style={{marginBottom:0}}>🏁 Teams ({teams.length})</H>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              <Btn onClick={generate} variant="ghost" size="sm">🔀 Opnieuw loten</Btn>
-              <Btn onClick={clearTeams} variant="ghost" size="sm">♻️ Opnieuw beginnen</Btn>
-            </div>
+      {/* Team Creator rebuild (#brackets-first) -- the unassigned pool gets
+          its own card, right above the brackets it feeds: who's still
+          waiting, and the one button that seats them. */}
+      <Card style={{marginBottom:"1.2rem"}}>
+        <H size="1rem" style={{marginBottom:".8rem"}}>
+          🧍 Niet ingedeeld{unassignedNames.length>0&&<span style={{color:AA_MUTED,fontFamily:"var(--font-b)",fontSize:".78rem",fontWeight:400,marginLeft:6}}>({unassignedNames.length})</span>}
+        </H>
+        {unassignedNames.length>0?(
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:"1rem"}}>
+            {unassignedNames.map(name=>(
+              <span key={name} style={{background:"rgba(232,148,58,.08)",border:"1px solid rgba(232,148,58,.25)",borderRadius:20,padding:"4px 12px",fontSize:".83rem",color:"var(--amber2)"}}>{name}</span>
+            ))}
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"1rem",marginBottom:"1.5rem"}}>
+        ):(
+          <div style={{color:participants.length>0?"var(--green)":AA_MUTED,fontSize:".83rem",marginBottom:"1rem"}}>
+            {participants.length>0?"✓ Iedereen is ingedeeld.":"Voeg hierboven deelnemers toe om ze te kunnen indelen."}
+          </div>
+        )}
+        <div style={{textAlign:"center"}}>
+          <Btn onClick={generate} variant="gold" size="lg" disabled={unassignedNames.length===0||generating} style={{minWidth:220}}>
+            {generating?"🎲 Loten...":"🎲 Genereer Teams"}
+          </Btn>
+          {unassignedNames.length>0&&!generating&&<div style={{color:AA_MUTED,fontSize:".78rem",marginTop:6}}>
+            Vult automatisch {unassignedNames.length===1?"de laatste open plek":`de resterende ${unassignedNames.length} plekken`}.
+          </div>}
+          {generating&&<div style={{color:AA_MUTED,fontSize:".78rem",marginTop:6}}>Schud… schud… schud…</div>}
+        </div>
+      </Card>
+
+      <div style={{marginBottom:"1.5rem"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem",flexWrap:"wrap",gap:8}}>
+          <H size="1.1rem" style={{marginBottom:0}}>🏁 Teams ({teams.length})</H>
+          <Btn onClick={resetPlacements} variant="ghost" size="sm" disabled={totalPlaced===0}>♻️ Opnieuw beginnen</Btn>
+        </div>
+        {teams.length===0?(
+          <div style={{textAlign:"center",padding:"2rem 1rem",color:AA_MUTED,fontSize:".85rem"}}>Voeg deelnemers toe om teams te zien.</div>
+        ):(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"1rem"}}>
             {teams.map((team,i)=>{
               const col=TEAM_COLORS[i%TEAM_COLORS.length];
               const members=Array.isArray(team.members)?team.members:[];
               return(
                 <div key={team.id} style={{background:"var(--bg2)",border:`1px solid ${col}44`,borderRadius:"var(--radius)",padding:"1.1rem",animation:"teamReveal .4s ease both",animationDelay:`${i*70}ms`}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:".75rem"}}>
-                    {/* Was a 24px-ish div with an onClick -- matching the
-                        44x44, real-<button> treatment mens-games already
-                        uses for its icon pickers (TournamentEditor/
-                        RoundEditor), for the same reason as the member-row
-                        icon buttons above. */}
                     <button type="button" onClick={()=>setAvatarPicker(avatarPicker===i?null:i)} aria-label="Kies team-icoon" aria-expanded={avatarPicker===i}
                       style={{width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1.4rem",cursor:"pointer",lineHeight:1,borderRadius:8,border:"1px solid var(--border)",background:"var(--bg3)",userSelect:"none",flexShrink:0}}>
                       {team.avatar}
@@ -6968,76 +7003,79 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
                     {members.map((name,j)=>{
                       const u=users.find(x=>(x.display_name||x.username)===name);
                       const isCap=team.captain===name;
-                      const isPinned=pins[name]===team.id;
                       return(
-                        // Two-line row (was one line with avatar + name + 3
-                        // icon buttons + a team-move dropdown all jammed
-                        // together): name gets its own full-width line so it
-                        // stops truncating, controls drop to a second,
-                        // wrapping line so the 44px tap targets below have
-                        // room to breathe instead of forcing the card wider.
+                        // Two-line row (name gets its own full-width line so
+                        // it stops truncating, controls drop to a second
+                        // line) so the 44px tap targets below have room to
+                        // breathe instead of forcing the card wider.
                         <div key={j} style={{display:"flex",flexDirection:"column",gap:2,padding:"6px 0",borderTop:j>0?"1px solid var(--border)":"none"}}>
                           <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
                             {u?<Avatar name={u.username} size={22} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>:<div style={{width:22,height:22,borderRadius:"50%",background:"var(--bg4)",border:"1px solid var(--border)",flexShrink:0}}/>}
                             <span style={{fontSize:".88rem",color:isCap?"var(--gold)":"var(--cream)",fontWeight:isCap?700:400,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</span>
                           </div>
-                          <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4,flexWrap:"wrap"}}>
-                            {teams.length>1&&(
-                              <select value={team.id} onChange={e=>assignMember(name,e.target.value)} aria-label={`Verplaats ${name} naar een ander team`}
-                                style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",fontSize:".74rem",padding:"0 6px",minHeight:44,maxWidth:112,flex:"1 1 auto"}}>
-                                {teams.map(t=><option key={t.id} value={t.id}>{t.avatar} {t.name}</option>)}
-                              </select>
-                            )}
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4}}>
                             <button onClick={()=>toggleCaptain(team.id,name)} aria-label={isCap?`${name} is aanvoerder — klik om te verwijderen`:`Maak ${name} aanvoerder`} title={isCap?"Aanvoerder verwijderen":"Maak aanvoerder"} style={iconBtn(isCap,"var(--gold)")}>👑</button>
-                            <button onClick={()=>togglePin(name,team.id)} aria-label={isPinned?`${name} losmaken (mag weer geloot worden)`:`${name} vastzetten op dit team`} title={isPinned?"Losmaken":"Vastzetten (blijft bij opnieuw loten)"} style={iconBtn(isPinned,"var(--blue)")}>📌</button>
-                            <button onClick={()=>remove(name)} aria-label={`${name} verwijderen uit deelnemers`} style={iconBtn(true,"var(--muted)")}>✕</button>
+                            <button onClick={()=>removeFromTeam(team.id,name)} aria-label={`${name} terug naar de pool`} title="Terug naar de pool" style={iconBtn(true,"var(--cream)")}>✕</button>
                           </div>
                         </div>
                       );
                     })}
-                    {members.length===0&&<div style={{fontSize:".78rem",color:"var(--muted2)",fontStyle:"italic",padding:"4px 0"}}>Nog niemand ingedeeld</div>}
+                    {members.length===0&&unassignedNames.length===0&&(
+                      <div style={{fontSize:".78rem",color:AA_MUTED,fontStyle:"italic",padding:"4px 0"}}>
+                        {participants.length===0?"Nog geen deelnemers.":"Nog niemand ingedeeld."}
+                      </div>
+                    )}
                   </div>
+                  {unassignedNames.length>0&&(
+                    <select defaultValue="" onChange={e=>{if(!e.target.value)return;addToTeam(team.id,e.target.value);e.target.value="";}}
+                      aria-label={`Voeg lid toe aan ${team.name||`team ${i+1}`}`}
+                      style={{width:"100%",marginTop:members.length>0?8:0,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,color:"var(--cream)",fontSize:".82rem",padding:"0 10px",minHeight:44}}>
+                      <option value="" disabled>+ Voeg lid toe…</option>
+                      {unassignedNames.map(n=><option key={n} value={n}>{n}</option>)}
+                    </select>
+                  )}
                 </div>
               );
             })}
           </div>
+        )}
+      </div>
 
-          {/* #9 -- save to library (was: save to event) */}
-          <Card style={{border:"1px solid var(--border2)"}}>
-            <H size=".95rem" style={{marginBottom:".8rem"}}>💾 {editingSetId?"Wijzigingen opslaan in bibliotheek":"Opslaan in bibliotheek"}</H>
-            <div style={{display:"grid",gap:".75rem"}}>
-              <Inp value={setName} onChange={e=>{setSetName(e.target.value);setSaved(false);}} placeholder="Naam voor deze teaminvulling… (bv. Groep A)"/>
-              <Inp value={setCategory} onChange={e=>{setSetCategory(e.target.value);setSaved(false);}} placeholder="Categorie / doel… (bv. Quiz ronde 1, Go-kart, Bowlen)"/>
-              <div>
-                <Lbl>Koppel aan event (optioneel)</Lbl>
-                {activeEvents.length===0?(
-                  <div style={{color:"var(--muted)",fontSize:".8rem"}}>Nog geen (actieve) events om aan te koppelen.</div>
-                ):(
-                  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                    {activeEvents.map(e=>{
-                      const linked=linkEvtIds.includes(e.id);
-                      return(
-                        <button key={e.id} type="button" onClick={()=>{toggleLinkEvt(e.id);setSaved(false);}} aria-pressed={linked}
-                          style={{background:linked?"rgba(232,148,58,.16)":"var(--bg3)",border:`1px solid ${linked?"var(--amber)":"var(--border)"}`,borderRadius:20,color:linked?"var(--amber2)":"var(--cream)",padding:"5px 12px",fontSize:".78rem",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:linked?600:400}}>
-                          {linked?"✓ ":""}{e.name} · {formatEventDateRange(e.date,e.end_date,{weekday:false,month:"short"})}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+      {/* #9 -- save to library (was: save to event) */}
+      <Card style={{border:"1px solid var(--border2)",marginBottom:"2rem"}}>
+        <H size=".95rem" style={{marginBottom:".8rem"}}>💾 {editingSetId?"Wijzigingen opslaan in bibliotheek":"Opslaan in bibliotheek"}</H>
+        <div style={{display:"grid",gap:".75rem"}}>
+          <Inp value={setName} onChange={e=>{setSetName(e.target.value);setSaved(false);}} placeholder="Naam voor deze teaminvulling… (bv. Groep A)"/>
+          <Inp value={setCategory} onChange={e=>{setSetCategory(e.target.value);setSaved(false);}} placeholder="Categorie / doel… (bv. Quiz ronde 1, Go-kart, Bowlen)"/>
+          <div>
+            <Lbl style={{color:AA_MUTED}}>Koppel aan event (optioneel)</Lbl>
+            {activeEvents.length===0?(
+              <div style={{color:AA_MUTED,fontSize:".8rem"}}>Nog geen (actieve) events om aan te koppelen.</div>
+            ):(
+              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                {activeEvents.map(e=>{
+                  const linked=linkEvtIds.includes(e.id);
+                  return(
+                    <button key={e.id} type="button" onClick={()=>{toggleLinkEvt(e.id);setSaved(false);}} aria-pressed={linked}
+                      style={{background:linked?"rgba(232,148,58,.16)":"var(--bg3)",border:`1px solid ${linked?"var(--amber)":"var(--border)"}`,borderRadius:20,color:linked?"var(--amber2)":"var(--cream)",padding:"5px 12px",fontSize:".78rem",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:linked?600:400}}>
+                      {linked?"✓ ":""}{e.name} · {formatEventDateRange(e.date,e.end_date,{weekday:false,month:"short"})}
+                    </button>
+                  );
+                })}
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                <Btn onClick={saveToLibrary} variant="gold" disabled={!setName.trim()||saving}>
-                  {saving?"Opslaan…":"💾 Opslaan"}
-                </Btn>
-                {editingSetId&&<Btn onClick={cancelEdit} variant="ghost" size="sm">Annuleer bewerken</Btn>}
-                {saved&&<span className="pop" style={{color:"var(--green)",fontSize:".85rem",fontWeight:600}}>✓ Opgeslagen!</span>}
-                {saveError&&<span role="alert" style={{color:"var(--red)",fontSize:".85rem",fontWeight:600}}>Opslaan mislukt — probeer opnieuw.</span>}
-              </div>
-            </div>
-          </Card>
+            )}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+            <Btn onClick={saveToLibrary} variant="gold" disabled={!setName.trim()||saving||totalPlaced===0}>
+              {saving?"Opslaan…":"💾 Opslaan"}
+            </Btn>
+            {editingSetId&&<Btn onClick={cancelEdit} variant="ghost" size="sm">Annuleer bewerken</Btn>}
+            {saved&&<span className="pop" style={{color:"var(--green)",fontSize:".85rem",fontWeight:600}}>✓ Opgeslagen!</span>}
+            {saveError&&<span role="alert" style={{color:"var(--red)",fontSize:".85rem",fontWeight:600}}>Opslaan mislukt — probeer opnieuw.</span>}
+            {totalPlaced===0&&!saving&&<span style={{color:AA_MUTED,fontSize:".78rem"}}>Plaats eerst iemand in een team.</span>}
+          </div>
         </div>
-      )}
+      </Card>
 
       {/* #9/#10 -- the team library: every saved set, active or archived */}
       <div style={{marginTop:"2rem"}}>
@@ -7053,7 +7091,7 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
 
         {visibleSets.length===0?(
           teamSetsError?<TeamSetsErrorNotice onRetry={onRetryTeamSets}/>:
-          <div style={{textAlign:"center",padding:"2rem 1rem",color:"var(--muted)",fontSize:".85rem"}}>
+          <div style={{textAlign:"center",padding:"2rem 1rem",color:AA_MUTED,fontSize:".85rem"}}>
             {libFilter==="archived"?"Nog geen gearchiveerde teamsets.":"Nog geen teamsets opgeslagen. Genereer teams hierboven en sla ze op."}
           </div>
         ):(
@@ -7069,16 +7107,16 @@ const TeamCreatorPage=({users,events=[],currentUser=null,teamSets=[],teamSetsErr
                       <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginBottom:2}}>
                         <span style={{fontFamily:"var(--font-b)",fontWeight:600,color:"var(--cream)",fontSize:".9rem"}}>{ts.name||"Naamloze teams"}</span>
                         {ts.category&&<span style={{background:"rgba(232,148,58,.15)",border:"1px solid rgba(232,148,58,.3)",borderRadius:20,padding:"1px 8px",fontSize:".68rem",fontFamily:"var(--font-b)",fontWeight:600,color:"var(--amber2)",letterSpacing:".04em"}}>{ts.category}</span>}
-                        {archived&&<span style={{background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:20,padding:"1px 8px",fontSize:".65rem",color:"var(--muted)",letterSpacing:".04em"}}>GEARCHIVEERD</span>}
+                        {archived&&<span style={{background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:20,padding:"1px 8px",fontSize:".65rem",color:AA_MUTED,letterSpacing:".04em"}}>GEARCHIVEERD</span>}
                       </div>
-                      <div style={{color:"var(--muted)",fontSize:".78rem"}}>
+                      <div style={{color:AA_MUTED,fontSize:".78rem"}}>
                         {summary.teamCount} teams · {summary.memberCount} personen
-                        {ts.createdAt&&<span style={{marginLeft:8,opacity:.7}}>{new Date(ts.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short"})}</span>}
+                        {ts.createdAt&&<span style={{marginLeft:8,color:AA_MUTED}}>{new Date(ts.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short"})}</span>}
                       </div>
                       {linkedEvents.length>0&&(
                         <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:5}}>
                           {linkedEvents.map(e=>(
-                            <span key={e.id} style={{fontSize:".68rem",color:"var(--muted)",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:20,padding:"1px 8px"}}>{e.name}</span>
+                            <span key={e.id} style={{fontSize:".68rem",color:AA_MUTED,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:20,padding:"1px 8px"}}>{e.name}</span>
                           ))}
                         </div>
                       )}

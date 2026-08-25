@@ -97,13 +97,26 @@ export function mergeNames(existing, incoming) {
   return merged;
 }
 
-// Ticket #7: pin specific people to specific teams, then have "generate"
-// fill only the remaining slots from the unpinned pool -- and have pinned
-// members stay exactly where they were put across a re-roll.
+// Team Creator rebuild (2026-08-25 -- "brackets first, then fill"): the
+// owner picks a team count (or size), gets that many empty brackets on
+// screen immediately, and places people into them by hand before ever
+// touching Generate. That retires the #7 pin concept entirely -- there is
+// no longer a separate "pinned" state to track, because *being a member of
+// a bracket* now means exactly what "pinned" used to mean: this person
+// stays exactly where they are on every future call. `generateTeams` only
+// ever ADDS people to `existingTeams` shells; it never removes or moves
+// anyone already seated, manually placed or auto-filled alike. So calling
+// it again with its own previous result as `existingTeams` (a "re-roll")
+// is a no-op unless the roster grew or a bracket was removed and returned
+// people to the pool -- which is exactly "Genereer only fills empty seats".
 //
-// `pins` is a map of participant name -> team id. `existingTeams`, when
-// given, supplies the team shells (id/name/avatar/captain) to keep --
-// pass `[]` (or omit) for a first-time generation from scratch.
+// `existingTeams`, when given, supplies the team shells (id/name/avatar/
+// captain/members) to keep exactly as-is aside from adding the unplaced
+// pool into them -- pass `[]` (or omit) for a first-time generation from
+// scratch, which also derives how many shells to build (see `resizeTeams`
+// for the shell-count logic the UI actually drives off `teamCount`/
+// `teamSize` directly; this fallback exists so the function stays
+// self-sufficient for direct/test callers that don't pre-build shells).
 //
 // `shuffle` is injectable purely for deterministic tests; production calls
 // omit it and get the default Math.random shuffle.
@@ -112,7 +125,7 @@ export function mergeNames(existing, incoming) {
 // many teams" rather than "how many people per team" -- pick `teamCount`
 // explicitly and everyone gets balanced as evenly as possible across that
 // many teams (round-robin: whoever has the fewest members so far gets the
-// next unpinned name), which is a different fill *shape* than the legacy
+// next unplaced name), which is a different fill *shape* than the legacy
 // `teamSize` chunking below (fill team 0 to capacity, then team 1, ...).
 // Passing `teamCount` selects the balanced fill; passing only `teamSize`
 // keeps the exact pre-existing chunking behaviour (and its tests). If both
@@ -123,59 +136,48 @@ export function generateTeams({
   teamSize = 1,
   teamCount,
   existingTeams = [],
-  pins = {},
   shuffle,
 } = {}) {
   const names = (Array.isArray(participants) ? participants : []).filter(Boolean);
   if (names.length === 0) return [];
   const shells0 = Array.isArray(existingTeams) ? existingTeams : [];
-  const pinMap = pins && typeof pins === "object" ? pins : {};
-
-  const pinnedTeamIds = new Set(
-    names.filter(n => pinMap[n]).map(n => pinMap[n]),
-  );
 
   // Which fill strategy applies is decided purely by whether `teamCount`
   // was explicitly passed -- not by whether this happens to be a first
-  // generation or a re-roll (`existingTeams` only ever fixes the *number*
-  // of shells, never which fill shape to use), so a re-roll of a
-  // count-driven set stays balanced too.
+  // generation or a re-roll, so a re-roll of a count-driven set stays
+  // balanced too.
   const balanced = teamCount != null;
   const count = shells0.length > 0
     ? shells0.length
     : balanced
-      ? Math.max(1, Math.round(Number(teamCount)) || 1, pinnedTeamIds.size)
-      : Math.max(1, Math.ceil(names.length / Math.max(1, Number(teamSize) || 1)), pinnedTeamIds.size);
+      ? Math.max(1, Math.round(Number(teamCount)) || 1)
+      : Math.max(1, Math.ceil(names.length / Math.max(1, Number(teamSize) || 1)));
 
-  const shells = Array.from({ length: count }, (_, i) => {
-    const prev = shells0[i];
-    return prev && typeof prev === "object"
-      ? { id: prev.id, name: prev.name, avatar: prev.avatar, captain: prev.captain ?? null, members: [] }
-      : blankTeam(i, "");
-  });
-  const shellById = new Map(shells.map(s => [s.id, s]));
+  // Unlike the pre-rebuild version, shells keep whatever members they
+  // already had -- nothing here ever wipes a seat clean before refilling
+  // it. Only `members`/`captain` need defensive array/null guards; the
+  // rest of an existing shell (id/name/avatar) passes through untouched.
+  const shells = shells0.length > 0
+    ? shells0.map(t => ({
+      id: t?.id, name: t?.name, avatar: t?.avatar, captain: t?.captain ?? null,
+      members: Array.isArray(t?.members) ? [...t.members] : [],
+    }))
+    : Array.from({ length: count }, (_, i) => blankTeam(i, ""));
 
-  // 1. Seat pinned participants in their pinned team first.
-  const pinnedSet = new Set();
-  names.forEach(n => {
-    const teamId = pinMap[n];
-    if (teamId && shellById.has(teamId)) {
-      shellById.get(teamId).members.push(n);
-      pinnedSet.add(n);
-    }
-  });
-
-  // 2. Shuffle everyone else.
-  const rest = names.filter(n => !pinnedSet.has(n));
+  // Anyone already seated on any shell -- manually placed or left over
+  // from an earlier generate -- is untouchable. Only the rest of the
+  // roster is up for grabs.
+  const alreadyPlaced = new Set(shells.flatMap(t => t.members));
+  const toPlace = names.filter(n => !alreadyPlaced.has(n));
   const doShuffle = typeof shuffle === "function" ? shuffle : arr => [...arr].sort(() => Math.random() - 0.5);
-  const shuffled = doShuffle(rest);
+  const shuffled = doShuffle(toPlace);
 
   if (balanced) {
-    // Team-count mode: hand each unpinned name to whichever team currently
+    // Team-count mode: hand each unplaced name to whichever team currently
     // has the fewest members (earliest team wins a tie) -- handles uneven
-    // splits (7 people / 3 teams -> 3/2/2) and pin-skewed starting points
-    // sensibly, and simply leaves extra teams empty when there are more
-    // teams than people rather than erroring.
+    // splits (7 people / 3 teams -> 3/2/2) and manually-skewed starting
+    // points sensibly, and simply leaves extra teams empty when there are
+    // more teams than people rather than erroring.
     for (const name of shuffled) {
       let target = shells[0];
       for (const t of shells) {
@@ -185,7 +187,8 @@ export function generateTeams({
     }
   } else {
     // Legacy people-per-team mode: fill remaining capacity team-by-team, in
-    // order (matches the pre-#7 chunking behaviour when nothing is pinned).
+    // order (matches the pre-#7 chunking behaviour when nothing is placed
+    // yet).
     const size = Math.max(1, Number(teamSize) || 1);
     let cursor = 0;
     for (const team of shells) {
@@ -193,22 +196,55 @@ export function generateTeams({
         team.members.push(shuffled[cursor++]);
       }
     }
-    // Defensive overflow (shouldn't happen given the teamCount calc above,
-    // but a hand-edited pins map could reference a team id that no longer
-    // matches the shell count): dump any leftovers on the last team rather
-    // than silently dropping people.
+    // Defensive overflow (shouldn't happen given the shell-count calc
+    // above, but a hand-edited members list could already overfill a
+    // team): dump any leftovers on the last team rather than silently
+    // dropping people.
     while (cursor < shuffled.length) {
       shells[shells.length - 1].members.push(shuffled[cursor++]);
     }
   }
 
-  // 4. A captain who got reshuffled off their team is no longer captain
-  // of anything -- same rule as `removeMember`.
+  // A captain whose team got emptied out from under them by a stale/
+  // hand-edited shell is no longer captain of anything -- same rule as
+  // `removeMember`. Generate itself never removes a member from a team it
+  // was already on, so this only ever bites on defensive/edge input.
   shells.forEach(t => {
     if (t.captain && !t.members.includes(t.captain)) t.captain = null;
   });
 
   return shells;
+}
+
+// Team Creator rebuild: "changing the count adds or removes brackets
+// live... removing a bracket that has people in it must not silently
+// discard them -- return them to the unassigned pool". This is the pure
+// resize step the count/size stepper drives on every change. Growing
+// appends fresh blank shells (cycling through `avatars`, skipping ones
+// already in use so two brackets don't default to the same icon -- same
+// courtesy `QuizBuilder`'s `addTeam` extends its own teams). Shrinking
+// drops shells off the end; it does NOT touch `members`, so anyone who was
+// on a dropped bracket simply stops appearing in any team's roster -- the
+// caller derives "unassigned" as participants minus everyone still seated
+// somewhere, so those people surface in the pool automatically rather than
+// being deleted.
+export function resizeTeams(teams, count, avatars = []) {
+  const list = Array.isArray(teams) ? teams : [];
+  const n = Math.max(0, Math.round(Number(count)) || 0);
+  if (n === list.length) return list;
+  if (n < list.length) return list.slice(0, n);
+  const pool = Array.isArray(avatars) ? avatars.filter(Boolean) : [];
+  const used = new Set(list.map(t => t?.avatar));
+  const next = [...list];
+  for (let i = list.length; i < n; i++) {
+    let avatar = "";
+    if (pool.length > 0) {
+      avatar = pool.find(a => !used.has(a)) || pool[i % pool.length];
+      used.add(avatar);
+    }
+    next.push(blankTeam(i, avatar));
+  }
+  return next;
 }
 
 // "Here's what will happen" preview -- shown next to the team-count
