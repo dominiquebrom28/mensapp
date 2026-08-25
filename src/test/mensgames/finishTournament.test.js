@@ -115,6 +115,14 @@ describe('buildTeamAwards', () => {
     { entrantId: 'ent_4', points: 1, rank: 4 }, // outside the medals anyway
   ]);
 
+  // 2026-08-26 (WP-Q1, docs/quiz-unification-spec.md §3.4/§7.1): a
+  // TeamAward's shape is now the same regardless of what awarded it --
+  // `sourceKind`/`sourceId` plus both `tournamentId` and `quizId` (the one
+  // that doesn't apply is `null`). No consumer reads any of these four
+  // fields yet (HallOfFame's trophy cabinet renders only `award.label`), so
+  // this is additive metadata on a tournament-sourced award, not a
+  // behaviour change -- every other field/value below is unchanged from
+  // before the extraction.
   it('builds a TeamAward per medalled team entrant, resolved to its team_sets row via teamSetId/sourceTeamId', () => {
     const out = buildTeamAwards(tournament(), standings, TEAM_SETS, { now: 5000 });
     expect(out).toHaveLength(2);
@@ -125,7 +133,10 @@ describe('buildTeamAwards', () => {
       teamId: 'tm_1',
       label: '🥇 Mens-Games 2026 — 1e plaats',
       placement: 1,
+      sourceKind: 'tournament',
+      sourceId: 'trn_1',
       tournamentId: 'trn_1',
+      quizId: null,
       eventId: 'evt-2026',
       note: '',
       awardedAt: new Date(5000).toISOString(),
