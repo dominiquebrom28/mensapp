@@ -187,6 +187,23 @@ const Btn = ({children,onClick,variant="primary",size="md",style={},disabled=fal
   const onUp=e=>{if(!disabled){const el=e.currentTarget;el.style.transform=el._preTr??"";}}
   return <button ref={btnRef} type={type} onClick={onClick} disabled={disabled} onMouseEnter={onEnter} onMouseLeave={onLeave} onMouseDown={onDown} onMouseUp={onUp} style={{borderRadius:"var(--radius-sm)",cursor:disabled?"not-allowed":"pointer",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s",opacity:disabled?.5:1,...computed}}>{children}</button>;
 };
+// Shared tab-strip button, extracted out of the Admin Panel and EventPage
+// tab bars (2026-08-26 visible-controls audit): both had hand-rolled the
+// exact snapshot-and-replay anti-pattern `Btn` was just fixed for above --
+// stash the pre-hover color/background on the entering element via `el._sc`/
+// `el._sb`, replay that snapshot on mouseleave. Same failure: click a tab to
+// make it active, and the mouseleave that eventually lands (deferred past
+// the click on touch, or just a slow mouse) replays the *pre-click, inactive*
+// muted color under the *now-active* amber underline/bold weight -- the
+// "half-active, half-disabled" tab the owner saw. Fixed the same way as
+// `Btn`: never trust a snapshot, recompute the resting color/background from
+// this render's own `active` prop on every leave.
+const TabBtn = ({active,onClick,children,style={}}) => {
+  const computed={background:"none",border:"none",borderBottom:active?"2px solid var(--amber)":"2px solid transparent",color:active?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"8px 14px",fontFamily:"var(--font-b)",fontWeight:active?600:400,fontSize:".83rem",marginBottom:-1,transition:"color .15s,background .15s",borderRadius:"6px 6px 0 0",...style};
+  const onEnter=e=>{if(active)return;const el=e.currentTarget;el.style.color="var(--amber)";el.style.background="rgba(232,148,58,.06)";};
+  const onLeave=e=>{const el=e.currentTarget;el.style.color=computed.color??"";el.style.background=computed.background??"";};
+  return <button onClick={onClick} onMouseEnter={onEnter} onMouseLeave={onLeave} style={computed}>{children}</button>;
+};
 const Inp = ({value,onChange,placeholder,style={},type="text",multiline=false,onKeyDown,autoFocus=false,rows=3}) => {
   const base={background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%",outline:"none"};
   return multiline
@@ -957,12 +974,9 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose,saraJayUnlocked,on
   const reject=id=>onDeleteUser(id);
   const remove=id=>{if(window.confirm("Remove this user?"))onDeleteUser(id);};
   const tabBtn=(t,label)=>(
-    <button key={t} onClick={()=>setTab(t)}
-      onMouseEnter={e=>{if(tab!==t){const el=e.currentTarget;el._sc=el.style.color;el._sb=el.style.background;el.style.color="var(--amber)";el.style.background="rgba(232,148,58,.06)";}}}
-      onMouseLeave={e=>{const el=e.currentTarget;el.style.color=el._sc??"";el.style.background=el._sb??"";}}
-      style={{background:"none",border:"none",borderBottom:tab===t?"2px solid var(--amber)":"2px solid transparent",color:tab===t?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"7px 16px",fontFamily:"var(--font-b)",fontWeight:tab===t?600:400,fontSize:".85rem",marginBottom:-1,transition:"color .15s,background .15s",borderRadius:"6px 6px 0 0"}}>
+    <TabBtn key={t} active={tab===t} onClick={()=>setTab(t)} style={{padding:"7px 16px",fontSize:".85rem"}}>
       {label}{t==="pending"&&pending.length>0&&<span style={{background:"var(--red)",color:"#fff",borderRadius:10,padding:"1px 6px",fontSize:".68rem",marginLeft:6}}>{pending.length}</span>}
-    </button>
+    </TabBtn>
   );
   return(
     <Modal onClose={onClose} maxWidth={600}>
@@ -2095,10 +2109,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
 
       <div className="fu1" style={{display:"flex",gap:".2rem",borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
         {visibleTabs.map(t=>(
-          <button key={t} onClick={()=>setTab(t)}
-            onMouseEnter={e=>{if(tab!==t){const el=e.currentTarget;el._sc=el.style.color;el._sb=el.style.background;el.style.color="var(--amber)";el.style.background="rgba(232,148,58,.06)";}}}
-            onMouseLeave={e=>{const el=e.currentTarget;el.style.color=el._sc??"";el.style.background=el._sb??"";}}
-            style={{background:"none",border:"none",borderBottom:tab===t?"2px solid var(--amber)":"2px solid transparent",color:tab===t?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"8px 14px",whiteSpace:"nowrap",fontFamily:"var(--font-b)",fontWeight:tab===t?600:400,fontSize:".83rem",marginBottom:-1,transition:"color .15s,background .15s",borderRadius:"6px 6px 0 0"}}>{t}</button>
+          <TabBtn key={t} active={tab===t} onClick={()=>setTab(t)} style={{whiteSpace:"nowrap"}}>{t}</TabBtn>
         ))}
       </div>
 
