@@ -2,24 +2,25 @@
 // extractFromAppSource.js (see that file for how/why). These run against
 // the real, current source text of App.jsx -- not a re-implementation.
 //
-// FOLLOW-UP (not done in this pass, per task scope: no edits to App.jsx):
-// the cleanest fix is a one-line change per helper, e.g.
-//   const getYouTubeId=url=>{...};   ->   export const getYouTubeId=url=>{...};
-// which would let every test below `import` the real thing directly and
-// delete extractFromAppSource.js entirely. Worth doing for:
-//   getYouTubeId, getSpotifyTrackId, isSpotifyUrl, isYouTubeUrl,
-//   hasAdmin, hasOrg, getUA, getDisplayName, computeMemberStats,
-//   normalizeQuiz
-// all ten are pure, side-effect-free, and already reachable by this
-// extraction technique -- exporting them is a no-risk change (an `export`
-// keyword doesn't alter behavior) that would remove the fragility called
-// out in extractFromAppSource.js's docblock.
+// docs/quiz-unification-spec.md §8.3/§9 (WP-Q3 pure move): `getYouTubeId`,
+// `getSpotifyTrackId`, `isSpotifyUrl`, `isYouTubeUrl` and `normalizeQuiz`
+// left App.jsx entirely -- they're real exports on `features/quiz/urls.js`
+// / `model.js` now, so those five import the real thing directly below
+// instead of slicing source text. Every assertion is unchanged.
+//
+// FOLLOW-UP (still not done, per task scope: no edits to App.jsx):
+// the remaining helpers below are un-exported `const`s reached only via
+// `extractFromApp`. The same one-line fix applies to them, e.g.
+//   const hasAdmin=u=>{...};   ->   export const hasAdmin=u=>{...};
+// Worth doing for: hasAdmin, hasOrg, getUA, getDisplayName,
+// computeMemberStats, formatEventDateRange -- all pure, side-effect-free,
+// and already reachable by this extraction technique.
 import { describe, it, expect } from 'vitest'
 import { extractFromApp } from './extractFromAppSource.js'
+import { getYouTubeId, getSpotifyTrackId, isSpotifyUrl, isYouTubeUrl } from '../features/quiz/urls.js'
+import { normalizeQuiz } from '../features/quiz/model.js'
 
 describe('getYouTubeId', () => {
-  const getYouTubeId = extractFromApp('getYouTubeId')
-
   it('parses a standard watch URL', () => {
     expect(getYouTubeId('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ')
   })
@@ -64,8 +65,6 @@ describe('getYouTubeId', () => {
 })
 
 describe('getSpotifyTrackId', () => {
-  const getSpotifyTrackId = extractFromApp('getSpotifyTrackId')
-
   it('parses a standard track URL', () => {
     expect(getSpotifyTrackId('https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC')).toBe(
       '4uLU6hMCjMI75M1A2tKUQC',
@@ -98,9 +97,6 @@ describe('getSpotifyTrackId', () => {
 })
 
 describe('isSpotifyUrl / isYouTubeUrl', () => {
-  const isSpotifyUrl = extractFromApp('isSpotifyUrl')
-  const isYouTubeUrl = extractFromApp('isYouTubeUrl')
-
   it('isSpotifyUrl recognizes spotify.com links', () => {
     expect(isSpotifyUrl('https://open.spotify.com/track/abc')).toBe(true)
   })
@@ -316,10 +312,6 @@ describe('formatEventDateRange', () => {
 })
 
 describe('normalizeQuiz', () => {
-  // normalizeQuiz references the module-scope TEAM_AVATARS const, so it
-  // must be extracted alongside it (see extractFromAppSource.js docs).
-  const normalizeQuiz = extractFromApp('TEAM_AVATARS', 'normalizeQuiz')
-
   it('wraps legacy flat `questions` into a single `rounds[0]`', () => {
     const legacy = { id: 'q1', questions: [{ q: 'Q1', options: ['a', 'b'], answer: 1, points: 10 }] }
     const normalized = normalizeQuiz(legacy)

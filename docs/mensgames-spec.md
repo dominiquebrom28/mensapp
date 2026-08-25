@@ -245,7 +245,7 @@ Plus: append to `TABS`; one tab render line; `can.runTournament`; `openMensGames
 Nothing, **if these rules hold**:
 
 1. **Never add `export` to an existing `const` in App.jsx.**
-2. **Never move, rename or reformat** the extracted declarations: `Card`, `Modal`, `H`, `Lbl`, `Inp`, `getYouTubeId`, `getSpotifyTrackId`, `isSpotifyUrl`, `isYouTubeUrl`, `hasAdmin`, `hasOrg`, `getUA`, `getDisplayName`, `computeMemberStats`, `formatEventDateRange`, `TEAM_AVATARS`, `normalizeQuiz`, `eventDayCount`, `dateForEventDay`, `dayHeadingLabel`, `scheduleDayTimeOrder`.
+2. **Never move, rename or reformat** the extracted declarations: `Card`, `Modal`, `H`, `Lbl`, `Inp`, `hasAdmin`, `hasOrg`, `getUA`, `getDisplayName`, `computeMemberStats`, `formatEventDateRange`, `eventDayCount`, `dateForEventDay`, `dayHeadingLabel`, `scheduleDayTimeOrder`, `padTimeForSort`. (`getYouTubeId`, `getSpotifyTrackId`, `isSpotifyUrl`, `isYouTubeUrl`, `TEAM_AVATARS` and `normalizeQuiz` **left this list** in docs/quiz-unification-spec.md WP-Q3 -- they're real exports on `features/quiz/urls.js`/`model.js` now, so the tests that used to slice them out of App.jsx's source text import them directly instead; see that spec's §9.)
 3. **Never introduce a line that is exactly `};` inside one of those declarations** — extractors slice to the *first* such line.
 4. Adding *new* module-scope declarations is safe.
 5. `App.smoke.test.jsx`'s supabase mock returns `{data:[],error:null}` for any unknown table, so `from('team_sets')`/`from('tournaments')` resolve harmlessly with no mock changes.
