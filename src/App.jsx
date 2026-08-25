@@ -118,9 +118,14 @@ const Btn = ({children,onClick,variant="primary",size="md",style={},disabled=fal
     success:{background:"transparent",color:"var(--green)",border:"1px solid rgba(76,175,125,.3)"},
     gold:{background:"linear-gradient(135deg,var(--gold),var(--amber))",color:"var(--bg)",border:"none"},
   };
+  const btnRef=useRef(null);
+  // What this exact render considers "resting" -- the single source of
+  // truth for both the JSX `style` prop below and every hover/press
+  // cleanup path. Read fresh off this render's `variant`/`style` closure,
+  // never cached, so it can never go stale relative to the props React
+  // actually committed.
+  const computed={...sz[size],...vr[variant],...style};
   const onEnter=e=>{if(disabled)return;const el=e.currentTarget;
-    // Save current inline values so onLeave can restore them exactly
-    el._saved={bg:el.style.background,tr:el.style.transform,sh:el.style.boxShadow,bc:el.style.borderColor,fi:el.style.filter};
     if(variant==="primary"){el.style.background="var(--amber2)";el.style.transform="translateY(-1px)";el.style.boxShadow="0 4px 16px rgba(232,148,58,.35)";}
     else if(variant==="ghost"){el.style.background="rgba(232,148,58,.09)";el.style.borderColor="var(--border2)";}
     else if(variant==="danger"){el.style.background="rgba(224,85,85,.12)";el.style.borderColor="rgba(224,85,85,.55)";}
@@ -128,13 +133,59 @@ const Btn = ({children,onClick,variant="primary",size="md",style={},disabled=fal
     else if(variant==="success"){el.style.background="rgba(76,175,125,.12)";el.style.borderColor="rgba(76,175,125,.55)";}
     else if(variant==="gold"){el.style.filter="brightness(1.12)";el.style.transform="translateY(-1px)";el.style.boxShadow="0 4px 18px rgba(201,146,42,.35)";}
   };
-  const onLeave=e=>{const el=e.currentTarget;const s=el._saved||{};
-    el.style.background=s.bg??"";el.style.transform=s.tr??"";el.style.boxShadow=s.sh??"";el.style.borderColor=s.bc??"";el.style.filter=s.fi??"";
+  // Bug (2026-08-25 visible-controls audit): the old implementation
+  // snapshotted each button's pre-hover inline style once, on mouseenter,
+  // and replayed that exact snapshot back on mouseleave. Two confirmed ways
+  // that goes wrong:
+  //  1. A browser that dispatches hover events to *disabled* controls
+  //     (Chromium suppresses these; WebKit/Firefox are documented not to)
+  //     delivers a mouseleave with no matching mouseenter ever having run
+  //     (onEnter's own `if(disabled)return` above skips the save) -- the
+  //     snapshot was never taken, so restoring it wiped every inline
+  //     override to nothing via `??""`, falling through to the bare UA
+  //     button-face colour while `color` (never snapshotted) stayed as the
+  //     light text -- unreadable, "completely white".
+  //  2. Even when a snapshot exists, it goes stale the moment this exact
+  //     button's own click flips its `variant` (e.g. the Team Creator
+  //     library's Actief/Gearchiveerd pair swapping primary<->ghost on
+  //     every click) or `disabled` state before the matching mouseleave
+  //     arrives -- most reachable on touch, where WebKit defers a tapped
+  //     element's synthetic mouseleave until the *next* tap lands
+  //     elsewhere, by which point the button can be a different variant
+  //     entirely. Replaying the old snapshot then paints the *previous*
+  //     variant's background under the *current* variant's text colour.
+  // Fixed by never trusting a snapshot: `rest()` always recomputes the
+  // resting look from `computed` above -- this render's actual props --
+  // instead of replaying history. A spurious leave with no matching enter,
+  // or one that arrives after the variant changed underneath it, is now a
+  // harmless reset to the already-correct resting style, never a wipe.
+  const rest=el=>{
+    el.style.background=computed.background??"";
+    el.style.border=computed.border??"";
+    // A handful of callers override just the border's colour via a
+    // longhand in `style` (e.g. Admin's role-change buttons) on top of the
+    // variant's shorthand `border`. Re-apply it after the shorthand, same
+    // order React itself would apply the merged style object in, so it
+    // wins instead of being silently re-covered by the shorthand.
+    if("borderColor" in style)el.style.borderColor=style.borderColor;
+    el.style.transform=computed.transform??"";el.style.boxShadow=computed.boxShadow??"";el.style.filter=computed.filter??"";
   };
+  const onLeave=e=>rest(e.currentTarget);
+  // Mirror case: hovered while *enabled*, then a re-render disables this
+  // exact button (most commonly its own onClick flipping the condition
+  // that drives `disabled`, e.g. "Deselecteer alles" after it empties the
+  // selection) while the pointer never left it. A disabled control can't
+  // dispatch mouseleave at all in this browser (confirmed), so `onLeave`
+  // above would never otherwise run and the hover-tinted style would be
+  // stuck for as long as it stays disabled.
+  useEffect(()=>{
+    if(disabled&&btnRef.current)rest(btnRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[disabled,variant]);
   // Save the pre-press transform (may be a hover transform) so onUp restores to it
   const onDown=e=>{if(!disabled){const el=e.currentTarget;el._preTr=el.style.transform;el.style.transform="scale(.96)";}};
   const onUp=e=>{if(!disabled){const el=e.currentTarget;el.style.transform=el._preTr??"";}}
-  return <button type={type} onClick={onClick} disabled={disabled} onMouseEnter={onEnter} onMouseLeave={onLeave} onMouseDown={onDown} onMouseUp={onUp} style={{borderRadius:"var(--radius-sm)",cursor:disabled?"not-allowed":"pointer",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s",opacity:disabled?.5:1,...sz[size],...vr[variant],...style}}>{children}</button>;
+  return <button ref={btnRef} type={type} onClick={onClick} disabled={disabled} onMouseEnter={onEnter} onMouseLeave={onLeave} onMouseDown={onDown} onMouseUp={onUp} style={{borderRadius:"var(--radius-sm)",cursor:disabled?"not-allowed":"pointer",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .18s",opacity:disabled?.5:1,...computed}}>{children}</button>;
 };
 const Inp = ({value,onChange,placeholder,style={},type="text",multiline=false,onKeyDown,autoFocus=false,rows=3}) => {
   const base={background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"11px 14px",color:"var(--cream)",fontSize:".88rem",width:"100%",outline:"none"};

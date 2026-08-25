@@ -75,8 +75,16 @@ function extractDeclarationSource(sourceLines, name) {
         `assumptions.`,
     )
   }
+  // Match the closer at the *same indentation as the opening line*, not
+  // "the first line anywhere that trims down to it" -- a declaration whose
+  // body contains its own multi-line object literal (e.g. Btn's `vr={...}`)
+  // closes that inner literal with an indented lone `};` too, which the old
+  // trim-and-compare check matched prematurely, truncating the extracted
+  // source mid-declaration.
+  const indent = firstLine.slice(0, firstLine.length - firstLine.trimStart().length)
+  const indentedCloser = indent + closer
   for (let i = startIdx + 1; i < sourceLines.length; i++) {
-    if (sourceLines[i].trim() === closer) {
+    if (sourceLines[i] === indentedCloser) {
       return sourceLines.slice(startIdx, i + 1).join('\n')
     }
   }

@@ -18,3 +18,7 @@ dist
 /src/qa-harness/
 /public/qa-harness-mock/
 /docs/qa-shots/
+
+# Throwaway visible-controls bug-hunt harness (2026-08-25) -- never ship
+/harness.html
+/vite.harness.config.mjs
