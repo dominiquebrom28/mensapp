@@ -21,18 +21,24 @@ const EventTrailer = lazy(() => import("./features/trailer/EventTrailer.jsx"));
 // feature owns its own Supabase I/O once either of these actually mounts.
 const MensGamesPage = lazy(() => import("./features/mensgames/MensGamesPage.jsx"));
 const MensGamesTab  = lazy(() => import("./features/mensgames/MensGamesTab.jsx"));
-// Quiz (docs/quiz-unification-spec.md §8.1/§8.3, WP-Q3 pure move): same
-// lazy-mount pattern as Mens-games above -- ~2,250 lines/90-110kB out of
-// the main chunk, loaded only once a quiz tab/dashboard/live-overlay is
-// actually rendered. Still reads/writes `evt.quizzes` via props; WP-Q4
-// rewires the live protocol onto `quiz_live`/`quiz_answers`.
+// Quiz (docs/quiz-unification-spec.md §8.1/§8.3/§14 decision 1, WP-Q7/Q8):
+// same lazy-mount pattern as Mens-games above, now dual-mounted the same way
+// too -- `QuizPage` (top-level, `pageView==="quiz"`) and `QuizTabMount`
+// (event tab) both lazily load `QuizShell.jsx`, ~2,250 lines/90-110kB out of
+// the main chunk. `QuizTab`/`QuizDashboard` are no longer imported here
+// directly -- `QuizShell.jsx` owns mounting them now (§8.3 item 3: EventPage
+// drops its own `quizDash` state).
 // Eager, deliberately not in the lazy chunk (docs/quiz-unification-spec.md
 // §4.5/§8.1): discovery has to run for someone who never opens the quiz at
-// all, since finding a live quiz is what invites them in.
+// all, since finding a live quiz is what invites them in. `fetchQuizResults`
+// is the same posture (§8.1: "eager, tiny") -- it feeds `computeMemberStats`/
+// `HallOfFame`/`WinnersTab` at boot, all of which render regardless of
+// whether the quiz feature itself is ever opened.
 import { useLiveQuizWatch } from "./features/quiz/liveWatch.js";
 import { fetchQuiz } from "./features/quiz/api.js";
-const QuizTab = lazy(() => import("./features/quiz/QuizTab.jsx"));
-const QuizDashboard = lazy(() => import("./features/quiz/QuizDashboard.jsx"));
+import { fetchQuizResults, isQuizAlreadyPublished } from "./features/quiz/results.js";
+const QuizPage = lazy(() => import("./features/quiz/QuizPage.jsx"));
+const QuizTabMount = lazy(() => import("./features/quiz/QuizTabMount.jsx"));
 const QuizParticipantView = lazy(() => import("./features/quiz/QuizParticipantView.jsx"));
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -430,17 +436,34 @@ const ANIMALS=[
   {name:"Koala",  emoji:"🐨",bg:"linear-gradient(135deg,#0984e3,#74b9ff)"},
   {name:"Panda",  emoji:"🐼",bg:"linear-gradient(135deg,#2d3436,#636e72)"},
 ];
-const computeMemberStats=(username,events)=>{
+const computeMemberStats=(username,events,quizResults=[])=>{
   const n=username.toLowerCase();
   const attended=events.filter(e=>e.archived&&(e.attendees||[]).some(a=>a.name.toLowerCase()===n&&a.status==="went"));
   const mensdays=attended.filter(e=>e.type!=="weekend").length;
   const weekends=attended.filter(e=>e.type==="weekend").length;
   let quizWins=0;
+  // §8.3 item 1 (docs/quiz-unification-spec.md): a third, optional arg --
+  // never breaks a caller still on two -- feeding wins from the `quizzes`
+  // table (WP-Q2's `fetchQuizResults()`) alongside the legacy `evt.quizzes[]`
+  // scan below. Needed for a quiz with no linked event at all (a standalone
+  // quiz has nowhere in `events` to have ever lived) and, defensively, for
+  // one whose `events.quizzes[]` write never landed. `countedIds` keeps a
+  // dual-write quiz (both places, "new" per the brief's three-state note)
+  // from being counted twice.
+  const countedIds=new Set();
   events.forEach(e=>{(e.quizzes||[]).forEach(q=>{
+    if(q&&q.id)countedIds.add(q.id);
     if(!q.scores||!Object.keys(q.scores).length)return;
     const max=Math.max(...Object.values(q.scores));
     if(max>0&&q.scores[username]===max)quizWins++;
   });});
+  (quizResults||[]).forEach(q=>{
+    if(!q||countedIds.has(q.id))return;
+    const scores=q.scores||{};
+    if(!Object.keys(scores).length)return;
+    const max=Math.max(...Object.values(scores));
+    if(max>0&&scores[username]===max)quizWins++;
+  });
   const mentions=[];
   events.forEach(e=>{(e.winners||[]).forEach(w=>{if(w.winner.toLowerCase()===n)mentions.push({...w,eventName:e.name});});});
   return{mensdays,weekends,quizWins,mentions,total:mensdays+weekends};
@@ -911,7 +934,7 @@ const useNavDropdown = () => {
   },[open]);
   return{open,setOpen,rootRef,triggerRef};
 };
-const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onUpdates,onProfile,onTeams,onTimer,onMensGames,mensGamesUnlocked,onSaraJay,saraJayUnlocked}) => {
+const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,onMembers,onAnnounce,pendingCount,notifications,notifLastRead,onUpdates,onProfile,onTeams,onTimer,onQuiz,onMensGames,mensGamesUnlocked,onSaraJay,saraJayUnlocked}) => {
   const [menuOpen,setMenuOpen]=useState(false);
   const tier=useNavTier();
   const compact=tier!=="full";
@@ -921,7 +944,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
   const displayName=currentUser.display_name||currentUser.username;
   const isAdmin=can.manageUsers(currentUser);
   const canAnnounce=can.announce(currentUser);
-  const toolsActive=view==="teams"||view==="timer"||view==="mensgames"||view==="sarajay";
+  const toolsActive=view==="teams"||view==="timer"||view==="quiz"||view==="mensgames"||view==="sarajay";
   useEffect(()=>{
     if(!menuOpen)return;
     const close=()=>setMenuOpen(false);
@@ -953,7 +976,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
         <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}}>
           {view!=="home"&&<button onClick={onBack} className="nav-btn" style={{background:"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--muted)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",flexShrink:0}}>← Terug</button>}
           <div onClick={onHome} onMouseEnter={e=>e.currentTarget.style.opacity=".72"} onMouseLeave={e=>e.currentTarget.style.opacity=""} style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer",transition:"opacity .15s"}}>
-            {view==="home"?"🍺 MensApp":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":view==="teams"?"🎲 Team Creator":view==="timer"?"⏱ Timer":view==="mensgames"?"🏆 Mens-Games":view==="sarajay"?"🤖 Sara Jay":eventName}
+            {view==="home"?"🍺 MensApp":view==="hof"?"🏅 Hall of Fame":view==="members"?"👥 Lads":view==="updates"?"📬 Updates":view==="teams"?"🎲 Team Creator":view==="timer"?"⏱ Timer":view==="quiz"?"🧠 Quiz":view==="mensgames"?"🏆 Mens-Games":view==="sarajay"?"🤖 Sara Jay":eventName}
           </div>
         </div>
         {tier!=="mobile"&&(
@@ -968,6 +991,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
                 <div id="nav-tools-menu" style={menuPanelStyle}>
                   <button onClick={()=>{onTeams();tools.setOpen(false);}} className="nav-btn" style={menuItemStyle(view==="teams")}>🎲 Team Creator</button>
                   <button onClick={()=>{onTimer();tools.setOpen(false);}} className="nav-btn" style={menuItemStyle(view==="timer")}>⏱ Timer</button>
+                  <button onClick={()=>{onQuiz();tools.setOpen(false);}} className="nav-btn" style={menuItemStyle(view==="quiz")}>🧠 Quiz</button>
                   {/* Locked mens-games gets a recognisable "🔒 Mens-Games" label, not
                       the Sara Jay "🔒 ???" mystery treatment -- mens-games is just
                       a feature not yet switched on, Sara Jay is a deliberate
@@ -1014,6 +1038,7 @@ const Nav = ({view,eventName,onBack,currentUser,onLogout,onAdmin,onHof,onHome,on
           <button onClick={()=>{onHof();setMenuOpen(false);}} className="nav-btn" style={{background:view==="hof"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🏅 Hall of Fame</button>
           <button onClick={()=>{onTeams();setMenuOpen(false);}} className="nav-btn" style={{background:view==="teams"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🎲 Team Creator</button>
           <button onClick={()=>{onTimer();setMenuOpen(false);}} className="nav-btn" style={{background:view==="timer"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>⏱ Timer</button>
+          <button onClick={()=>{onQuiz();setMenuOpen(false);}} className="nav-btn" style={{background:view==="quiz"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:"var(--amber2)",padding:"10px 14px",cursor:"pointer",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left"}}>🧠 Quiz</button>
           {/* Same "recognisable, not mysterious" locked label as the desktop
               button above. */}
           <button onClick={mensGamesUnlocked?()=>{onMensGames();setMenuOpen(false);}:undefined} className="nav-btn" style={{background:view==="mensgames"?"rgba(232,148,58,.15)":"transparent",border:"1px solid var(--border)",borderRadius:8,color:mensGamesUnlocked?"var(--amber2)":"var(--muted)",padding:"10px 14px",cursor:mensGamesUnlocked?"pointer":"not-allowed",fontSize:".88rem",fontFamily:"var(--font-b)",fontWeight:600,textAlign:"left",opacity:mensGamesUnlocked?1:.55}}>{mensGamesUnlocked?"🏆 Mens-Games":"🔒 Mens-Games"}</button>
@@ -1141,7 +1166,7 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose,saraJayUnlocked,on
 // ─────────────────────────────────────────────────────────────────────────────
 // HALL OF FAME
 // ─────────────────────────────────────────────────────────────────────────────
-const HallOfFame = ({events,users=[],teamSets=[],teamSetsError=null,onRetryTeamSets}) => {
+const HallOfFame = ({events,users=[],teamSets=[],teamSetsError=null,onRetryTeamSets,quizResults=[]}) => {
   const allAttendees = {};
   const allWins = {};
   let totalEvents = events.length;
@@ -1163,17 +1188,33 @@ const HallOfFame = ({events,users=[],teamSets=[],teamSetsError=null,onRetryTeamS
   const winners = Object.values(allWins).sort((a,b)=>b.count-a.count);
   const perfect = attendance.filter(a=>a.attended===totalEvents&&totalEvents>0);
 
-  // Quiz leaderboard across all events
+  // Quiz leaderboard across all events (docs/quiz-unification-spec.md §6/§8.3
+  // item 2: per-person totals now read `memberScores` -- username-keyed for
+  // both an individual quiz and a team one, where it's each member's share
+  // of their team's final score. Was `scores` (name-keyed; for a team quiz
+  // that's the *team's* name, so a lad's own username was never a key and
+  // his teammates' win never showed up here at all) -- falls back to
+  // `scores` only for a pre-Q6 finished quiz that has no `memberScores` yet,
+  // so old data still renders exactly as it always has.
+  // `countedQuizIds` also folds in `quizResults` (the `quizzes` table, WP-Q2)
+  // without double-counting a quiz finished after WP-Q5's dual write --
+  // needed because a standalone quiz (§14 decision 1) has no `events` entry
+  // to ever have been scanned from at all.
   const quizScores = {};
-  events.forEach(evt=>{
-    (evt.quizzes||[]).filter(q=>q.status==="finished").forEach(quiz=>{
-      Object.entries(quiz.scores||{}).forEach(([name,score])=>{
-        if(!quizScores[name]) quizScores[name]={name,total:0,quizzes:0};
-        quizScores[name].total+=score;
-        quizScores[name].quizzes++;
-      });
+  const countedQuizIds = new Set();
+  const tallyQuizScores=quiz=>{
+    if(quiz&&quiz.id)countedQuizIds.add(quiz.id);
+    const ms=quiz.memberScores&&Object.keys(quiz.memberScores).length?quiz.memberScores:(quiz.scores||{});
+    Object.entries(ms).forEach(([name,score])=>{
+      if(!quizScores[name]) quizScores[name]={name,total:0,quizzes:0};
+      quizScores[name].total+=score;
+      quizScores[name].quizzes++;
     });
+  };
+  events.forEach(evt=>{
+    (evt.quizzes||[]).filter(q=>q.status==="finished").forEach(tallyQuizScores);
   });
+  (quizResults||[]).filter(q=>q&&q.status==="finished"&&!countedQuizIds.has(q.id)).forEach(tallyQuizScores);
   const quizBoard = Object.values(quizScores).sort((a,b)=>b.total-a.total);
 
   // #16 "other ideas" -- three genuinely fun categories built from data the
@@ -1465,8 +1506,8 @@ const HallOfFame = ({events,users=[],teamSets=[],teamSetsError=null,onRetryTeamS
 // ─────────────────────────────────────────────────────────────────────────────
 // MEMBERS
 // ─────────────────────────────────────────────────────────────────────────────
-const MemberCard=({user,events,onClick,isMe})=>{
-  const stats=computeMemberStats(user.username,events);
+const MemberCard=({user,events,onClick,isMe,quizResults=[]})=>{
+  const stats=computeMemberStats(user.username,events,quizResults);
   const hasPhoto=!!user.photo_url;
   const animal=ANIMALS[(user.animal_avatar??user.avatar??0)%ANIMALS.length];
   return(
@@ -1491,7 +1532,7 @@ const MemberCard=({user,events,onClick,isMe})=>{
   );
 };
 
-const MembersPage=({users,events,onOpenMember,currentUser})=>{
+const MembersPage=({users,events,onOpenMember,currentUser,quizResults=[]})=>{
   const members=users.filter(u=>u.role!=="pending").sort((a,b)=>{
     if(hasAdmin(a)&&!hasAdmin(b))return -1;
     if(hasAdmin(b)&&!hasAdmin(a))return 1;
@@ -1501,14 +1542,14 @@ const MembersPage=({users,events,onOpenMember,currentUser})=>{
     <div>
       <H style={{marginBottom:"1.5rem"}}>👥 Lads</H>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:"1rem"}}>
-        {members.map(u=><MemberCard key={u.id} user={u} events={events} onClick={()=>onOpenMember(u.id)} isMe={u.id===currentUser.id}/>)}
+        {members.map(u=><MemberCard key={u.id} user={u} events={events} onClick={()=>onOpenMember(u.id)} isMe={u.id===currentUser.id} quizResults={quizResults}/>)}
       </div>
     </div>
   );
 };
 
-const MemberProfile=({user,events,currentUser,onEdit})=>{
-  const stats=computeMemberStats(user.username,events);
+const MemberProfile=({user,events,currentUser,onEdit,quizResults=[]})=>{
+  const stats=computeMemberStats(user.username,events,quizResults);
   const hasPhoto=!!user.photo_url;
   const animal=ANIMALS[(user.animal_avatar??user.avatar??0)%ANIMALS.length];
   const isMe=user.id===currentUser.id;
@@ -1634,7 +1675,7 @@ const EditProfileModal=({user,onSave,onClose})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────────────────────────────────────
-const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onMensGames,mensGamesUnlocked,onSaraJay,saraJayUnlocked}) => {
+const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onQuiz,onMensGames,mensGamesUnlocked,onSaraJay,saraJayUnlocked}) => {
   const isMobile=useIsMobile();
   const isOver=e=>e.archived||new Date(`${e.end_date||e.date}T${e.end_time||"23:59"}:00`)<new Date();
   const upcoming=events.filter(e=>!isOver(e)).sort((a,b)=>new Date(a.date)-new Date(b.date));
@@ -1709,6 +1750,11 @@ const Home = ({events,onOpen,onNew,currentUser,users=[],onTeams,onTimer,onMensGa
           {[
             {icon:"🎲",title:"Team Creator",desc:"Schud willekeurige teams voor je activiteiten",onClick:onTeams,color:"var(--amber)"},
             {icon:"⏱",title:"Timer",desc:"Afteltimer voor spelletjes en activiteiten",onClick:onTimer,color:"var(--blue)"},
+            // Quiz (docs/quiz-unification-spec.md §14 decision 1, WP-Q7):
+            // unlocked by default, unlike Mens-Games/Sara Jay below -- it's
+            // an existing feature going standalone, not a new one behind an
+            // admin switch, so it never needed a locked state.
+            {icon:"🧠",title:"Quiz",desc:"Bouw of open een quiz -- los, of gekoppeld aan een event",onClick:onQuiz,color:"var(--orange)"},
             // Locked mens-games keeps its real title -- it's just a feature
             // not switched on yet, not a deliberate mystery like Sara Jay
             // (`hideTitleWhenLocked` below stays false only for this one).
@@ -1992,7 +2038,7 @@ const TeamsTab=({evt,teamSets=[],teamSetsError=null,onRetryTeamSets,onTeamSetsCh
   );
 };
 
-const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif,autoOpenTrailerId,onAutoTrailerConsumed,teamSets=[],teamSetsError=null,onRetryTeamSets,onTeamSetsChanged,mensGamesUnlocked})=>{
+const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif,autoOpenTrailerId,onAutoTrailerConsumed,teamSets=[],teamSetsError=null,onRetryTeamSets,onTeamSetsChanged,mensGamesUnlocked,quizResults=[]})=>{
   // Locked mens-games has no equivalent in the Sara Jay pattern (that
   // feature lives outside events entirely) -- per spec, a visible tab
   // leading to a locked page is worse than no tab, so it's dropped from the
@@ -2019,39 +2065,19 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
   const [editing,setEditing]=useState(false);
   const [presenting,setPresenting]=useState(false);
   const [soloOpen,setSoloOpen]=useState(false);
-  const [quizDash,setQuizDash]=useState(false);
-  const [quizDismissed,setQuizDismissed]=useState(false);
   const [presenterDetected,setPresenterDetected]=useState(false);
   const [viewerDismissed,setViewerDismissed]=useState(false);
   const [schedLive,setSchedLive]=useState(null);
-  // The live quiz, hoisted so both the rejoin banner and the overlay below
-  // read the same one. Hiding is per-session: when this quiz stops being live
-  // (or a different quiz starts), the dismissal clears so the next session
-  // isn't silently suppressed for whoever hid the last one.
-  //
-  // Discovery moved off `evt.quizzes[]._liveState` when WP-Q4 stopped writing
-  // it (docs/quiz-unification-spec.md §4.5). `useLiveQuizWatch` watches the
-  // `quiz_live` table -- realtime, plus a 30 s poll for phones where realtime
-  // never connects.
-  const {liveQuizzes}=useLiveQuizWatch();
-  const liveHereId=(liveQuizzes.find(q=>q.eventId===evt.id)||{}).id||null;
-  // The definition normally resolves locally: the builder still writes to
-  // `evt.quizzes`, so the 33 kB of rounds is already in hand and refetching
-  // it would be the exact waste this refactor exists to remove. The fetch is
-  // the fallback for a quiz that lives only as a `quizzes` row -- which is
-  // what a standalone quiz becomes once Q5/Q7 move the builder.
-  const localLiveQuiz=liveHereId?((evt.quizzes||[]).find(q=>q.id===liveHereId)||null):null;
-  const [fetchedLiveQuiz,setFetchedLiveQuiz]=useState(null);
-  const needsFetch=!!liveHereId&&!localLiveQuiz;
-  useEffect(()=>{
-    if(!needsFetch){setFetchedLiveQuiz(null);return;}
-    let alive=true;
-    fetchQuiz(liveHereId).then(res=>{if(alive&&res.ok)setFetchedLiveQuiz(res.quiz);});
-    return()=>{alive=false;};
-  },[needsFetch,liveHereId]);
-  const liveQuiz=localLiveQuiz||(fetchedLiveQuiz&&fetchedLiveQuiz.id===liveHereId?fetchedLiveQuiz:null);
-  const liveQuizId=liveQuiz?liveQuiz.id:null;
-  useEffect(()=>{setQuizDismissed(false)},[liveQuizId]);
+  // The live-quiz rejoin banner + participant overlay that used to live here
+  // (`quizDash`/`quizDismissed`/`liveQuizzes`/`localLiveQuiz`/`fetchedLiveQuiz`)
+  // moved to the App root (docs/quiz-unification-spec.md §4.5/§8.3 items 3/9-11,
+  // WP-Q8) -- a live quiz now has to reach people who aren't sat on this
+  // event's page at all (a standalone quiz has no event page), so discovery
+  // and the overlay live one level up and auto-open here the same way they
+  // used to (App root checks `pageView==="event" && activeEvent.id===
+  // liveQuiz.eventId`). `quizDash` (the "Open Quiz Dashboard" modal) moved
+  // into `QuizShell.jsx`'s event scope, mounted via the `QuizTabMount` tab
+  // below instead of being owned by this component.
   const countdown=useCountdown(evt.date,evt.start_time);
   const isPast=evt.archived;
   const isAdmin=can.editEvent(currentUser);
@@ -2225,10 +2251,10 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
       <div className="fu2">
         {tab==="Overview"             &&<OverviewTab evt={evt} onUpdate={onUpdate} isPast={isPast} currentUser={currentUser} users={users} onSendNotif={onSendNotif}/>}
         {tab==="Polls"                &&<PollsTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users} onSendNotif={onSendNotif}/>}
-        {tab==="Quiz"                 &&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><QuizTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users} onOpenQuizDash={()=>setQuizDash(true)} can={can}/></Suspense>}
+        {tab==="Quiz"                 &&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><QuizTabMount evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users} can={can} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} onSendNotif={onSendNotif}/></Suspense>}
         {tab==="Teams"                &&<TeamsTab evt={evt} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} onTeamSetsChanged={onTeamSetsChanged} currentUser={currentUser} users={users}/>}
         {tab==="Photos"               &&<PhotosTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
-        {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast}/>}
+        {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} quizResults={quizResults}/>}
         {tab==="FAQ"                  &&<FAQTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Kretjes 🍺"           &&<KretjesTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Mens-Games 🏆"&&mensGamesUnlocked&&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesTab evt={evt} events={events} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={onUpdate} onTeamSetsChanged={onTeamSetsChanged} onSendNotif={onSendNotif}/></Suspense>}
@@ -2248,20 +2274,6 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
         </div>
       )}
 
-      {/* Live quiz banner — the way back in after hiding the participant view */}
-      {liveQuiz&&quizDismissed&&!quizDash&&(
-        <div className="ann-banner" style={{position:"fixed",top:0,left:0,right:0,zIndex:999,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:"linear-gradient(90deg,rgba(15,10,2,.97),rgba(30,18,4,.97))",borderBottom:"1px solid rgba(232,148,58,.45)",padding:".7rem 1.4rem",backdropFilter:"blur(12px)"}}>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <span style={{width:8,height:8,borderRadius:"50%",background:"var(--red)",flexShrink:0,animation:"pulse 1s ease-in-out infinite",display:"inline-block"}}/>
-            <div>
-              <div style={{fontWeight:700,color:"var(--amber2)",fontSize:".88rem"}}>🧠 Quiz is live</div>
-              <div style={{fontSize:".73rem",color:"var(--muted)"}}>{liveQuiz.title||"A quiz"} is running right now</div>
-            </div>
-          </div>
-          <Btn onClick={()=>setQuizDismissed(false)} variant="primary" size="sm">▶ Rejoin</Btn>
-        </div>
-      )}
-
       {editing&&<EditEventModal evt={evt} users={users} onSave={u=>{onUpdate(u);setEditing(false)}} onClose={()=>setEditing(false)}/>}
       {presenting&&<PresentationMode evt={evt} onUpdate={onUpdate} isPresenter={true} onClose={()=>setPresenting(false)}/>}
       {!presenting&&presenterDetected&&!viewerDismissed&&<PresentationMode evt={evt} onUpdate={onUpdate} isPresenter={false} currentLive={schedLive} onHide={()=>setViewerDismissed(true)} onPresenterLeft={resetPresenter} onClose={()=>{}}/>}
@@ -2273,9 +2285,6 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
       {trailerOpen&&<Suspense fallback={null}>
         <EventTrailer input={trailerInput} onClose={()=>setTrailerOpen(false)}/>
       </Suspense>}
-      {quizDash&&<Suspense fallback={null}><QuizDashboard evt={evt} onUpdate={onUpdate} users={users} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} onClose={()=>setQuizDash(false)}/></Suspense>}
-      {/* Live quiz participant view — shown to everyone when a quiz is being presented */}
-      {liveQuiz&&!quizDash&&!quizDismissed&&<Suspense fallback={null}><QuizParticipantView liveQ={liveQuiz} currentUser={currentUser} users={users} can={can} onHide={()=>setQuizDismissed(true)}/></Suspense>}
     </div>
   );
 };
@@ -2907,21 +2916,41 @@ const PhotosTab=({evt,onUpdate,currentUser})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // WINNERS TAB
 // ─────────────────────────────────────────────────────────────────────────────
-const WinnersTab=({evt,onUpdate,currentUser})=>{
+const WinnersTab=({evt,onUpdate,currentUser,quizResults=[]})=>{
   const [addingW,setAddingW]=useState(false);const [addingH,setAddingH]=useState(false);
   const [editW,setEditW]=useState(null);const [editH,setEditH]=useState(null);
   const winners=evt.winners||[];const highlights=evt.highlights||[];
   const saveW=w=>onUpdate({...evt,winners:w});const saveH=h=>onUpdate({...evt,highlights:h});
   const isAdmin=can.addWinner(currentUser);
-  const quizWinners=(evt.quizzes||[]).filter(q=>q.status==="finished"&&q.scores&&Object.keys(q.scores).length>0).map(quiz=>{
-    const isTeam=(quiz.teams||[]).length>0;
-    const sorted=Object.entries(quiz.scores).sort((a,b)=>b[1]-a[1]);
-    if(!sorted.length)return null;
-    const [topName,topScore]=sorted[0];
-    const team=isTeam?(quiz.teams||[]).find(t=>t.name===topName):null;
-    const detail=isTeam&&team?.members?.length?`${topScore} pts · ${team.members.join(", ")}`:`${topScore} pts`;
-    return{id:`quiz-winner-${quiz.id}`,icon:isTeam?(team?.avatar||"🎯"):"🧠",category:`🧠 ${quiz.title}`,winner:topName,detail,topScore};
-  }).filter(Boolean);
+  // §7.4 (docs/quiz-unification-spec.md): once `finishQuiz` writes a real,
+  // editable `Winner` row for a finished quiz, this derived "AUTO" card would
+  // double-render next to it -- `isQuizAlreadyPublished` (features/quiz/
+  // results.js) is the exact, already-tested dedup this section names,
+  // matched on the same `qz-<quiz.id>-` prefix `pushWinnersToEvent` itself
+  // dedupes on. Legacy quizzes with no real award row keep their AUTO card.
+  // `finishedQuizzesForEvt` also folds in `quizResults` (the `quizzes`
+  // table) filtered to this event and not already present in `evt.quizzes`
+  // -- a quiz created straight from the standalone page (§14 decision 1) and
+  // linked to this event never gets an `evt.quizzes[]` entry at all (no
+  // legacy array to dual-write into), so without this it would finish and
+  // never show up here.
+  const evtQuizIds=new Set((evt.quizzes||[]).map(q=>q&&q.id));
+  const finishedQuizzesForEvt=[
+    ...(evt.quizzes||[]),
+    ...(quizResults||[]).filter(q=>q&&q.eventId===evt.id&&!evtQuizIds.has(q.id)),
+  ];
+  const quizWinners=finishedQuizzesForEvt
+    .filter(q=>q.status==="finished"&&q.scores&&Object.keys(q.scores).length>0)
+    .filter(quiz=>!isQuizAlreadyPublished(quiz,winners))
+    .map(quiz=>{
+      const isTeam=(quiz.teams||[]).length>0;
+      const sorted=Object.entries(quiz.scores).sort((a,b)=>b[1]-a[1]);
+      if(!sorted.length)return null;
+      const [topName,topScore]=sorted[0];
+      const team=isTeam?(quiz.teams||[]).find(t=>t.name===topName):null;
+      const detail=isTeam&&team?.members?.length?`${topScore} pts · ${team.members.join(", ")}`:`${topScore} pts`;
+      return{id:`quiz-winner-${quiz.id}`,icon:isTeam?(team?.avatar||"🎯"):"🧠",category:`🧠 ${quiz.title}`,winner:topName,detail,topScore};
+    }).filter(Boolean);
   return(
     <div style={{display:"grid",gap:"1.8rem"}}>
       <div>
@@ -4190,11 +4219,17 @@ const diffEvents=(prev,next)=>{
     // Start time changed
     if(old.start_time&&evt.start_time&&old.start_time!==evt.start_time)
       acts.push({id:`time-${eid}-${evt.start_time}`,type:"schedule",message:`Starttijd gewijzigd: ${evt.start_time}`,event:en,eventId:eid,timestamp:now,tab:"Overview"});
-    // Quizzes
-    (evt.quizzes||[]).forEach(quiz=>{
-      if(!(old.quizzes||[]).find(q=>q.id===quiz.id))
-        acts.push({id:`quiz-new-${quiz.id}`,type:"quiz",message:`Nieuwe quiz beschikbaar: "${quiz.title}"`,event:en,eventId:eid,timestamp:now,tab:"Quiz"});
-    });
+    // Quizzes: no longer diffed here (docs/quiz-unification-spec.md §8.3
+    // item 8, WP-Q8). A new quiz can now be created with no `events` write
+    // at all (a standalone quiz, §14 decision 1) -- this block would never
+    // fire for one -- and `QuizDashboard.jsx`/`QuizShell.jsx` now call
+    // `onSendNotif` directly the moment a quiz is actually created instead.
+    // Tradeoff, same one `docs/mensgames-spec.md`-style features already
+    // accept: fires once, from the creator's own client, rather than every
+    // connected client independently re-deriving the same notification off
+    // this `events` diff -- which stops today's duplicate-notification
+    // shape for the quiz specifically (every other activity type below
+    // keeps the old per-client-diff behaviour; out of scope here).
     // Winners announced
     const ow=(old.winners||[]).length,nw=(evt.winners||[]).length;
     if(nw>ow)
@@ -5176,10 +5211,21 @@ export default function App(){
   // them can show a false "nothing here yet" for a read that actually
   // failed.
   const [teamSetsError,setTeamSetsError]=useState(null);
+  // Finished-quiz archive (docs/quiz-unification-spec.md §8.1/§8.3 item 9,
+  // WP-Q8) -- eager, tiny, same reasoning as `teamSets` above:
+  // `computeMemberStats`/`HallOfFame`/`WinnersTab` all need it and none of
+  // them are behind the quiz's own lazy chunk. `fetchQuizResults()` never
+  // rejects (features/quiz/results.js) -- a failed read just leaves this at
+  // `[]`, same "degrade to legacy `evt.quizzes[]` data, don't block boot"
+  // posture `teamSetsError` has for the team library. No dedicated error
+  // banner: unlike the team library, nothing in this app is quiz-results-or-
+  // nothing -- the legacy per-event data these three consumers already read
+  // keeps working even if this fetch is down.
+  const [quizResults,setQuizResults]=useState([]);
   const [currentUser,setCurrentUser]=useState(null);
   const [authView,setAuthView]=useState("login");
   const [activeId,setActiveId]=useState(null);
-  const [pageView,setPageView]=useState("home"); // home | event | hof | members | member | updates | teams | timer | mensgames
+  const [pageView,setPageView]=useState("home"); // home | event | hof | members | member | updates | teams | timer | quiz | mensgames
   const [showAdmin,setShowAdmin]=useState(false);
   const [newEvent,setNewEvent]=useState(false);
   const [loaded,setLoaded]=useState(false);
@@ -5258,9 +5304,15 @@ export default function App(){
       supabase.from("users").select("*"),
       supabase.from("announcements").select("*").order("created_at",{ascending:false}),
       fetchTeamSets(),
-    ]).then(async([{data:evts},{data:usrs},{data:anns},teamSetsRes])=>{
+      fetchQuizResults(),
+    ]).then(async([{data:evts},{data:usrs},{data:anns},teamSetsRes,quizResultsRes])=>{
       setTeamSets(teamSetsRes.ok?teamSetsRes.teamSets:[]);
       setTeamSetsError(teamSetsRes.ok?null:"Kon de teams-bibliotheek niet laden. Controleer je verbinding.");
+      // Never blocks boot and has no dedicated error banner -- see this
+      // state's own declaration above for why. `quizResultsRes` always
+      // resolves ({ok,error,quizResults}, never a rejection), same contract
+      // `fetchTeamSets` has.
+      setQuizResults(quizResultsRes.ok?quizResultsRes.quizResults:[]);
       const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});
       if(anns&&anns.length){
         const sjRow=anns.find(r=>r.id==="__sara_jay__");
@@ -5312,11 +5364,18 @@ export default function App(){
     });
   };
 
+  // Same never-reject contract as `reloadTeamSets` -- a failed poll just
+  // leaves the last-known `quizResults` in place rather than clearing it.
+  const reloadQuizResults=()=>{
+    fetchQuizResults().then(res=>{if(res.ok)setQuizResults(res.quizResults);});
+  };
+
   useEffect(()=>{
     boot();
 
     const poll=setInterval(()=>{
       reloadTeamSets();
+      reloadQuizResults();
       supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data&&data.length){const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});const sjRow=data.find(r=>r.id==="__sara_jay__");if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}const mgRow=data.find(r=>r.id==="__mens_games__");if(mgRow){const v=mgRow.active!==false;setMensGamesUnlocked(v);localStorage.setItem("md-mg-unlocked",JSON.stringify(v));}const delRow=data.find(r=>r.id==="__deleted_notifs__");if(delRow){try{const raw=JSON.parse(delRow.body||"null");if(raw){const ids=new Set(Array.isArray(raw)?raw:(raw.ids||[]));const cb=Array.isArray(raw)?"": (raw.cleared_before||"");setDeletedNotifIds(ids);if(cb)setClearedBefore(cb);setNotifications(prev=>{const next=prev.filter(n=>!ids.has(n.id)&&(!cb||n.timestamp>cb));const cu=currentUserRef.current;if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));return next;});}}catch{/* ignore malformed announcement JSON from Supabase */}}const SYSTEM_IDS=new Set(["__sara_jay__","__mens_games__","__deleted_notifs__"]);const mapped=data.filter(r=>!SYSTEM_IDS.has(r.id)).map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}});
       supabase.from("users").select("*").then(({data})=>{
         if(data){
@@ -5575,6 +5634,7 @@ export default function App(){
   const openMember=id=>{setActiveMemberId(id);setPageView("member");};
   const openTeams=()=>setPageView("teams");
   const openTimer=()=>setPageView("timer");
+  const openQuiz=()=>setPageView("quiz");
   // Locked means the lazy chunk never loads, not merely that the buttons
   // are hidden -- guards anyone with the URL or stale state (e.g. a tab
   // left open across an admin toggling it off) from slipping through.
@@ -5624,6 +5684,62 @@ export default function App(){
   const activeEvent=events.find(e=>e.id===activeId);
   const activeMember=users.find(u=>u.id===activeMemberId);
 
+  // Live-quiz discovery + the app-wide banner/overlay (docs/
+  // quiz-unification-spec.md §4.5, §8.3 items 9-11, §14 decision 2 default:
+  // "a dismissible app-wide banner, auto-opening only on the linked event
+  // page"). Hoisted here from `EventPage` (which used to own an identical,
+  // per-event-only version) because a live quiz now has to be able to reach
+  // someone who isn't sat on that event's page at all -- a standalone quiz
+  // has no event page to be on. `useLiveQuizWatch` is eager (imported at the
+  // top of this file, not part of the quiz's lazy chunk) for exactly that
+  // reason: discovery has to run for a lad who never opens the quiz feature.
+  const {liveQuizzes}=useLiveQuizWatch();
+  // Prefers a live quiz linked to whatever event the lad is currently on
+  // (matches the old per-`EventPage` resolution exactly, so being on that
+  // event's page is never second-guessed by an unrelated quiz going live
+  // elsewhere) and only falls back to "any live quiz, anywhere" for the
+  // app-wide discovery banner when that's not the case.
+  const liveHere=(activeEvent&&liveQuizzes.find(q=>q.eventId===activeEvent.id))||liveQuizzes[0]||null;
+  const liveHereId=liveHere?liveHere.id:null;
+  // From `quiz_live.event_id` (via `liveQuizzes`), not the quiz *definition*
+  // object resolved below -- a quiz still living only in `evt.quizzes[]`
+  // (the "unmigrated"/legacy case) doesn't necessarily carry its own
+  // `eventId` field at all, since it's the surrounding event that nests it,
+  // not the object itself. The live row is always the authority on which
+  // event a live quiz belongs to.
+  const liveHereEventId=liveHere?liveHere.eventId:null;
+  // The definition resolves locally first -- scanning every event's
+  // `evt.quizzes[]` (not just the active one, since the banner can appear
+  // on any page) means the 33 kB of rounds is already in hand for any quiz
+  // still going through the legacy dual write, and refetching it would be
+  // the exact waste this refactor exists to remove. The fetch below is the
+  // fallback for a quiz that lives only as a `quizzes` row -- what a
+  // standalone quiz always is, and what an event-linked one becomes once
+  // its `events.quizzes[]` copy is gone (§10.4, a release away).
+  const localLiveQuiz=liveHereId?(events.flatMap(e=>e.quizzes||[]).find(q=>q.id===liveHereId)||null):null;
+  const [fetchedLiveQuiz,setFetchedLiveQuiz]=useState(null);
+  const needsLiveQuizFetch=!!liveHereId&&!localLiveQuiz;
+  useEffect(()=>{
+    if(!needsLiveQuizFetch){setFetchedLiveQuiz(null);return;}
+    let alive=true;
+    fetchQuiz(liveHereId).then(res=>{if(alive&&res.ok)setFetchedLiveQuiz(res.quiz);});
+    return()=>{alive=false;};
+  },[needsLiveQuizFetch,liveHereId]);
+  const liveQuiz=localLiveQuiz||(fetchedLiveQuiz&&fetchedLiveQuiz.id===liveHereId?fetchedLiveQuiz:null);
+  const liveQuizId=liveQuiz?liveQuiz.id:null;
+  // Per-live-quiz, not global: dismissing (or joining) one quiz's banner/
+  // overlay must not silently carry over to the next one that goes live.
+  const [quizDismissed,setQuizDismissed]=useState(false);
+  const [quizJoined,setQuizJoined]=useState(false);
+  useEffect(()=>{setQuizDismissed(false);setQuizJoined(false);},[liveQuizId]);
+  // "auto-opens only on the linked event page" -- today's exact EventPage
+  // behaviour, reproduced here instead of regressed: someone already on the
+  // event a quiz is running for still just sees it, no extra tap. Anyone
+  // else gets the banner and has to choose to join.
+  const onLiveQuizEventPage=pageView==="event"&&!!activeEvent&&!!liveQuiz&&activeEvent.id===liveHereEventId;
+  const quizOverlayOpen=!!liveQuiz&&!quizDismissed&&(onLiveQuizEventPage||quizJoined);
+  const showQuizBanner=!!liveQuiz&&!quizOverlayOpen;
+
   if(!loaded){
     // `bootError` only ever gets set by the boot Promise.all's `.catch` --
     // a genuine rejection, not one of its four calls' own resolved
@@ -5669,17 +5785,18 @@ export default function App(){
           <button onClick={()=>setWriteError(null)} style={{background:"rgba(255,255,255,.14)",border:"1px solid rgba(255,255,255,.3)",borderRadius:8,color:"#fff",padding:"6px 14px",cursor:"pointer",fontSize:".75rem",fontWeight:700,fontFamily:"var(--font-b)",minHeight:44,display:"flex",alignItems:"center"}}>Dismiss</button>
         </div>
       )}
-      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onUpdates={()=>setPageView("updates")} onProfile={()=>openMember(currentUser.id)} onTeams={openTeams} onTimer={openTimer} onMensGames={openMensGames} mensGamesUnlocked={mensGamesUnlocked} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>
+      <Nav view={pageView} eventName={pageView==="member"?(activeMember?.display_name||activeMember?.username||"Lid"):activeEvent?.name} onBack={goBack} currentUser={currentUser} onLogout={logout} onAdmin={()=>setShowAdmin(true)} onAnnounce={()=>setShowAnnounce(true)} onHof={()=>setPageView("hof")} onHome={goHome} onMembers={()=>setPageView("members")} pendingCount={users.filter(u=>u.role==="pending").length} notifications={notifications} notifLastRead={notifLastRead} onUpdates={()=>setPageView("updates")} onProfile={()=>openMember(currentUser.id)} onTeams={openTeams} onTimer={openTimer} onQuiz={openQuiz} onMensGames={openMensGames} mensGamesUnlocked={mensGamesUnlocked} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
         <AnnouncementBanner announcements={announcements} currentUser={currentUser} onArchive={archiveAnnouncement} onHardDelete={hardDeleteAnnouncement} onReactivate={reactivateAnnouncement} onEdit={ann=>{setEditingAnn(ann);setShowAnnounce(true);}} onNew={()=>{setEditingAnn(null);setShowAnnounce(true);}}/>
-        {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users} onTeams={openTeams} onTimer={openTimer} onMensGames={openMensGames} mensGamesUnlocked={mensGamesUnlocked} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>}
-        {pageView==="hof"&&<HallOfFame events={events} users={users} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets}/>}
-        {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser}/>}
-        {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)}/>}
-        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} onTeamSetsChanged={setTeamSets} mensGamesUnlocked={mensGamesUnlocked}/>}
+        {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users} onTeams={openTeams} onTimer={openTimer} onQuiz={openQuiz} onMensGames={openMensGames} mensGamesUnlocked={mensGamesUnlocked} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>}
+        {pageView==="hof"&&<HallOfFame events={events} users={users} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} quizResults={quizResults}/>}
+        {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser} quizResults={quizResults}/>}
+        {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)} quizResults={quizResults}/>}
+        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} onTeamSetsChanged={setTeamSets} mensGamesUnlocked={mensGamesUnlocked} quizResults={quizResults}/>}
         {pageView==="updates"&&<UpdatesPage notifications={notifications.filter(n=>!deletedNotifIds.has(n.id)&&(!clearedBefore||n.timestamp>clearedBefore))} notifLastRead={notifLastRead} currentUser={currentUser} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={openEvent} onClearSelf={()=>{setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);}} onDeleteSelf={id=>{setNotifications(prev=>{const next=prev.filter(n=>n.id!==id);if(currentUser)localStorage.setItem(`md-notifs-${currentUser.id}`,JSON.stringify(next));return next;});}} onClearUpdates={async()=>{const cb=new Date().toISOString();const allIds=[...new Set([...deletedNotifIds,...notifications.map(n=>n.id)])];const newSet=new Set(allIds);setDeletedNotifIds(newSet);setClearedBefore(cb);setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);const body=JSON.stringify({ids:allIds,cleared_before:cb});await supabase.from("announcements").upsert({id:"__deleted_notifs__",title:"__deleted_notifs__",body,created_by:"system",created_at:new Date().toISOString(),active:false});supabase.channel("notif-ctrl").send({type:"broadcast",event:"clear-notifs",payload:{ids:allIds,cleared_before:cb}});}} onDeleteNotif={deleteNotifForAll}/>}
         {pageView==="teams"&&<TeamCreatorPage users={users} events={events} currentUser={currentUser} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} onTeamSetsChanged={setTeamSets}/>}
         {pageView==="timer"&&<TimerPage/>}
+        {pageView==="quiz"&&<Suspense fallback={<div style={{padding:"3rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><QuizPage events={events} users={users} currentUser={currentUser} can={can} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} onUpdateEvent={updateEvent} onSendNotif={sendNotifToAll}/></Suspense>}
         {pageView==="mensgames"&&mensGamesUnlocked&&<Suspense fallback={<div style={{padding:"3rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesPage events={events} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={updateEvent} onTeamSetsChanged={setTeamSets} onSendNotif={sendNotifToAll}/></Suspense>}
         {pageView==="sarajay"&&<SaraJayOrJAI/>}
       </main>
@@ -5706,6 +5823,33 @@ export default function App(){
       }} onClose={()=>setNewEvent(false)}/>}
       {editingProfile&&<EditProfileModal user={currentUser} onSave={async u=>{await saveProfile(u);setEditingProfile(false);}} onClose={()=>setEditingProfile(false)}/>}
       {teaserEvent&&<TeaserModal evt={teaserEvent} onWatch={teaserWatch} onSkip={teaserSkip}/>}
+
+      {/* App-wide live-quiz banner (docs/quiz-unification-spec.md §14
+          decision 2 default) -- reaches a lad who isn't on the linked
+          event's page at all (or a standalone quiz, which has no event page
+          to be on). Shown whenever the overlay below isn't already up: that
+          covers both today's exact "▶ Rejoin" case (closed the overlay
+          after joining) and the new discovery case (never joined, and not
+          on the linked event's page), which is why the label switches on
+          `quizDismissed` -- "join" and "rejoin" are the same action here. */}
+      {showQuizBanner&&(
+        <div className="ann-banner" style={{position:"fixed",top:0,left:0,right:0,zIndex:999,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:"linear-gradient(90deg,rgba(15,10,2,.97),rgba(30,18,4,.97))",borderBottom:"1px solid rgba(232,148,58,.45)",padding:".7rem 1.4rem",backdropFilter:"blur(12px)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{width:8,height:8,borderRadius:"50%",background:"var(--red)",flexShrink:0,animation:"pulse 1s ease-in-out infinite",display:"inline-block"}}/>
+            <div>
+              <div style={{fontWeight:700,color:"var(--amber2)",fontSize:".88rem"}}>🔴 Quiz bezig — meedoen</div>
+              <div style={{fontSize:".73rem",color:"var(--muted)"}}>{liveQuiz.title||"Een quiz"} is nu bezig{liveHereEventId&&events.find(e=>e.id===liveHereEventId)?` · ${events.find(e=>e.id===liveHereEventId).name}`:""}</div>
+            </div>
+          </div>
+          <Btn onClick={()=>{setQuizDismissed(false);setQuizJoined(true);}} variant="primary" size="sm">{quizDismissed?"▶ Rejoin":"▶ Meedoen"}</Btn>
+        </div>
+      )}
+      {/* Live quiz participant view -- app-wide now (moved from `EventPage`,
+          §8.3 items 9-11): auto-opens only while on the linked event's page
+          (`onLiveQuizEventPage`, computed above), reproducing today's exact
+          behaviour there; everywhere else it opens only once the banner's
+          been tapped. */}
+      {quizOverlayOpen&&<Suspense fallback={null}><QuizParticipantView liveQ={liveQuiz} currentUser={currentUser} users={users} can={can} onHide={()=>setQuizDismissed(true)}/></Suspense>}
     </div>
   );
 }

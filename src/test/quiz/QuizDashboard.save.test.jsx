@@ -74,6 +74,35 @@ describe('QuizDashboard -- new quiz creation writes both places at rev 1', () =>
     // Same id both places -- there is exactly one quiz, not two.
     expect(saveQuiz.mock.calls[0][0].id).toBe(legacyQuiz.id);
   });
+
+  // §8.3 item 8: a brand-new quiz notifies once, from the creator's own
+  // client -- replacing `diffEvents`' per-client-diff notification, which
+  // never fires at all for a quiz that skips `events.quizzes[]` entirely
+  // (a standalone one).
+  it('calls onSendNotif exactly once for a new quiz', async () => {
+    const onSendNotif = vi.fn();
+    const evt = { id: 'evt-2026', name: 'Kroegentocht', quizzes: [], attendees: [] };
+    render(<QuizDashboard evt={evt} onUpdate={async (next) => next} onClose={() => {}} users={[]} teamSets={[]} onSendNotif={onSendNotif} />);
+
+    fireEvent.click(screen.getAllByText('+ New Quiz')[0]);
+    fireEvent.click(await screen.findByText('stub-save'));
+
+    expect(onSendNotif).toHaveBeenCalledTimes(1);
+    expect(onSendNotif.mock.calls[0][0]).toMatchObject({ type: 'quiz', eventId: 'evt-2026', event: 'Kroegentocht' });
+    expect(onSendNotif.mock.calls[0][0].message).toContain('Herziene titel');
+  });
+
+  it('does not call onSendNotif for an edit to an existing quiz', async () => {
+    const onSendNotif = vi.fn();
+    const QUIZ = { id: 'qz1', title: 'Pubquiz', status: 'ready', rounds: [{ id: 'r0', title: 'Round 1', questions: [] }], teams: [], scores: {} };
+    const evt = { id: 'evt-2026', name: 'Kroegentocht', quizzes: [QUIZ], attendees: [] };
+    render(<QuizDashboard evt={evt} onUpdate={async (next) => next} onClose={() => {}} users={[]} teamSets={[]} onSendNotif={onSendNotif} />);
+
+    fireEvent.click(screen.getByText('Pubquiz'));
+    fireEvent.click(await screen.findByText('stub-save'));
+
+    expect(onSendNotif).not.toHaveBeenCalled();
+  });
 });
 
 describe('QuizDashboard -- editing bumps rev and writes both places, for every migration-state group', () => {
@@ -173,5 +202,40 @@ describe('QuizDashboard -- duplicate and delete stay consistent across both writ
 
     expect(onUpdate.mock.calls[0][0].quizzes).toEqual([]);
     expect(deleteQuiz).toHaveBeenCalledWith('qz1');
+  });
+});
+
+// docs/quiz-unification-spec.md §8.1, WP-Q7: `initialQuizId`/`initialNew`
+// let `QuizShell.jsx`'s standalone page land a lad straight in a specific
+// quiz's edit panel (or straight in "+ New Quiz"), instead of always
+// opening on the plain "Select a quiz to edit" welcome screen -- both
+// default to falsy, so every test above (which never passes them) is
+// exercising the exact same welcome-screen default this section proves is
+// still there when neither prop is given.
+describe('QuizDashboard -- initialQuizId/initialNew (WP-Q7 standalone page delegation)', () => {
+  it('opens with no props: the plain welcome screen, unaffected', () => {
+    const evt = { id: 'evt-2026', name: 'Kroegentocht', quizzes: [{ id: 'qz1', title: 'Pubquiz', status: 'ready', rounds: [], teams: [], scores: {} }], attendees: [] };
+    render(<QuizDashboard evt={evt} onUpdate={() => {}} onClose={() => {}} users={[]} teamSets={[]} />);
+    expect(screen.getByText('Select a quiz to edit')).toBeInTheDocument();
+  });
+
+  it('initialQuizId lands straight in that quiz\'s edit panel', () => {
+    const evt = { id: 'evt-2026', name: 'Kroegentocht', quizzes: [{ id: 'qz1', title: 'Pubquiz', status: 'ready', rounds: [{ id: 'r0', title: 'Round 1', questions: [] }], teams: [], scores: {} }], attendees: [] };
+    render(<QuizDashboard evt={evt} onUpdate={() => {}} onClose={() => {}} users={[]} teamSets={[]} initialQuizId="qz1" />);
+    expect(screen.queryByText('Select a quiz to edit')).not.toBeInTheDocument();
+    expect(screen.getByText('stub-save')).toBeInTheDocument();
+  });
+
+  it('an initialQuizId that does not exist in evt.quizzes falls back to the welcome screen rather than crashing', () => {
+    const evt = { id: 'evt-2026', name: 'Kroegentocht', quizzes: [], attendees: [] };
+    render(<QuizDashboard evt={evt} onUpdate={() => {}} onClose={() => {}} users={[]} teamSets={[]} initialQuizId="does-not-exist" />);
+    expect(screen.getByText('Select a quiz to edit')).toBeInTheDocument();
+  });
+
+  it('initialNew lands straight in "+ New Quiz", even with existing quizzes and an initialQuizId also set', () => {
+    const evt = { id: 'evt-2026', name: 'Kroegentocht', quizzes: [{ id: 'qz1', title: 'Pubquiz', status: 'ready', rounds: [], teams: [], scores: {} }], attendees: [] };
+    render(<QuizDashboard evt={evt} onUpdate={() => {}} onClose={() => {}} users={[]} teamSets={[]} initialQuizId="qz1" initialNew={true} />);
+    expect(screen.queryByText('Select a quiz to edit')).not.toBeInTheDocument();
+    expect(screen.getByText('stub-save')).toBeInTheDocument();
   });
 });

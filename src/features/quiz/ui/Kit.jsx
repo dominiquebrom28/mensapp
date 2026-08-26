@@ -115,3 +115,42 @@ export const TeamSetsErrorNotice = ({ onRetry }) => (
     {onRetry && <Btn onClick={onRetry} variant="danger" size="sm">Opnieuw proberen</Btn>}
   </div>
 );
+
+// Filter/sub-tab button. Exists because `QuizShell` originally reached for
+// mens-games' `.mg-subtab` CSS class, which is only injected by
+// `MensGamesShell` -- so inside the quiz feature the class matched nothing
+// and every tab fell back to the user-agent button default: a #efefef grey
+// background under cream text (unreadable), roughly 24px tall, no pointer
+// cursor. Same shape of bug the owner reported twice in August, from the
+// same cause each time: a control whose visible state depends on styling
+// that isn't actually there.
+//
+// Values are `.mg-subtab`'s own, inlined so this cannot happen again by
+// forgetting to import a stylesheet. App.jsx has a near-identical `TabBtn`
+// that can't be shared -- see the fork note there and docs/ux-plan.md.
+export const SubTab = ({ active, onClick, children, style = {} }) => (
+  <button
+    onClick={onClick}
+    style={{
+      background: "none",
+      border: "none",
+      borderBottom: active ? "2px solid var(--amber)" : "2px solid transparent",
+      color: active ? "var(--amber2)" : "var(--muted)",
+      fontWeight: active ? 600 : 400,
+      cursor: "pointer",
+      padding: "8px 14px",
+      whiteSpace: "nowrap",
+      fontFamily: "var(--font-b)",
+      fontSize: ".83rem",
+      transition: "color .15s,background .15s",
+      borderRadius: "8px 8px 0 0",
+      minHeight: 44,
+      marginBottom: -1,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      ...style,
+    }}>
+    {children}
+  </button>
+);

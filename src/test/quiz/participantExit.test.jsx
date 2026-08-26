@@ -85,26 +85,29 @@ describe('QuizParticipantView exit', () => {
   })
 })
 
-// EventPage's half of the fix. Mounting the whole app with a live quiz just
-// to read one banner isn't worth the fragility (same call
+// The App root's half of the fix -- moved there from EventPage in WP-Q8
+// (docs/quiz-unification-spec.md §4.5/§8.3 items 9-11) so a live quiz can
+// reach a lad who isn't on the linked event's page at all (a standalone
+// quiz has no event page). Mounting the whole app with a live quiz just to
+// read one banner isn't worth the fragility (same call
 // modalBackdrop.wiring.test.js makes), so this asserts the wiring against
 // App.jsx's source text: the overlay must be gated on the dismissal, the
 // dismissal must clear when the live session changes, and there must be a
 // way back in.
-describe('EventPage wiring', () => {
+describe('App root wiring', () => {
   const source = readFileSync(path.join(process.cwd(), 'src', 'App.jsx'), 'utf-8')
 
-  it('gates the overlay on the dismissal and passes onHide', () => {
-    expect(source).toMatch(/\{liveQuiz&&!quizDash&&!quizDismissed&&<Suspense/)
+  it('gates the overlay on the dismissal (and auto-open state) and passes onHide', () => {
+    expect(source).toMatch(/\{quizOverlayOpen&&<Suspense/)
     expect(source).toMatch(/<QuizParticipantView[^/]*onHide=\{\(\)=>setQuizDismissed\(true\)\}/)
   })
 
   it('clears the dismissal when the live quiz changes, so the next session is not suppressed', () => {
-    expect(source).toMatch(/useEffect\(\(\)=>\{setQuizDismissed\(false\)\},\[liveQuizId\]\)/)
+    expect(source).toMatch(/useEffect\(\(\)=>\{setQuizDismissed\(false\);setQuizJoined\(false\);\},\[liveQuizId\]\)/)
   })
 
-  it('shows a rejoin banner while hidden', () => {
-    expect(source).toMatch(/\{liveQuiz&&quizDismissed&&!quizDash&&\(/)
-    expect(source).toMatch(/onClick=\{\(\)=>setQuizDismissed\(false\)\}[^>]*>▶ Rejoin</)
+  it('shows a rejoin/join banner while hidden or not yet joined', () => {
+    expect(source).toMatch(/\{showQuizBanner&&\(/)
+    expect(source).toMatch(/onClick=\{\(\)=>\{setQuizDismissed\(false\);setQuizJoined\(true\);\}\}[^>]*>\{quizDismissed\?"▶ Rejoin":"▶ Meedoen"\}</)
   })
 })

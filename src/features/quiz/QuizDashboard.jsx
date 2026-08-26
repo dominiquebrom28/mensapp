@@ -13,12 +13,30 @@ import { QuizPresenter } from './QuizPresenter.jsx';
 import { computeMemberScores, finishQuiz } from './finishQuiz.js';
 import { deleteQuiz, saveQuiz } from './api.js';
 
-const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=null,onRetryTeamSets})=>{
+const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=null,onRetryTeamSets,onSendNotif,initialQuizId=null,initialNew=false})=>{
   const quizzes=evt.quizzes||[];
   const saveQuizzes=q=>onUpdate({...evt,quizzes:q});
 
-  const [panel,setPanel]=useState("welcome");   // "welcome" | "new" | "edit"
-  const [editTarget,setEditTarget]=useState(null);
+  // `initialQuizId`/`initialNew` (docs/quiz-unification-spec.md §8.1, WP-Q7):
+  // let a caller land straight in this quiz's edit panel, or straight in
+  // "+ New Quiz", instead of always opening on the plain welcome screen --
+  // used by the standalone quiz page (`QuizShell.jsx`) when a lad opens an
+  // event-linked quiz from there, so it doesn't dump them into "pick a quiz
+  // from the sidebar" after they already picked one. Both default to the
+  // falsy values that reproduce today's exact behaviour when absent (every
+  // existing caller -- the event tab's own "Open Quiz Dashboard" button).
+  const [panel,setPanel]=useState(()=>{
+    if(initialNew)return"new";
+    if(initialQuizId&&quizzes.some(q=>q.id===initialQuizId))return"edit";
+    return"welcome";
+  });   // "welcome" | "new" | "edit"
+  const [editTarget,setEditTarget]=useState(()=>{
+    if(!initialNew&&initialQuizId){
+      const found=quizzes.find(q=>q.id===initialQuizId);
+      if(found)return normalizeQuiz(found);
+    }
+    return null;
+  });
   const [presenterQuiz,setPresenterQuiz]=useState(null);
   // WP-Q6 (docs/quiz-unification-spec.md §7.2): a failed publish after a
   // quiz finished -- distinct from a rendering error, holds what's needed
@@ -289,7 +307,8 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=nu
                   // landed yet.
                   const nowIso=new Date().toISOString();
                   let fullQuiz;
-                  if(panel==="new"){
+                  const wasNew=panel==="new";
+                  if(wasNew){
                     fullQuiz={...quiz,id:`qz${Date.now()}`,eventId:evt.id,status:"ready",scores:{},memberScores:{},participants:[],settings:{secret:false,published:false},rev:1,createdBy:"",createdAt:nowIso,updatedAt:nowIso,finishedAt:null};
                     saveQuizzes([...quizzes,fullQuiz]);
                   } else {
@@ -313,6 +332,15 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=nu
                   }
                   closePanel();
                   persistQuizRow(fullQuiz);
+                  // §8.3 item 8: a brand-new quiz notifies once, from the
+                  // creator's own client, instead of every connected
+                  // client independently re-deriving the same notification
+                  // off an `events` realtime diff (today's duplicate-notif
+                  // shape for every OTHER activity type too, but the quiz's
+                  // own diff block is the one this work package removes --
+                  // see `diffEvents` in App.jsx). Fires after both writes
+                  // are in flight, never blocking on either.
+                  if(wasNew)onSendNotif?.({message:`Nieuwe quiz beschikbaar: "${fullQuiz.title}"`,type:"quiz",tab:"Quiz",targetId:null,eventId:evt.id,event:evt.name});
                 }}
                 onCancel={closePanel}/>
             </div>

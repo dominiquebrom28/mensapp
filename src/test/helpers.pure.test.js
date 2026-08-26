@@ -252,6 +252,34 @@ describe('computeMemberStats', () => {
     expect(stats).toMatchObject({ mensdays: 0, weekends: 0, quizWins: 0, total: 0 })
     expect(stats.mentions).toEqual([])
   })
+
+  // docs/quiz-unification-spec.md §8.3 item 1: third, optional `quizResults`
+  // arg -- feeds wins from the `quizzes` table (WP-Q2's `fetchQuizResults()`)
+  // alongside the `evt.quizzes[]` scan above. Every existing call above
+  // passes only two args and is unaffected (default `[]`).
+  it('counts a quiz win from `quizResults` when there is no matching evt.quizzes[] entry (a standalone quiz)', () => {
+    const quizResults = [{ id: 'qz-standalone', status: 'finished', scores: { Doom: 90, Bram: 40 } }]
+    const stats = computeMemberStats('Doom', events, quizResults)
+    // events[0] alone already gives Doom one win -- this proves the second
+    // source adds on top rather than replacing it.
+    expect(stats.quizWins).toBe(2)
+    expect(computeMemberStats('Bram', events, quizResults).quizWins).toBe(0)
+  })
+
+  it('does not double-count a quiz present in both evt.quizzes[] and quizResults (the "new"/dual-write state)', () => {
+    const dualWriteEvents = [
+      { archived: true, type: 'day', attendees: [{ name: 'Doom', status: 'went' }], quizzes: [{ id: 'qz-dual', scores: { Doom: 300, Bram: 100 } }], winners: [] },
+    ]
+    // Same id as the embedded quiz -- must be skipped, not added on top of
+    // the win already counted from the `evt.quizzes[]` scan.
+    const quizResults = [{ id: 'qz-dual', status: 'finished', scores: { Doom: 300, Bram: 100 } }]
+    const stats = computeMemberStats('Doom', dualWriteEvents, quizResults)
+    expect(stats.quizWins).toBe(1)
+  })
+
+  it('defaults `quizResults` to empty and behaves exactly as the two-arg call when omitted', () => {
+    expect(computeMemberStats('Doom', events)).toEqual(computeMemberStats('Doom', events, []))
+  })
 })
 
 describe('formatEventDateRange', () => {
