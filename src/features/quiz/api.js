@@ -232,6 +232,28 @@ export async function quizRowExists(id) {
   return { ok: true, error: null, exists: Array.isArray(data) && data.length > 0 };
 }
 
+// Narrow event-link patch (QuizShell.jsx's link/relink/unlink feature,
+// 2026-08-26) -- same rationale as `patchQuiz` right above: a quiz's
+// `event_id` is one column, so changing it should never re-send the ~33 kB
+// `rounds` blob via `saveQuiz`'s full-row upsert. `.update().eq('id',…)` on
+// a row that doesn't exist yet (a legacy-only quiz with no `quizzes` row at
+// all) is a silent, harmless no-op, not an error -- `QuizShell.jsx`'s
+// `applyLink` checks for that case itself (via the `tableQuizzes` list it
+// already holds) and falls back to a full `saveQuiz` seed instead of
+// calling this function, exactly like `finishQuiz.js`'s
+// `persistFinishedQuiz` already does for the identical no-row trap.
+export async function patchQuizEventId(id, eventId) {
+  const { error } = await supabase
+    .from('quizzes')
+    .update({ event_id: eventId ?? null, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) {
+    console.error('patchQuizEventId failed:', error);
+    return { ok: false, error };
+  }
+  return { ok: true, error: null };
+}
+
 export async function deleteQuiz(id) {
   const { error } = await supabase.from('quizzes').delete().eq('id', id);
   if (error) {
