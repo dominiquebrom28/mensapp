@@ -59,48 +59,56 @@ describe('matchQuizNames', () => {
 });
 
 describe('pullQuizResults', () => {
+  // docs/quiz-unification-spec.md §8.4 / §9: WP-Q10 repoints this at a
+  // directly-picked quiz object (`mensgames/quizPicker.js` resolves it),
+  // not an event to search inside — these cases now pass the quiz itself.
   const round = { id: 'rnd_1', format: 'quiz', source: { type: 'quiz', eventId: 'evt-2026', quizId: 'q1', nameMap: {}, raw: {}, pulledAt: null } };
 
   it('freezes a snapshot of quiz.scores into source.raw/pulledAt', () => {
-    const event = { quizzes: [{ id: 'q1', status: 'finished', scores: { 'Team Alfa': 300 } }] };
-    const result = pullQuizResults(round, event, '2026-09-12T20:11:00Z');
+    const quiz = { id: 'q1', status: 'finished', scores: { 'Team Alfa': 300 } };
+    const result = pullQuizResults(round, quiz, '2026-09-12T20:11:00Z');
     expect(result.source.raw).toEqual({ 'Team Alfa': 300 });
     expect(result.source.pulledAt).toBe('2026-09-12T20:11:00Z');
   });
 
   it('does not mutate the input round', () => {
-    const event = { quizzes: [{ id: 'q1', status: 'finished', scores: { a: 1 } }] };
+    const quiz = { id: 'q1', status: 'finished', scores: { a: 1 } };
     const before = JSON.stringify(round);
-    pullQuizResults(round, event, 'now');
+    pullQuizResults(round, quiz, 'now');
     expect(JSON.stringify(round)).toBe(before);
   });
 
   it('a later edit to the live quiz cannot mutate an already-pulled snapshot', () => {
     const scores = { 'Team Alfa': 300 };
-    const event = { quizzes: [{ id: 'q1', status: 'finished', scores } ] };
-    const pulled = pullQuizResults(round, event, 't1');
+    const quiz = { id: 'q1', status: 'finished', scores };
+    const pulled = pullQuizResults(round, quiz, 't1');
     scores['Team Alfa'] = 999999; // simulate a later quiz edit on the live object
     expect(pulled.source.raw['Team Alfa']).toBe(300);
   });
 
-  it('returns the round unchanged if no finished quiz matches quizId', () => {
-    const event = { quizzes: [{ id: 'q1', status: 'draft', scores: { a: 1 } }] };
-    expect(pullQuizResults(round, event, 'now')).toBe(round);
+  it('returns the round unchanged if the quiz is not finished', () => {
+    const quiz = { id: 'q1', status: 'draft', scores: { a: 1 } };
+    expect(pullQuizResults(round, quiz, 'now')).toBe(round);
   });
 
-  it('returns the round unchanged if the event has no quizzes at all', () => {
-    expect(pullQuizResults(round, {}, 'now')).toBe(round);
+  it('returns the round unchanged if no quiz is passed at all', () => {
+    expect(pullQuizResults(round, undefined, 'now')).toBe(round);
     expect(pullQuizResults(round, null, 'now')).toBe(round);
   });
 
   it('never throws on a round with no source (not a quiz round)', () => {
-    expect(pullQuizResults({ id: 'rnd_2' }, {}, 'now')).toEqual({ id: 'rnd_2' });
-    expect(pullQuizResults(null, {}, 'now')).toBeNull();
+    expect(pullQuizResults({ id: 'rnd_2' }, { id: 'q1', status: 'finished' }, 'now')).toEqual({ id: 'rnd_2' });
+    expect(pullQuizResults(null, { id: 'q1', status: 'finished' }, 'now')).toBeNull();
   });
 
   it('defaults quiz.scores to {} when the quiz row has none', () => {
-    const event = { quizzes: [{ id: 'q1', status: 'finished' }] };
-    const result = pullQuizResults(round, event, 'now');
+    const quiz = { id: 'q1', status: 'finished' };
+    const result = pullQuizResults(round, quiz, 'now');
     expect(result.source.raw).toEqual({});
+  });
+
+  it('refuses to snapshot a quiz whose id does not match round.source.quizId', () => {
+    const quiz = { id: 'some-other-quiz', status: 'finished', scores: { a: 1 } };
+    expect(pullQuizResults(round, quiz, 'now')).toBe(round);
   });
 });

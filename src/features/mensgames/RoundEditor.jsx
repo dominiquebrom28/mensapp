@@ -9,7 +9,7 @@
 // formats, so there's no ambiguous "what happens to the existing matches"
 // case to reason about.
 import { useMemo, useState } from 'react';
-import { Btn, Card, Divider, H, Inp, Lbl, Stepper, Tag } from './ui/Kit.jsx';
+import { Btn, Card, Divider, EmptyState, ErrorState, H, Inp, Lbl, Stepper, Tag } from './ui/Kit.jsx';
 import ConfigFields from './ConfigFields.jsx';
 import EntrantPicker from './EntrantPicker.jsx';
 import MatchRow from './MatchRow.jsx';
@@ -17,6 +17,7 @@ import { blankMatch, generateRandomPairs, generateRoundRobin } from './model.js'
 import { getScoringType, listScoringTypes, SCORING_TYPES } from './scoring/index.js';
 import { rankRound } from './standings.js';
 import { matchQuizNames, pullQuizResults } from './quizRound.js';
+import { useFinishedQuizzes } from './quizPicker.js';
 import { useRoundTimer } from './useRoundTimer.js';
 import { ROUND_TIMER_MAX_SECONDS, ROUND_TIMER_MIN_SECONDS } from './constants.js';
 
@@ -96,37 +97,91 @@ function CompactTimer({ seconds, onChangeSeconds, disabled }) {
   );
 }
 
+const QUIZ_SELECT_STYLE = { background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 10, padding: '11px 14px', color: 'var(--cream)', fontSize: '.88rem', minHeight: 44, width: '100%' };
+
 function QuizPanel({ round, entrants, events, onChange, disabled }) {
   const source = round.source || {};
-  const selectedEvent = (events || []).find((e) => e.id === source.eventId) || null;
-  const finishedQuizzes = (selectedEvent?.quizzes || []).filter((q) => q.status === 'finished');
+  const { quizzes: allQuizzes, hiddenSecret, loading, error, isMissingTable, refetch } = useFinishedQuizzes(events);
+
+  // The event picker is an *optional* filter now (owner brief, 2026-08-26 —
+  // extends docs/quiz-unification-spec.md §8.4): a quiz can exist with no
+  // event at all, so requiring one first would hide it. `source.eventId`
+  // keeps its old meaning for a round configured before this change (it
+  // still narrows the list to that event by default), but nothing about
+  // finding or pulling a quiz depends on it any more.
+  const filterEventId = source.eventId || '';
+  const filtered = filterEventId ? allQuizzes.filter((q) => q.eventId === filterEventId) : allQuizzes;
+  const selectedQuiz = allQuizzes.find((q) => q.id === source.quizId) || null;
+  // A round configured before this change (or against a filter that no
+  // longer matches) must never look like its quiz vanished — surface it as
+  // an extra option rather than silently hiding the current selection.
+  const quizOptions = (selectedQuiz && !filtered.some((q) => q.id === selectedQuiz.id))
+    ? [selectedQuiz, ...filtered]
+    : filtered;
+
   const hasRaw = source.raw && Object.keys(source.raw).length > 0;
   const { matched, unmatched } = useMemo(() => matchQuizNames(source.raw, entrants, source.nameMap), [source.raw, source.nameMap, entrants]);
   const ranking = hasRaw ? rankRound(round) : [];
 
   const setSource = (patch) => onChange({ ...round, source: { ...source, ...patch } });
+  const eventNameFor = (id) => (events || []).find((e) => e.id === id)?.name || null;
+  const optionLabel = (q) => `${q.title || 'Naamloze quiz'} — ${q.eventId ? (eventNameFor(q.eventId) || 'gekoppeld event') : 'Losstaand'}`;
 
   return (
     <div style={{ display: 'grid', gap: '.8rem' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: '.7rem' }}>
         <div>
-          <Lbl htmlFor="mg-quiz-evt">Event</Lbl>
-          <select id="mg-quiz-evt" value={source.eventId || ''} disabled={disabled} onChange={(e) => setSource({ eventId: e.target.value || null, quizId: null, nameMap: {}, raw: {}, pulledAt: null })} style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 10, padding: '11px 14px', color: 'var(--cream)', fontSize: '.88rem', minHeight: 44, width: '100%' }}>
-            <option value="">Kies een event…</option>
+          <Lbl htmlFor="mg-quiz-evt">Event (filter, optioneel)</Lbl>
+          <select id="mg-quiz-evt" value={filterEventId} disabled={disabled} onChange={(e) => setSource({ eventId: e.target.value || null })} style={QUIZ_SELECT_STYLE}>
+            <option value="">Alle quizzes</option>
             {(events || []).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
         </div>
         <div>
           <Lbl htmlFor="mg-quiz-quiz">Quiz (afgerond)</Lbl>
-          <select id="mg-quiz-quiz" value={source.quizId || ''} disabled={disabled || !selectedEvent} onChange={(e) => setSource({ quizId: e.target.value || null, nameMap: {}, raw: {}, pulledAt: null })} style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 10, padding: '11px 14px', color: 'var(--cream)', fontSize: '.88rem', minHeight: 44, width: '100%' }}>
-            <option value="">{selectedEvent ? 'Kies een quiz…' : 'Kies eerst een event'}</option>
-            {finishedQuizzes.map((q) => <option key={q.id} value={q.id}>{q.title || 'Naamloze quiz'}</option>)}
+          <select id="mg-quiz-quiz" value={source.quizId || ''} disabled={disabled || loading} onChange={(e) => setSource({ quizId: e.target.value || null, nameMap: {}, raw: {}, pulledAt: null })} style={QUIZ_SELECT_STYLE}>
+            <option value="">{loading ? 'Quizzes laden…' : 'Kies een afgeronde quiz…'}</option>
+            {quizOptions.map((q) => <option key={q.id} value={q.id}>{optionLabel(q)}</option>)}
           </select>
-          {selectedEvent && finishedQuizzes.length === 0 && <div style={{ fontSize: '.75rem', color: 'var(--muted)', marginTop: 4 }}>Dit event heeft nog geen afgeronde quiz.</div>}
+          {source.quizId && !selectedQuiz && !loading && (
+            <div style={{ fontSize: '.75rem', color: 'var(--red)', marginTop: 4 }}>⚠ Deze quiz kan niet gevonden worden — mogelijk verwijderd.</div>
+          )}
         </div>
       </div>
+
+      {!loading && error && (
+        <ErrorState
+          message={isMissingTable
+            ? 'De quiz-tabel bestaat nog niet in de database (migratie nog niet gedraaid). Afgeronde quizzes uit oude events staan hieronder wel gewoon.'
+            : 'Kon de quizzes niet laden uit de database. Wat hieronder staat komt alleen uit oude events — probeer opnieuw voor de rest.'}
+          onRetry={refetch}
+        />
+      )}
+
+      {!loading && !error && allQuizzes.length === 0 && (
+        <EmptyState
+          icon="🧠"
+          title={hiddenSecret > 0 ? 'Alleen geheime quizzes gevonden' : 'Nog geen afgeronde quiz gevonden'}
+          hint={hiddenSecret > 0
+            ? 'Een geheime quiz blijft hier verborgen tot je hem onthult — anders verklap je de uitslag via de mens-games.'
+            : 'Rond eerst een quiz af via de Quiz-tool — los of gekoppeld aan een event — en die verschijnt dan hier.'}
+        />
+      )}
+
+      {/* A secret quiz is correctly withheld, but withheld and non-existent
+          look identical in a dropdown. Saying so turns a silent gap into an
+          explanation -- the same failure shape that cost this project an
+          evening. Deliberately vague about the count for table-only
+          quizzes: `fetchQuizResults()` filters those server-side before we
+          ever see them, so this number only covers the legacy half. */}
+      {!loading && allQuizzes.length > 0 && hiddenSecret > 0 && (
+        <div style={{ fontSize: '.74rem', color: 'var(--muted)' }}>
+          🔒 {hiddenSecret === 1 ? 'Eén afgeronde quiz staat' : `${hiddenSecret} afgeronde quizzes staan`} nog op geheim en {hiddenSecret === 1 ? 'is' : 'zijn'} hier verborgen.
+        </div>
+      )}
+
       <div>
-        <Btn variant="subtle" disabled={disabled || !source.quizId} onClick={() => onChange(pullQuizResults(round, selectedEvent))}>⬇ Haal resultaten op</Btn>
+        <Btn variant="subtle" disabled={disabled || !selectedQuiz} onClick={() => onChange(pullQuizResults(round, selectedQuiz))}>⬇ Haal resultaten op</Btn>
         {source.pulledAt && <span style={{ fontSize: '.74rem', color: 'var(--muted)', marginLeft: 10 }}>Opgehaald {new Date(source.pulledAt).toLocaleString('nl-NL')}</span>}
       </div>
 

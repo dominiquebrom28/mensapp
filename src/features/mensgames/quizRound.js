@@ -1,9 +1,11 @@
 // The pure half of the quiz round adapter (WP-G; docs/mensgames-spec.md
-// §4.4). No quiz code is touched or reimplemented — this only reads
-// `evt.quizzes` and matches its score keys (free-typed names) against
-// entrant names. Case-insensitive **exact** match only: nothing is guessed.
-// Anything that doesn't match is surfaced as `unmatched` for the UI to
-// resolve via a dropdown, never auto-assigned.
+// §4.4; repointed onto a directly-picked quiz by WP-Q10, docs/
+// quiz-unification-spec.md §8.4). No quiz code is touched or reimplemented
+// — this only matches a quiz's score keys (free-typed names) against
+// entrant names, and freezes a snapshot of a chosen quiz's scores.
+// Case-insensitive **exact** match only: nothing is guessed. Anything that
+// doesn't match is surfaced as `unmatched` for the UI to resolve via a
+// dropdown, never auto-assigned.
 import { toFiniteNumber } from './scoring/shared.js';
 
 function normalizeName(name) {
@@ -54,17 +56,25 @@ export function matchQuizNames(scores, entrants, nameMap = {}) {
 }
 
 /**
- * Pulls the finished quiz named on `round.source.quizId` from `event` and
- * **freezes** a snapshot into `source.raw` / `source.pulledAt`, so a later
- * edit to the live quiz can never retroactively change a locked standing
- * (§4.4). Returns a new round object; never mutates `round`. If no matching
- * finished quiz is found, returns `round` unchanged.
+ * Freezes a snapshot of `quiz.scores` into `source.raw` / `source.pulledAt`,
+ * so a later edit to the live quiz can never retroactively change a locked
+ * standing (§4.4). Returns a new round object; never mutates `round`.
+ *
+ * docs/quiz-unification-spec.md §8.4: the quiz is picked directly from the
+ * quiz feature now (`quizPicker.js`), not via an event-then-quiz two-step,
+ * so this takes the already-resolved `quiz` object itself rather than an
+ * `event` to search inside. Still defensive: refuses to snapshot a quiz
+ * that isn't finished, or one that doesn't match `round.source.quizId` (a
+ * caller bug, not a user action — the picker only ever resolves the quiz it
+ * already selected, so this should never trip in practice, but a silent
+ * mismatch here is exactly the "looks like it worked" bug shape this
+ * feature has to avoid).
  */
-export function pullQuizResults(round, event, nowIso = new Date().toISOString()) {
+export function pullQuizResults(round, quiz, nowIso = new Date().toISOString()) {
   if (!round || typeof round !== 'object' || !round.source || typeof round.source !== 'object') return round;
-  const quizzes = Array.isArray(event?.quizzes) ? event.quizzes : [];
-  const quiz = quizzes.find((q) => q && q.id === round.source.quizId && q.status === 'finished');
-  if (!quiz) return round;
+  if (!quiz || typeof quiz !== 'object') return round;
+  if (quiz.id !== round.source.quizId) return round;
+  if (quiz.status !== 'finished') return round;
   const raw = quiz.scores && typeof quiz.scores === 'object' ? JSON.parse(JSON.stringify(quiz.scores)) : {};
   return {
     ...round,
