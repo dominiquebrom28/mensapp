@@ -13,6 +13,8 @@ import {
   blankQuiz,
   fmtTime,
   normalizeQuiz,
+  resolveQuizWinner,
+  teamStableId,
   teamsFromTeamSet,
 } from '../../features/quiz/model.js';
 
@@ -162,5 +164,110 @@ describe('teamsFromTeamSet', () => {
   it('coerces a non-array `members` field rather than throwing', () => {
     const teams = teamsFromTeamSet({ id: 'ts_1', teams: [{ id: 'tm_1', name: 'A', members: 'not-an-array' }] });
     expect(teams[0].members).toEqual([]);
+  });
+});
+
+// The Winner-tab brief (2026-08-26): the builder's Winner tab preview,
+// `WinnersTab` (App.jsx) and `finishQuiz.js`'s placement/award path must all
+// resolve to the exact same winner off the same `quiz.settings.winner`
+// override -- this is the one function that decides it.
+describe('teamStableId', () => {
+  it('prefers `id`, then `sourceTeamId`, then falls back to `name` for a legacy team with neither', () => {
+    expect(teamStableId({ id: 'tm_1', sourceTeamId: 'tm_9', name: 'A' })).toBe('tm_1');
+    expect(teamStableId({ sourceTeamId: 'tm_9', name: 'A' })).toBe('tm_9');
+    expect(teamStableId({ name: 'De Kraaien' })).toBe('De Kraaien');
+  });
+
+  it('is defensive -- null/hostile input never throws', () => {
+    expect(teamStableId(null)).toBeNull();
+    expect(teamStableId({})).toBeNull();
+    expect(teamStableId({ name: '   ' })).toBeNull();
+  });
+});
+
+describe('resolveQuizWinner', () => {
+  it('returns null when there is no override and no scores yet', () => {
+    expect(resolveQuizWinner({ id: 'qz1', teams: [], scores: {} })).toBeNull();
+    expect(resolveQuizWinner(null)).toBeNull();
+  });
+
+  it('mode absent/auto: derives the top scorer, exactly like the old inline WinnersTab card did', () => {
+    const quiz = { id: 'qz1', teams: [], scores: { Doom: 20, Bram: 15 } };
+    expect(resolveQuizWinner(quiz)).toMatchObject({ name: 'Doom', detail: '20 pts', avatar: '🧠', source: 'auto', kind: 'player' });
+  });
+
+  it('auto, team quiz: picks the top-scoring team and includes its members in the detail', () => {
+    const quiz = {
+      id: 'qz1',
+      teams: [{ id: 'tm_1', name: 'De Kraaien', avatar: '🦅', members: ['Doom', 'Bram'] }],
+      scores: { 'De Kraaien': 30 },
+    };
+    expect(resolveQuizWinner(quiz)).toMatchObject({ name: 'De Kraaien', detail: '30 pts · Doom, Bram', avatar: '🦅', source: 'auto', kind: 'team' });
+  });
+
+  it('a tie picks a stable (score-sorted) top entry, same as the old inline behaviour -- overriding is the fix for this, not this function', () => {
+    const quiz = { id: 'qz1', teams: [], scores: { Bram: 10, Doom: 10 } };
+    const resolved = resolveQuizWinner(quiz);
+    expect(['Bram', 'Doom']).toContain(resolved.name);
+    expect(resolved.detail).toBe('10 pts');
+  });
+
+  it('mode team: resolves the chosen team by stable id, not name, and defaults detail to its member list', () => {
+    const quiz = {
+      id: 'qz1',
+      teams: [{ id: 'tm_1', name: 'De Kraaien', avatar: '🦅', members: ['Doom', 'Bram'], teamSetId: 'ts_1', sourceTeamId: 'tm_1' }],
+      scores: {},
+      settings: { winner: { mode: 'team', teamId: 'tm_1' } },
+    };
+    expect(resolveQuizWinner(quiz)).toMatchObject({
+      name: 'De Kraaien', detail: 'Doom, Bram', avatar: '🦅', source: 'team', kind: 'team',
+      teamSetId: 'ts_1', sourceTeamId: 'tm_1',
+    });
+  });
+
+  it('mode team: an explicit detail overrides the member-list default', () => {
+    const quiz = {
+      id: 'qz1', teams: [{ id: 'tm_1', name: 'De Kraaien', members: ['Doom'] }], scores: {},
+      settings: { winner: { mode: 'team', teamId: 'tm_1', detail: 'na een tie-break vraag' } },
+    };
+    expect(resolveQuizWinner(quiz).detail).toBe('na een tie-break vraag');
+  });
+
+  it('mode team: still resolves after the team is renamed -- matched by id, not by the stale name', () => {
+    const quiz = {
+      id: 'qz1',
+      teams: [{ id: 'tm_1', name: 'De Nieuwe Naam', avatar: '🦅', members: [], teamSetId: 'ts_1', sourceTeamId: 'tm_1' }],
+      scores: {},
+      settings: { winner: { mode: 'team', teamId: 'tm_1' } },
+    };
+    expect(resolveQuizWinner(quiz).name).toBe('De Nieuwe Naam');
+  });
+
+  it('mode team: a teamId that no longer resolves (team removed) returns null, never a bogus winner', () => {
+    const quiz = { id: 'qz1', teams: [{ id: 'tm_2', name: 'Other' }], scores: {}, settings: { winner: { mode: 'team', teamId: 'tm_1' } } };
+    expect(resolveQuizWinner(quiz)).toBeNull();
+  });
+
+  it('mode manual: a free-text name/detail, no scores required at all', () => {
+    const quiz = { id: 'qz1', teams: [], scores: {}, settings: { winner: { mode: 'manual', name: 'Sven', detail: 'Beste inzet van de avond' } } };
+    expect(resolveQuizWinner(quiz)).toMatchObject({ name: 'Sven', detail: 'Beste inzet van de avond', avatar: '🏆', source: 'manual', kind: 'player' });
+  });
+
+  it('mode manual: a blank/whitespace-only name is not a real override -- returns null', () => {
+    const quiz = { id: 'qz1', teams: [], scores: {}, settings: { winner: { mode: 'manual', name: '   ' } } };
+    expect(resolveQuizWinner(quiz)).toBeNull();
+  });
+
+  it('an override survives a quiz with scores that would otherwise pick someone else', () => {
+    const quiz = {
+      id: 'qz1', teams: [], scores: { Doom: 100 },
+      settings: { winner: { mode: 'manual', name: 'Bram', detail: 'Disqualified Doom for cheating' } },
+    };
+    expect(resolveQuizWinner(quiz).name).toBe('Bram');
+  });
+
+  it('switching back to mode auto (or the key being absent) ignores any leftover teamId/name', () => {
+    const quiz = { id: 'qz1', teams: [], scores: { Doom: 5 }, settings: { winner: { mode: 'auto', teamId: 'tm_1', name: 'stale' } } };
+    expect(resolveQuizWinner(quiz)).toMatchObject({ name: 'Doom', source: 'auto' });
   });
 });

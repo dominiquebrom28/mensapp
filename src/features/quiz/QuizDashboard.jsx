@@ -309,7 +309,13 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=nu
                   let fullQuiz;
                   const wasNew=panel==="new";
                   if(wasNew){
-                    fullQuiz={...quiz,id:`qz${Date.now()}`,eventId:evt.id,status:"ready",scores:{},memberScores:{},participants:[],settings:{secret:false,published:false},rev:1,createdBy:"",createdAt:nowIso,updatedAt:nowIso,finishedAt:null};
+                    // Winner-tab brief (2026-08-26): the builder's own
+                    // `settings` (today: just `winner`, if the tab was used
+                    // before the quiz was ever saved) must survive a brand
+                    // new quiz's otherwise-literal defaults, or picking a
+                    // winner before the first save would be silently
+                    // discarded.
+                    fullQuiz={...quiz,id:`qz${Date.now()}`,eventId:evt.id,status:"ready",scores:{},memberScores:{},participants:[],settings:{secret:false,published:false,...(quiz.settings&&typeof quiz.settings==="object"?quiz.settings:{})},rev:1,createdBy:"",createdAt:nowIso,updatedAt:nowIso,finishedAt:null};
                     saveQuizzes([...quizzes,fullQuiz]);
                   } else {
                     // Merge onto the freshest copy of this quiz this

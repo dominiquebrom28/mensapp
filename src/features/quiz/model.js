@@ -142,6 +142,112 @@ export const blankQuiz = ({ title = '', eventId = null, createdBy = '', now = Da
  * team_sets row: skips any team missing a usable `id`, coerces `members`
  * to an array of strings, falls back to a numbered avatar/name.
  */
+/**
+ * A stable identifier for a `quiz.teams` entry -- prefers the library id
+ * (`sourceTeamId`, or the snapshot's own `id`, which `teamsFromTeamSet` sets
+ * to the same value), and only falls back to the team's `name` for a legacy
+ * team that predates library provenance entirely (§5.1: the old inline team
+ * builder never stamped an id). Exported so `resolveQuizWinner` below and
+ * the Winner tab UI (docs/quiz-unification-spec.md's Winner-tab brief,
+ * 2026-08-26) key/match on exactly the same thing -- a team picked as the
+ * winner must still resolve after "↻ Ververs uit bibliotheek" changes its
+ * `name` (the whole reason the brief insists on a stable id, never a name,
+ * for `settings.winner.teamId`).
+ */
+export function teamStableId(team) {
+  if (!team || typeof team !== 'object') return null;
+  if (typeof team.id === 'string' && team.id) return team.id;
+  if (typeof team.sourceTeamId === 'string' && team.sourceTeamId) return team.sourceTeamId;
+  if (typeof team.name === 'string' && team.name.trim()) return team.name.trim();
+  return null;
+}
+
+/**
+ * The one place "who won this quiz" is decided (docs/
+ * quiz-unification-spec.md's Winner-tab brief, 2026-08-26). The new Winner
+ * tab's own preview, `WinnersTab` (App.jsx) and `finishQuiz.js`'s placement/
+ * award path all call this and only this -- if any of the three ever
+ * derived a winner independently, the builder's preview, the event's
+ * Winners & Highlights tab and the published award could each show a
+ * different name for the same quiz.
+ *
+ * `quiz.settings.winner` (jsonb, additive, no migration) is the override:
+ * `{ mode:'auto'|'team'|'manual', teamId, name, detail }`. Absent, `null`,
+ * or `mode:'auto'` all mean the same thing -- "derive from scores, as
+ * before" -- so switching back to Automatisch and simply never having set
+ * an override look identical to every caller.
+ *
+ * Returns `null` when there is nothing to show yet: no override AND no
+ * scores. Callers render an honest empty state for that ("de winnaar
+ * verschijnt zodra de quiz is afgerond"), never a broken-looking one.
+ *
+ * The brief's literal return shape is `{name, detail, avatar, source}`, and
+ * those four are always present and mean exactly what it says. This returns
+ * a superset -- `kind`/`memberNames`/`teamSetId`/`sourceTeamId` in addition
+ * -- because `finishQuiz.js`'s `quizPlacements` needs that provenance to
+ * build a correct `TeamAward` for a team override (§3.4 needs a
+ * `teamSetId`/`sourceTeamId` pair, which a bare name can't supply), and the
+ * brief names no second place that data could legitimately come from
+ * without re-deriving the winner a second time -- the exact drift this
+ * function exists to prevent. Callers that only care about the four
+ * documented fields simply ignore the rest.
+ */
+export function resolveQuizWinner(quiz) {
+  const settings = quiz && quiz.settings && typeof quiz.settings === 'object' ? quiz.settings : {};
+  const w = settings.winner && typeof settings.winner === 'object' ? settings.winner : null;
+  const mode = w && typeof w.mode === 'string' ? w.mode : 'auto';
+  const overrideDetail = w && typeof w.detail === 'string' ? w.detail.trim() : '';
+
+  if (mode === 'manual') {
+    const name = w && typeof w.name === 'string' ? w.name.trim() : '';
+    if (!name) return null;
+    return { name, detail: overrideDetail, avatar: '🏆', source: 'manual', kind: 'player', memberNames: [], teamSetId: null, sourceTeamId: null };
+  }
+
+  if (mode === 'team') {
+    const teamId = w && typeof w.teamId === 'string' && w.teamId ? w.teamId : null;
+    if (!teamId) return null;
+    const team = (Array.isArray(quiz?.teams) ? quiz.teams : []).find((t) => teamStableId(t) === teamId);
+    if (!team) return null;
+    const name = (typeof team.name === 'string' && team.name.trim()) || 'Team';
+    const memberNames = Array.isArray(team.members) ? team.members.filter((m) => typeof m === 'string' && m) : [];
+    const detail = overrideDetail || (memberNames.length ? memberNames.join(', ') : '');
+    return {
+      name,
+      detail,
+      avatar: (typeof team.avatar === 'string' && team.avatar) || '🎯',
+      source: 'team',
+      kind: 'team',
+      memberNames,
+      teamSetId: typeof team.teamSetId === 'string' ? team.teamSetId : null,
+      sourceTeamId: typeof team.sourceTeamId === 'string' ? team.sourceTeamId : (typeof team.id === 'string' ? team.id : null),
+    };
+  }
+
+  // 'auto' (or any unrecognised mode -- fail safe onto the derived winner,
+  // never onto a throw). Mirrors WinnersTab's pre-existing top-of-`scores`
+  // card byte-for-byte (icon/detail formatting included), since that card's
+  // *display* is unchanged -- only its *source* moves to this one function.
+  const scores = quiz && quiz.scores && typeof quiz.scores === 'object' ? quiz.scores : {};
+  const entries = Object.entries(scores).filter(([n, v]) => typeof n === 'string' && n && Number.isFinite(v));
+  if (!entries.length) return null;
+  const [topName, topScore] = [...entries].sort((a, b) => b[1] - a[1])[0];
+  const isTeam = Array.isArray(quiz?.teams) && quiz.teams.length > 0;
+  const team = isTeam ? (quiz.teams || []).find((t) => t && t.name === topName) : null;
+  const memberNames = team && Array.isArray(team.members) ? team.members.filter((m) => typeof m === 'string' && m) : [];
+  const detail = isTeam && memberNames.length ? `${topScore} pts · ${memberNames.join(', ')}` : `${topScore} pts`;
+  return {
+    name: topName,
+    detail,
+    avatar: (team && typeof team.avatar === 'string' && team.avatar) || (isTeam ? '🎯' : '🧠'),
+    source: 'auto',
+    kind: isTeam ? 'team' : 'player',
+    memberNames,
+    teamSetId: team && typeof team.teamSetId === 'string' ? team.teamSetId : null,
+    sourceTeamId: team && typeof team.sourceTeamId === 'string' ? team.sourceTeamId : (team && typeof team.id === 'string' ? team.id : null),
+  };
+}
+
 export const teamsFromTeamSet = (teamSet) => {
   const teams = teamSet && Array.isArray(teamSet.teams) ? teamSet.teams : [];
   const setId = (teamSet && typeof teamSet.id === 'string' && teamSet.id) || null;

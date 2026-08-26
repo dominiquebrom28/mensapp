@@ -29,6 +29,7 @@
 import { patchQuiz, quizRowExists, saveQuiz } from './api.js';
 import { deleteQuizLive } from './live.js';
 import { deleteAnswersForQuiz } from './answers.js';
+import { resolveQuizWinner } from './model.js';
 import { buildTeamAwards as buildTeamAwardsForSource, publishResults, winnerRowsFromPlacements } from '../awards/publishResults.js';
 
 function isoOf(now) {
@@ -126,7 +127,7 @@ function rankRows(rows) {
  * one row per `scores` entry, `kind:'player'`. Ties share a rank; only
  * ranks 1-3 survive.
  */
-export function quizPlacements(quiz) {
+function naturalPlacements(quiz) {
   const scores = quiz && quiz.scores && typeof quiz.scores === 'object' ? quiz.scores : {};
   let rows;
   if (isTeamQuiz(quiz)) {
@@ -167,6 +168,48 @@ export function quizPlacements(quiz) {
       detail: `${r.points} punt${r.points === 1 ? '' : 'en'}`,
       slot: r.sourceTeamId || undefined,
     }));
+}
+
+/**
+ * `quiz` (with its final `scores` already set -- see `finishQuiz`) ->
+ * `Placement[]`, same as before, UNLESS `quiz.settings.winner` holds a real
+ * override (`mode:'team'|'manual'`) -- the Winner-tab brief's whole point:
+ * "the published award matches what the tab showed". `resolveQuizWinner`
+ * (the one function that decides who won, `model.js`) is called here too,
+ * never re-derived -- when it returns a non-`'auto'` result, that becomes
+ * rank 1 outright, replacing whatever the raw scores would have produced
+ * there (ties included: an override doesn't leave a demoted co-winner
+ * sitting at rank 1 beside it). If the overridden team/name also happens to
+ * occupy a natural rank 2 or 3, that duplicate entry is dropped rather than
+ * awarded twice for one result.
+ *
+ * Deliberately scoped to rank 1 only: this feature is "pick or correct THE
+ * winner", the same singular concept the Winner tab and `WinnersTab`'s
+ * (now-shared) card show -- not a full podium editor. Ranks 2/3 keep coming
+ * from the actual scores, so a team override doesn't silently strip real
+ * medals from the teams that came second and third.
+ */
+export function quizPlacements(quiz) {
+  const natural = naturalPlacements(quiz);
+  const winner = resolveQuizWinner(quiz);
+  if (!winner || winner.source === 'auto') return natural;
+
+  const overridePlacement = {
+    rank: 1,
+    name: winner.name,
+    kind: winner.kind === 'team' ? 'team' : 'player',
+    memberNames: Array.isArray(winner.memberNames) ? winner.memberNames : [],
+    teamSetId: typeof winner.teamSetId === 'string' ? winner.teamSetId : null,
+    sourceTeamId: typeof winner.sourceTeamId === 'string' ? winner.sourceTeamId : null,
+    detail: typeof winner.detail === 'string' ? winner.detail : '',
+    slot: winner.sourceTeamId || undefined,
+  };
+  const overrideIdentity = overridePlacement.sourceTeamId || overridePlacement.name;
+  const rest = natural.filter((p) => {
+    if (p.rank === 1) return false; // superseded by the override, ties included
+    return (p.sourceTeamId || p.name) !== overrideIdentity;
+  });
+  return [overridePlacement, ...rest];
 }
 
 export function winnerRowsFromQuiz(quiz) {

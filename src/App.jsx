@@ -16,7 +16,7 @@ import { blankTeamSet, setCaptain, removeMember, teamSetSummary, namesFromUsers,
 // "legitimately leave" App.jsx, §9) -- imported back here because
 // `TeamCreatorPage`'s own team-avatar picker (unrelated to the quiz) still
 // needs it and always has, per §5.2/§5.3 there being one team concept.
-import { TEAM_AVATARS } from "./features/quiz/model.js";
+import { TEAM_AVATARS, resolveQuizWinner } from "./features/quiz/model.js";
 
 // The app's first code split (technical spec `docs/trailer-technical-spec.md`
 // §3): keeps the trailer's weight out of the main chunk, loaded only when an
@@ -2865,17 +2865,23 @@ const WinnersTab=({evt,onUpdate,currentUser,quizResults=[],tournamentResults=[]}
     ...(evt.quizzes||[]),
     ...(quizResults||[]).filter(q=>q&&q.eventId===evt.id&&!evtQuizIds.has(q.id)),
   ];
+  // Winner-tab brief (2026-08-26): this card used to derive its own
+  // top-of-`scores` winner inline -- now it calls `resolveQuizWinner`
+  // (features/quiz/model.js), the one function the builder's own Winner tab
+  // and `finishQuiz.js`'s award path also call, so a manual/team override
+  // set in the builder shows up here identically to how it will publish.
+  // Also lifts the old `q.scores&&Object.keys(q.scores).length>0` guard --
+  // a finished quiz with NO scores at all but a real override (§7.4's "an
+  // award for something other than the top score") must still get a card;
+  // `resolveQuizWinner` returning `null` (no override, no scores) is what
+  // now does that filtering, one level down.
   const quizWinners=finishedQuizzesForEvt
-    .filter(q=>q.status==="finished"&&q.scores&&Object.keys(q.scores).length>0)
+    .filter(q=>q.status==="finished")
     .filter(quiz=>!isQuizAlreadyPublished(quiz,winners))
     .map(quiz=>{
-      const isTeam=(quiz.teams||[]).length>0;
-      const sorted=Object.entries(quiz.scores).sort((a,b)=>b[1]-a[1]);
-      if(!sorted.length)return null;
-      const [topName,topScore]=sorted[0];
-      const team=isTeam?(quiz.teams||[]).find(t=>t.name===topName):null;
-      const detail=isTeam&&team?.members?.length?`${topScore} pts · ${team.members.join(", ")}`:`${topScore} pts`;
-      return{id:`quiz-winner-${quiz.id}`,icon:isTeam?(team?.avatar||"🎯"):"🧠",category:`🧠 ${quiz.title}`,winner:topName,detail,topScore};
+      const resolved=resolveQuizWinner(quiz);
+      if(!resolved)return null;
+      return{id:`quiz-winner-${quiz.id}`,icon:resolved.avatar,category:`🧠 ${quiz.title}`,winner:resolved.name,detail:resolved.detail};
     }).filter(Boolean);
   // Owner decision, 2026-08-26: the event page dropped its Mens-Games 🏆 tab
   // -- tournaments are a stand-alone tool now, and results flow back to this

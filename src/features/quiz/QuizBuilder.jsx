@@ -18,6 +18,7 @@ import { ALPHA, ROUND_ICONS, TYPE_META, blankQuestion } from './model.js';
 import { getYouTubeId, isSpotifyUrl, isYouTubeUrl } from './urls.js';
 import { Btn, Inp, Lbl } from './ui/Kit.jsx';
 import { TeamSetPicker } from './TeamSetPicker.jsx';
+import { WinnerTab } from './WinnerTab.jsx';
 
 const SEL_STYLE={background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"5px 8px",color:"var(--muted)",fontSize:".75rem",fontFamily:"var(--font-b)"};
 const ICON_BTN={background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:5,color:"var(--muted)",padding:"3px 8px",cursor:"pointer",fontSize:".75rem",fontFamily:"var(--font-b)",lineHeight:1.2,transition:"all .12s"};
@@ -34,6 +35,13 @@ export const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=
   });
   const [teams,setTeams]=useState(existing?.teams||[]);
   const [teamSetId,setTeamSetId]=useState(existing?.teamSetId||null);
+  // Winner-tab brief (2026-08-26): `quiz.settings.winner` -- the override,
+  // `null`/absent meaning "Automatisch". Kept as its own bit of state rather
+  // than folded into a generic `settings` object because this tab is the
+  // only thing in the builder that ever writes to `settings` today; the
+  // rest of `existing.settings` (`secret`/`published`, not yet builder-
+  // editable) is carried through untouched via `settingsPatch` below.
+  const [winner,setWinner]=useState(existing?.settings?.winner||null);
   const [activeRi,setActiveRi]=useState(0);
   const [expandedQ,setExpandedQ]=useState(0);
   const [builderTab,setBuilderTab]=useState("rounds");
@@ -109,6 +117,16 @@ export const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=
   const ar=rounds[activeRi]||rounds[0];
   const ri=activeRi;
 
+  // Carries `existing.settings` (today: `secret`/`published`, neither
+  // builder-editable yet) through untouched, adding/removing only `winner`
+  // -- switching back to Automatisch (`winner===null`) must not leave a
+  // stale `winner` key sitting in the saved row.
+  const settingsPatch=(()=>{
+    const base=existing?.settings&&typeof existing.settings==="object"?{...existing.settings}:{};
+    if(winner)base.winner=winner;else delete base.winner;
+    return base;
+  })();
+
   // ── Tab button helper ────────────────────────────────────────────
   const TabBtn=({id,label,badge})=>(
     <button onClick={()=>setBuilderTab(id)} style={{background:"none",border:"none",borderBottom:builderTab===id?"2px solid var(--amber)":"2px solid transparent",color:builderTab===id?"var(--amber2)":"var(--muted)",cursor:"pointer",padding:"8px 16px",fontFamily:"var(--font-b)",fontWeight:builderTab===id?600:400,fontSize:".85rem",marginBottom:-1,transition:"color .15s",display:"flex",alignItems:"center",gap:5}}>
@@ -131,7 +149,7 @@ export const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=
         </div>
         <div style={{display:"flex",gap:6,flexShrink:0}}>
           <Btn onClick={onCancel} variant="ghost" size="sm">Cancel</Btn>
-          <Btn onClick={()=>onSave({title,defaultTime,rounds,teams,teamSetId,introText,introBg})} disabled={!valid} variant="gold" size="sm">
+          <Btn onClick={()=>onSave({title,defaultTime,rounds,teams,teamSetId,introText,introBg,settings:settingsPatch})} disabled={!valid} variant="gold" size="sm">
             {existing?"Save Changes":"Create Quiz"}
           </Btn>
         </div>
@@ -142,6 +160,7 @@ export const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=
         <TabBtn id="rounds" label="📋 Rounds" badge={0}/>
         <TabBtn id="teams" label="👥 Teams" badge={teams.length}/>
         <TabBtn id="intro" label="🎬 Intro" badge={0}/>
+        <TabBtn id="winner" label="🏆 Winner" badge={winner?1:0}/>
       </div>
 
       {/* ════════════════════════════════════════════════════════ */}
@@ -426,6 +445,13 @@ export const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=
           attendees={attendees}
           status={existing?.status||"ready"}
         />
+      )}
+
+      {/* ════════════════════════════════════════════════════════ */}
+      {/* WINNER TAB                                              */}
+      {/* ════════════════════════════════════════════════════════ */}
+      {builderTab==="winner"&&(
+        <WinnerTab teams={teams} scores={existing?.scores||{}} title={title} winner={winner} onChange={setWinner}/>
       )}
     </div>
   );

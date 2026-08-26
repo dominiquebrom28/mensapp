@@ -151,6 +151,55 @@ describe('quizPlacements', () => {
     expect(quizPlacements({ teams: 'garbage', scores: null })).toEqual([]);
     expect(quizPlacements({ teams: [], scores: 'garbage' })).toEqual([]);
   });
+
+  // Winner-tab brief (2026-08-26): "so the published award matches what the
+  // tab showed" -- `quizPlacements` calls the same `resolveQuizWinner`
+  // (`model.js`) the tab's preview and `WinnersTab` call, and a real
+  // override (`mode:'team'|'manual'`) replaces rank 1 outright.
+  describe('a settings.winner override replaces rank 1', () => {
+    it('mode team: the chosen team becomes rank 1 with library provenance, natural rank 1 is dropped (not double-awarded), ranks 2/3 are untouched', () => {
+      const quiz = teamQuiz({ settings: { winner: { mode: 'team', teamId: 'tm_4' } } });
+      const placements = quizPlacements(quiz);
+      expect(placements).toEqual([
+        { rank: 1, name: 'Team Delta', kind: 'team', memberNames: ['Bo'], teamSetId: 'ts_1', sourceTeamId: 'tm_4', detail: 'Bo', slot: 'tm_4' },
+        { rank: 3, name: 'Geen Bibliotheek', kind: 'team', memberNames: ['Sven'], teamSetId: null, sourceTeamId: null, detail: '5 punten', slot: undefined },
+      ]);
+      // The natural top scorer (Team Gamma, 42 pts) is gone from the podium
+      // entirely -- not left sitting at rank 1 next to the override.
+      expect(placements.some((p) => p.name === 'Team Gamma')).toBe(false);
+    });
+
+    it('mode manual: a free-text winner becomes rank 1 even with real scores present, kind player, no team provenance', () => {
+      const quiz = teamQuiz({ settings: { winner: { mode: 'manual', name: 'De Jury', detail: 'Publieksprijs' } } });
+      const placements = quizPlacements(quiz);
+      expect(placements[0]).toEqual({ rank: 1, name: 'De Jury', kind: 'player', memberNames: [], teamSetId: null, sourceTeamId: null, detail: 'Publieksprijs', slot: undefined });
+      expect(placements).toHaveLength(3); // override + the two natural placements it didn't collide with
+    });
+
+    it('an override on a quiz with NO scores at all still produces exactly one placement', () => {
+      const quiz = teamQuiz({ scores: {}, settings: { winner: { mode: 'manual', name: 'Sven' } } });
+      expect(quizPlacements(quiz)).toEqual([
+        { rank: 1, name: 'Sven', kind: 'player', memberNames: [], teamSetId: null, sourceTeamId: null, detail: '', slot: undefined },
+      ]);
+    });
+
+    it('mode auto (or the key absent) is unaffected -- exact same output as no settings.winner at all', () => {
+      const withAuto = quizPlacements(teamQuiz({ settings: { winner: { mode: 'auto' } } }));
+      const withNone = quizPlacements(teamQuiz());
+      expect(withAuto).toEqual(withNone);
+    });
+
+    it('a team override still resolves after the team is renamed since the snapshot was taken -- matched by id, not the (now stale) name', () => {
+      const renamed = teamQuiz({
+        teams: [
+          { id: 'tm_3', name: 'Team Gamma Renamed', members: ['Rik', 'Sanne'], teamSetId: 'ts_1', sourceTeamId: 'tm_3' },
+          { id: 'tm_4', name: 'Team Delta', members: ['Bo'], teamSetId: 'ts_1', sourceTeamId: 'tm_4' },
+        ],
+        settings: { winner: { mode: 'team', teamId: 'tm_3' } },
+      });
+      expect(quizPlacements(renamed)[0].name).toBe('Team Gamma Renamed');
+    });
+  });
 });
 
 describe('winnerRowsFromQuiz / buildTeamAwards (adapters onto awards/publishResults.js)', () => {
