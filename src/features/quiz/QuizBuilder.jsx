@@ -4,15 +4,20 @@
 // same-file `const`s. `SEL_STYLE`/`ICON_BTN`/`SONG_SECS` are quiz-builder-
 // only (grep-verified, spec §8.3) and move here as local consts rather than
 // into `model.js`, since nothing else needs them. `ALPHA`, `ROUND_ICONS`,
-// `TYPE_META`, `blankQuestion`, `TEAM_AVATARS` were already extracted to
-// `model.js` in WP-Q2 -- imported from there instead of a third copy.
-// The team-creation UI here (§5.1 in the spec) is slated for deletion in
-// WP-Q5 once `TeamSetPicker` lands; out of scope for this pure move.
+// `TYPE_META`, `blankQuestion` were already extracted to `model.js` in
+// WP-Q2 -- imported from there instead of a third copy.
+// WP-Q5 (docs/quiz-unification-spec.md §5.1/§5.2): the inline team-creation
+// UI that used to live in the Teams tab below (hand-typed team names, its
+// own avatar picker, and a second 👑-captain-toggle write site duplicating
+// the Team Creator's) is deleted. Teams now come from the library
+// exclusively, via `TeamSetPicker` -- see that file for the
+// snapshot-not-live-reference reasoning (§5.3).
 import { useState } from 'react';
 import { supabase } from '../../supabase.js';
-import { ALPHA, ROUND_ICONS, TYPE_META, blankQuestion, TEAM_AVATARS } from './model.js';
+import { ALPHA, ROUND_ICONS, TYPE_META, blankQuestion } from './model.js';
 import { getYouTubeId, isSpotifyUrl, isYouTubeUrl } from './urls.js';
-import { Btn, Card, Inp, Lbl, TeamSetsErrorNotice } from './ui/Kit.jsx';
+import { Btn, Inp, Lbl } from './ui/Kit.jsx';
+import { TeamSetPicker } from './TeamSetPicker.jsx';
 
 const SEL_STYLE={background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"5px 8px",color:"var(--muted)",fontSize:".75rem",fontFamily:"var(--font-b)"};
 const ICON_BTN={background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:5,color:"var(--muted)",padding:"3px 8px",cursor:"pointer",fontSize:".75rem",fontFamily:"var(--font-b)",lineHeight:1.2,transition:"all .12s"};
@@ -28,8 +33,7 @@ export const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=
     return[{id:`r${Date.now()}`,title:"Round 1",theme:"",icon:"🎯",description:"",bgImage:null,questions:[blankQuestion()]}];
   });
   const [teams,setTeams]=useState(existing?.teams||[]);
-  const [newTeamName,setNewTeamName]=useState("");
-  const [avatarPicker,setAvatarPicker]=useState(null);
+  const [teamSetId,setTeamSetId]=useState(existing?.teamSetId||null);
   const [activeRi,setActiveRi]=useState(0);
   const [expandedQ,setExpandedQ]=useState(0);
   const [builderTab,setBuilderTab]=useState("rounds");
@@ -94,17 +98,6 @@ export const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=
     e.target.value="";
   };
 
-  // ── Team helpers ─────────────────────────────────────────────────
-  const assignedNames=teams.flatMap(t=>t.members);
-  const unassigned=(attendees||[]).filter(a=>!assignedNames.includes(a.name));
-  const addTeam=()=>{
-    if(!newTeamName.trim())return;
-    const usedAv=teams.map(t=>t.avatar||"");
-    const nextAv=TEAM_AVATARS.find(a=>!usedAv.includes(a))||TEAM_AVATARS[teams.length%TEAM_AVATARS.length];
-    setTeams(t=>[...t,{id:`tm${Date.now()}`,name:newTeamName.trim(),members:[],avatar:nextAv}]);
-    setNewTeamName("");
-  };
-
   // ── Validation ───────────────────────────────────────────────────
   const qValid=q=>{
     if(!q.q.trim())return false;
@@ -138,7 +131,7 @@ export const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=
         </div>
         <div style={{display:"flex",gap:6,flexShrink:0}}>
           <Btn onClick={onCancel} variant="ghost" size="sm">Cancel</Btn>
-          <Btn onClick={()=>onSave({title,defaultTime,rounds,teams,introText,introBg})} disabled={!valid} variant="gold" size="sm">
+          <Btn onClick={()=>onSave({title,defaultTime,rounds,teams,teamSetId,introText,introBg})} disabled={!valid} variant="gold" size="sm">
             {existing?"Save Changes":"Create Quiz"}
           </Btn>
         </div>
@@ -423,122 +416,16 @@ export const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=
       {/* TEAMS TAB                                               */}
       {/* ════════════════════════════════════════════════════════ */}
       {builderTab==="teams"&&(
-        <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
-          {/* Import saved teams */}
-          {team_sets.length===0&&teamSetsError&&<TeamSetsErrorNotice onRetry={onRetryTeamSets}/>}
-          {team_sets.length>0&&(
-            <div style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:"var(--radius-sm)",padding:".85rem"}}>
-              <div style={{fontSize:".72rem",color:"var(--muted)",letterSpacing:".08em",textTransform:"uppercase",marginBottom:".5rem"}}>📥 Laad opgeslagen teams</div>
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {team_sets.map(ts=>(
-                  <button key={ts.id}
-                    onClick={()=>setTeams(ts.teams.map(t=>({...t,captain:t.captain||null})))}
-                    style={{background:"rgba(232,148,58,.1)",border:"1px solid rgba(232,148,58,.3)",borderRadius:6,color:"var(--amber2)",padding:"5px 12px",cursor:"pointer",fontSize:".8rem",fontFamily:"var(--font-b)",fontWeight:600,transition:"all .15s"}}
-                    onMouseEnter={e=>{e.target.style.background="rgba(232,148,58,.2)";}}
-                    onMouseLeave={e=>{e.target.style.background="rgba(232,148,58,.1)";}}>
-                    {ts.category&&<span style={{opacity:.7,marginRight:4}}>[{ts.category}]</span>}{ts.name} <span style={{opacity:.65}}>({ts.teams.length})</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {/* Create team */}
-          <div style={{display:"flex",gap:8}}>
-            <Inp value={newTeamName} onChange={e=>setNewTeamName(e.target.value)} placeholder="Team name…"
-              onKeyDown={e=>{if(e.key==="Enter")addTeam();}} style={{flex:1}}/>
-            <Btn onClick={addTeam} disabled={!newTeamName.trim()} size="sm">+ Create Team</Btn>
-          </div>
-
-          {attendees.length===0&&(
-            <div style={{textAlign:"center",padding:"2rem",color:"var(--muted)",fontSize:".85rem"}}>
-              No attendees on this event yet — add them first via RSVP.
-            </div>
-          )}
-
-          {/* Team cards */}
-          {teams.map((team,ti)=>(
-            <Card key={team.id} style={{background:"var(--bg3)"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:".6rem"}}>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <div onClick={()=>setAvatarPicker(avatarPicker===ti?null:ti)}
-                    title="Change avatar"
-                    style={{fontSize:"1.5rem",cursor:"pointer",lineHeight:1,padding:"3px 5px",borderRadius:6,border:"1px solid var(--border)",background:"var(--bg2)",userSelect:"none"}}>
-                    {team.avatar||"🎯"}
-                  </div>
-                  <div style={{fontFamily:"var(--font-h)",fontSize:".95rem",color:"var(--amber2)"}}>{team.name}</div>
-                </div>
-                <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  <span style={{fontSize:".7rem",color:"var(--muted)"}}>{team.members.length} member{team.members.length!==1?"s":""}</span>
-                  <Btn onClick={()=>setTeams(t=>t.filter((_,i)=>i!==ti))} variant="danger" size="sm" style={{padding:"3px 8px"}}>✕</Btn>
-                </div>
-              </div>
-              {avatarPicker===ti&&(
-                <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:".6rem",padding:".4rem",background:"var(--bg)",borderRadius:8,border:"1px solid var(--border)"}}>
-                  {TEAM_AVATARS.map(e=>(
-                    <div key={e} onClick={()=>{setTeams(ts=>ts.map((t,i)=>i===ti?{...t,avatar:e}:t));setAvatarPicker(null);}}
-                      style={{fontSize:"1.3rem",cursor:"pointer",padding:"4px 5px",borderRadius:6,border:team.avatar===e?"2px solid var(--amber)":"1px solid transparent",background:team.avatar===e?"rgba(232,148,58,.12)":"transparent",userSelect:"none"}}>
-                      {e}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {/* Current members */}
-              {team.members.length>0&&(
-                <div style={{fontSize:".65rem",color:"var(--muted)",marginBottom:4,textTransform:"uppercase",letterSpacing:".06em"}}>
-                  Members · tap 👑 to set captain
-                </div>
-              )}
-              <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:team.members.length>0?".6rem":0}}>
-                {team.members.map(name=>{
-                  const isCap=team.captain===name;
-                  return(
-                    <div key={name} style={{display:"flex",alignItems:"center",gap:4,
-                      background:isCap?"rgba(201,146,42,.18)":"rgba(232,148,58,.1)",
-                      border:isCap?"1px solid rgba(201,146,42,.5)":"1px solid rgba(232,148,58,.28)",
-                      borderRadius:20,padding:"3px 8px 3px 6px",transition:"all .15s"}}>
-                      <button
-                        onClick={()=>setTeams(ts=>ts.map((t,i)=>i===ti?{...t,captain:t.captain===name?null:name}:t))}
-                        title={isCap?"Remove captain":"Make team captain"}
-                        style={{background:"none",border:"none",cursor:"pointer",fontSize:".75rem",padding:0,opacity:isCap?1:.3,lineHeight:1,transition:"opacity .15s",userSelect:"none"}}>
-                        👑
-                      </button>
-                      <span style={{fontSize:".82rem",fontWeight:isCap?700:600,color:isCap?"var(--gold)":"var(--cream)"}}>{name}</span>
-                      <button onClick={()=>setTeams(ts=>ts.map((t,i)=>i===ti?{...t,members:t.members.filter(m=>m!==name),captain:t.captain===name?null:t.captain}:t))}
-                        style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontSize:".75rem",padding:"0 0 0 2px",lineHeight:1}}>✕</button>
-                    </div>
-                  );
-                })}
-              </div>
-              {team.captain&&<div style={{fontSize:".7rem",color:"var(--gold)",marginBottom:".4rem"}}>👑 Captain: <strong>{team.captain}</strong> · answers for the team during live quiz</div>}
-              {/* Add member */}
-              {unassigned.length>0&&(
-                <select defaultValue="" onChange={e=>{if(!e.target.value)return;const n=e.target.value;setTeams(ts=>ts.map((t,i)=>i===ti?{...t,members:[...t.members,n]}:t));e.target.value="";}}>
-                  <option value="" disabled>+ Add member…</option>
-                  {unassigned.map(a=><option key={a.name} value={a.name}>{a.name}</option>)}
-                </select>
-              )}
-              {unassigned.length===0&&team.members.length===0&&<div style={{fontSize:".78rem",color:"var(--muted2)",fontStyle:"italic"}}>All lads are assigned elsewhere</div>}
-            </Card>
-          ))}
-
-          {/* Unassigned list */}
-          {unassigned.length>0&&teams.length>0&&(
-            <div>
-              <Lbl>Unassigned lads</Lbl>
-              <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:5}}>
-                {unassigned.map(a=>(
-                  <span key={a.name} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:20,padding:"3px 10px",fontSize:".8rem",color:"var(--muted)"}}>{a.name}</span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {teams.length===0&&attendees.length>0&&(
-            <div style={{textAlign:"center",padding:"1.5rem",color:"var(--muted)",fontSize:".85rem"}}>
-              Create a team above, then assign lads to it.
-            </div>
-          )}
-        </div>
+        <TeamSetPicker
+          teams={teams}
+          teamSetId={teamSetId}
+          onChange={({teams:nextTeams,teamSetId:nextSetId})=>{setTeams(nextTeams);setTeamSetId(nextSetId);}}
+          teamSets={team_sets}
+          teamSetsError={teamSetsError}
+          onRetryTeamSets={onRetryTeamSets}
+          attendees={attendees}
+          status={existing?.status||"ready"}
+        />
       )}
     </div>
   );

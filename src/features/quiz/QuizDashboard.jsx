@@ -11,6 +11,7 @@ import { Btn, ErrorState } from './ui/Kit.jsx';
 import { QuizBuilder } from './QuizBuilder.jsx';
 import { QuizPresenter } from './QuizPresenter.jsx';
 import { computeMemberScores, finishQuiz } from './finishQuiz.js';
+import { deleteQuiz, saveQuiz } from './api.js';
 
 const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=null,onRetryTeamSets})=>{
   const quizzes=evt.quizzes||[];
@@ -30,6 +31,31 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=nu
     finishQuiz({quiz:finishError.quiz,event:evt,onUpdateEvent:onUpdate,teamSets}).then(
       result=>setFinishError(result.ok?null:{quiz:finishError.quiz})
     );
+  };
+
+  // WP-Q5 (docs/quiz-unification-spec.md §4.1/§4.3, §10.4): the builder now
+  // writes BOTH `events.quizzes[]` (legacy, kept per §10.4 -- not dropped
+  // until a release after the next event) AND a real `quizzes` row, via
+  // `saveQuiz`'s full-row upsert. The two are kept consistent by construction
+  // rather than by reconciliation: `persistQuizRow` is always called with the
+  // exact same object `saveQuizzes` just wrote into the event, so there is
+  // never a moment where the two disagree on anything but latency (the
+  // `quizzes` write is fire-and-forget after the legacy write/panel close,
+  // same "local state is truth, remote is best-effort" posture `saveQuizzes`
+  // itself already has for every other quiz mutation in this file).
+  // Failure here doesn't block editing (the legacy write already succeeded,
+  // and the whole point of §10 is that `events.quizzes` remains a working
+  // fallback) but the whole reason this write exists is to make the quiz
+  // discoverable/presentable/finishable -- see the three workarounds this
+  // work package's brief names -- so a failure gets a visible, retryable
+  // banner rather than only a console.error buried in `saveQuiz` itself.
+  const [saveError,setSaveError]=useState(null);
+  const persistQuizRow=fullQuiz=>{
+    saveQuiz(fullQuiz).then(res=>setSaveError(res.ok?null:{quiz:fullQuiz}));
+  };
+  const retrySaveQuiz=()=>{
+    if(!saveError)return;
+    persistQuizRow(saveError.quiz);
   };
 
   const openNew=()=>{setEditTarget(null);setPanel("new");};
@@ -112,6 +138,12 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=nu
         </div>
       )}
 
+      {saveError&&(
+        <div style={{flexShrink:0,padding:".9rem 1.4rem 0"}}>
+          <ErrorState message="Wijzigingen zijn lokaal opgeslagen, maar konden niet naar de quiz-tabel geschreven worden -- de quiz is mogelijk niet vindbaar voor deelnemers. Probeer het opnieuw." onRetry={retrySaveQuiz}/>
+        </div>
+      )}
+
       {/* Body */}
       <div style={{flex:1,display:"grid",gridTemplateColumns:"270px 1fr",overflow:"hidden"}}>
 
@@ -171,14 +203,31 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=nu
                         🎤 Present
                       </button>
                     )}
-                    <button onClick={()=>{const dup={...quiz,id:`qz${Date.now()}`,title:`Copy of ${quiz.title}`,status:"ready",scores:{},_liveState:null};saveQuizzes([...quizzes,dup]);}}
+                    <button onClick={()=>{
+                        // A duplicate is a brand-new definition (its own id,
+                        // reset scores, `rev` restarts at 1) -- written to
+                        // both places for the same reason the builder's own
+                        // save is, below.
+                        const dup={...quiz,id:`qz${Date.now()}`,title:`Copy of ${quiz.title}`,eventId:quiz.eventId??evt.id,status:"ready",scores:{},memberScores:{},rev:1,finishedAt:null,_liveState:null};
+                        saveQuizzes([...quizzes,dup]);
+                        persistQuizRow(dup);
+                      }}
                       title="Duplicate quiz"
                       style={{background:"rgba(91,155,213,.08)",border:"1px solid rgba(91,155,213,.2)",borderRadius:6,color:"var(--blue)",padding:"4px 9px",cursor:"pointer",fontSize:".7rem",fontFamily:"var(--font-b)",transition:"background .12s"}}
                       onMouseEnter={e=>e.currentTarget.style.background="rgba(91,155,213,.2)"}
                       onMouseLeave={e=>e.currentTarget.style.background="rgba(91,155,213,.08)"}>
                       ⧉
                     </button>
-                    <button onClick={()=>{if(isActive)closePanel();saveQuizzes(quizzes.filter(q=>q.id!==quiz.id));}}
+                    <button onClick={()=>{
+                        if(isActive)closePanel();
+                        saveQuizzes(quizzes.filter(q=>q.id!==quiz.id));
+                        // Keep the `quizzes` table from accumulating rows for
+                        // quizzes no longer reachable from any event -- best
+                        // effort, same posture as every other write here:
+                        // the legacy delete above is what actually removes
+                        // the quiz from this dashboard regardless of outcome.
+                        deleteQuiz(quiz.id);
+                      }}
                       style={{background:"rgba(224,85,85,.08)",border:"1px solid rgba(224,85,85,.2)",borderRadius:6,color:"var(--red)",padding:"4px 9px",cursor:"pointer",fontSize:".7rem",fontFamily:"var(--font-b)",transition:"background .12s"}}
                       onMouseEnter={e=>e.currentTarget.style.background="rgba(224,85,85,.2)"}
                       onMouseLeave={e=>e.currentTarget.style.background="rgba(224,85,85,.08)"}>
@@ -231,12 +280,39 @@ const QuizDashboard=({evt,onUpdate,onClose,users=[],teamSets=[],teamSetsError=nu
                 teamSetsError={teamSetsError}
                 onRetryTeamSets={onRetryTeamSets}
                 onSave={quiz=>{
+                  // WP-Q5 (docs/quiz-unification-spec.md §4.1, §4.3, §10.4).
+                  // `fullQuiz` is the one object written to BOTH places --
+                  // `events.quizzes[]` (legacy, via `saveQuizzes`/`onUpdate`)
+                  // and the real `quizzes` row (via `persistQuizRow`/
+                  // `saveQuiz`, api.js's full-row upsert) -- so the two can
+                  // never disagree on shape, only on which one's write has
+                  // landed yet.
+                  const nowIso=new Date().toISOString();
+                  let fullQuiz;
                   if(panel==="new"){
-                    saveQuizzes([...quizzes,{...quiz,id:`qz${Date.now()}`,status:"ready",scores:{}}]);
+                    fullQuiz={...quiz,id:`qz${Date.now()}`,eventId:evt.id,status:"ready",scores:{},memberScores:{},participants:[],settings:{secret:false,published:false},rev:1,createdBy:"",createdAt:nowIso,updatedAt:nowIso,finishedAt:null};
+                    saveQuizzes([...quizzes,fullQuiz]);
                   } else {
-                    saveQuizzes(quizzes.map(q=>q.id===editTarget.id?{...q,...quiz}:q));
+                    // Merge onto the freshest copy of this quiz this
+                    // dashboard holds (`quizzes`, not the possibly-stale
+                    // `editTarget` snapshot taken when the editor opened) --
+                    // preserves `scores`/`participants`/`settings`/etc. the
+                    // builder never touches.
+                    const prior=quizzes.find(q=>q.id===editTarget.id)||editTarget;
+                    // §4.1/§4.3: bump `rev` on every definition save -- the
+                    // mechanism `QuizParticipantView`'s rev-watch effect
+                    // relies on so a mid-quiz typo fix reaches every phone
+                    // without re-shipping the whole ~33 kB definition. A
+                    // quiz that predates this work package (or a `quizzes`
+                    // row that was never written at all) has no `rev` yet;
+                    // treat that as rev 1 so the first save under this code
+                    // bumps it to 2, same as any other edit.
+                    const priorRev=Number.isFinite(prior.rev)?prior.rev:1;
+                    fullQuiz={...prior,...quiz,eventId:prior.eventId??evt.id,rev:priorRev+1,updatedAt:nowIso};
+                    saveQuizzes(quizzes.map(q=>q.id===editTarget.id?fullQuiz:q));
                   }
                   closePanel();
+                  persistQuizRow(fullQuiz);
                 }}
                 onCancel={closePanel}/>
             </div>
