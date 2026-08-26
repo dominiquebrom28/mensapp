@@ -618,7 +618,7 @@ The feature currently **does not work**, so the downside case is "it still doesn
 4. **Secret quizzes wanted?** ~20 lines once §7.1 is done. *Default: implement.*
 5. **Individual-quiz roster.** *Default: seeded from `went`/`going` attendees, editable.*
 6. **Who may present?** *Default: unchanged (org/admin).* Mens-games has the same open question — answer both at once.
-7. **Retroactively link old quizzes to team sets?** *Default: no.*
+7. **Retroactively link old quizzes to team sets?** ~~*Default: no.*~~ **Answered yes, 2026-08-26 — built.** The default was written before the cost was visible: deleting the inline builder left every pre-existing quiz with teams that are in no library, so they cannot earn a team trophy (`finishQuiz` needs a `sourceTeamId`), cannot be reused for a tournament, and would have to be re-entered by hand before an event that is soon. It is an explicit action in `TeamSetPicker`, never automatic, and it never rewrites a quiz that has already run.
 8. **Language.** *Default: existing quiz copy stays English, new strings Dutch.* Mixed and slightly ugly — flag if it bothers him.
 9. **Archive the winning team set on finish?** *Default: manual tick, off — same as tournaments.*
 
@@ -680,4 +680,4 @@ The feature currently **does not work**, so the downside case is "it still doesn
 
 ## 18. Out of scope
 
-Server-side auth; Supabase Auth; RLS hardening; TypeScript/Tailwind; App.jsx decomposition beyond `src/features/quiz/`; any change to question types, scoring rules, slide design, music, or the pause screen; results export; per-question analytics; auto-grading open answers; cross-device presenter handover; a knockout view; retroactively linking legacy quizzes; dropping `events.quizzes`; i18n.
+Server-side auth; Supabase Auth; RLS hardening; TypeScript/Tailwind; App.jsx decomposition beyond `src/features/quiz/`; any change to question types, scoring rules, slide design, music, or the pause screen; results export; per-question analytics; auto-grading open answers; cross-device presenter handover; a knockout view; dropping `events.quizzes`; i18n. *("Retroactively linking legacy quizzes" was listed here and is no longer out of scope — see §14 decision 7.)*

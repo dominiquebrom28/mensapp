@@ -444,6 +444,7 @@ export const QuizBuilder=({onSave,onCancel,existing=null,attendees=[],team_sets=
           onRetryTeamSets={onRetryTeamSets}
           attendees={attendees}
           status={existing?.status||"ready"}
+          title={title}
         />
       )}
 

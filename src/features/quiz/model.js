@@ -10,6 +10,16 @@
 // reproducible id, and a teams-library **snapshot** (not a live reference)
 // per §5.3 -- `quizzes.scores` is name-keyed, so a rename in the library
 // after the snapshot must never orphan a finished quiz's results.
+//
+// `buildLegacyImportPlan`/`buildLegacyTeamSetDraft` (2026-08-26, owner brief:
+// "give the owner a way to bring a legacy quiz's teams into the Team Creator
+// library") are the pure half of that flow -- everything a legacy quiz's
+// `teams[]` (built by the deleted inline builder, §5.1, so never carrying
+// `teamSetId`/`sourceTeamId`) needs to become a real `team_sets` row, or to
+// be recognised as one that already exists. `TeamSetPicker.jsx` owns the one
+// Supabase write (`saveTeamSet`) and the explicit-action UI around it; this
+// module only ever decides *what* to write, never whether to.
+import { blankTeamSet } from '../teamlib/model.js';
 
 export const ALPHA = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 
@@ -246,6 +256,138 @@ export function resolveQuizWinner(quiz) {
     teamSetId: team && typeof team.teamSetId === 'string' ? team.teamSetId : null,
     sourceTeamId: team && typeof team.sourceTeamId === 'string' ? team.sourceTeamId : (team && typeof team.id === 'string' ? team.id : null),
   };
+}
+
+// Case-insensitive, trim-insensitive dedupe for a list of team names --
+// `TeamSetPicker`'s own `duplicateNameIn` guard rejects a set with two teams
+// sharing a name (§3.3: `quizzes.scores` is name-keyed), and a legacy quiz
+// built through the deleted inline builder (which never enforced that rule)
+// may already have exactly that. Rather than blocking the import outright --
+// there is no other UI left to rename a legacy team, since the only editor
+// that ever wrote these names was deleted alongside the inline builder --
+// this renames every name after the first occurrence by appending " (2)",
+// " (3)", … until it's unique, so the library copy this produces can never
+// be a set `TeamSetPicker` would then refuse. Blank/whitespace-only names
+// fall back to `Team <n>` first, same default `teamsFromTeamSet` uses, so
+// they dedupe against each other too rather than colliding as `''`.
+//
+// Returns `{ names, renamed }` -- `names` is the same length/order as the
+// input, `renamed` is only the entries that actually changed
+// (`{ index, from, to }`), so a caller can show an honest "nothing was
+// renamed" when the input was already clean.
+export function dedupeTeamNames(names) {
+  const canonicalBase = new Map(); // lowercased key -> the FIRST display form seen for it
+  const nextSuffix = new Map(); // lowercased key -> next "(n)" to try
+  const used = new Set(); // lowercased FINAL (already-emitted) names
+  const out = [];
+  const renamed = [];
+  (Array.isArray(names) ? names : []).forEach((raw, i) => {
+    const own = (typeof raw === 'string' && raw.trim()) || `Team ${i + 1}`;
+    const key = own.toLowerCase();
+    // Every occurrence of the same name (case-insensitively) is renamed off
+    // of whichever spelling showed up FIRST, not off its own casing --
+    // otherwise "Team Gamma" / "team gamma" / "TEAM GAMMA" would each grow
+    // their own suffix chain instead of becoming one deduped family.
+    if (!canonicalBase.has(key)) canonicalBase.set(key, own);
+    const base = canonicalBase.get(key);
+    let candidate = base;
+    let finalKey = candidate.toLowerCase();
+    if (used.has(finalKey)) {
+      let n = nextSuffix.get(key) || 2;
+      do {
+        candidate = `${base} (${n})`;
+        finalKey = candidate.toLowerCase();
+        n += 1;
+      } while (used.has(finalKey));
+      nextSuffix.set(key, n);
+    }
+    used.add(finalKey);
+    out.push(candidate);
+    if (candidate !== raw) renamed.push({ index: i, from: typeof raw === 'string' ? raw : '', to: candidate });
+  });
+  return { names: out, renamed };
+}
+
+// A canonical, order-independent fingerprint for a team roster -- one string
+// per team (`name|sorted,lowercased,members`), the whole array sorted, so
+// two rosters compare equal regardless of team order. Used only to detect
+// "this is the same teams, already in the library" (below); deliberately
+// keyed on name AND members together, not name alone, so two unrelated teams
+// that happen to share a name (a common one, "Team 1") don't get treated as
+// the same roster just because the label matches.
+function rosterSignature(teams) {
+  return (Array.isArray(teams) ? teams : [])
+    .map((t) => {
+      const name = (t && typeof t.name === 'string' ? t.name : '').trim().toLowerCase();
+      const members = (Array.isArray(t?.members) ? t.members : [])
+        .filter((m) => typeof m === 'string' && m)
+        .map((m) => m.trim().toLowerCase())
+        .sort();
+      return `${name}|${members.join(',')}`;
+    })
+    .sort()
+    .join(';');
+}
+
+/**
+ * The pure half of "bring a legacy quiz's teams into the library" (owner
+ * brief, 2026-08-26). Takes the quiz as it stands today (`quiz.teams`, never
+ * mutated) and the library's current active sets, and decides:
+ *  - what the imported teams would look like as fresh `team_sets` `Team[]`
+ *    rows (`candidateTeams` -- new `tm_…` ids, since a legacy team's own id,
+ *    if it has one at all, was never a library id and carries no meaning
+ *    there; names deduped per `dedupeTeamNames` above),
+ *  - whether an identical roster (by `rosterSignature`) already exists as an
+ *    ACTIVE set in the library -- "two quizzes played with the same teams
+ *    should not create two near-identical library sets" -- so the caller can
+ *    offer "link to this existing set" instead of creating a duplicate,
+ *  - a proposed name for a brand-new set, derived from the quiz title so the
+ *    library doesn't fill up with anonymous "Geïmporteerde teams" rows.
+ *
+ * Never mutates its inputs, never throws on malformed `quiz.teams`/
+ * `teamSets` (both are ultimately hand-editable JSONB, same posture as every
+ * other reader in this feature). `now` is injectable for reproducible ids in
+ * tests, same convention as `blankQuiz`.
+ */
+export function buildLegacyImportPlan(quiz, teamSets = [], { now = Date.now() } = {}) {
+  const legacyTeams = (Array.isArray(quiz?.teams) ? quiz.teams : []).filter((t) => t && typeof t === 'object');
+  const { names, renamed } = dedupeTeamNames(legacyTeams.map((t) => t.name));
+  const candidateTeams = legacyTeams.map((t, i) => ({
+    id: `tm_${now}_${i}`,
+    name: names[i],
+    avatar: (typeof t.avatar === 'string' && t.avatar) || TEAM_AVATARS[i % TEAM_AVATARS.length],
+    members: Array.isArray(t.members) ? t.members.filter((m) => typeof m === 'string') : [],
+    captain: typeof t.captain === 'string' ? t.captain : null,
+  }));
+
+  const signature = rosterSignature(candidateTeams);
+  const activeSets = (Array.isArray(teamSets) ? teamSets : []).filter((s) => s && s.status === 'active');
+  const match = activeSets.find((s) => rosterSignature(s.teams) === signature) || null;
+
+  const titleText = (typeof quiz?.title === 'string' && quiz.title.trim()) || '';
+  const setName = titleText ? `${titleText} — Teams` : 'Geïmporteerde teams';
+
+  return { candidateTeams, renamed, match, setName };
+}
+
+/**
+ * The other half: a real `team_sets` row (teamlib's own JS shape, ready for
+ * `saveTeamSet`) for a plan's `candidateTeams` when no match was found.
+ * `blankTeamSet` supplies every field this feature doesn't care about
+ * (`awards: []`, `eventIds: []`, `status: 'active'`) so a set born from an
+ * import is indistinguishable from one built by hand in the Team Creator --
+ * it is one, from this point on. `category` marks its origin only for the
+ * owner's own orientation in the Team Creator list; nothing reads it back.
+ */
+export function buildLegacyTeamSetDraft(plan, { now = Date.now(), createdBy = '' } = {}) {
+  return blankTeamSet({
+    id: `ts_${now}`,
+    name: plan.setName,
+    category: 'Quiz (geïmporteerd)',
+    teams: plan.candidateTeams,
+    createdBy,
+    createdAt: new Date(now).toISOString(),
+  });
 }
 
 export const teamsFromTeamSet = (teamSet) => {
