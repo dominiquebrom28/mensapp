@@ -89,15 +89,24 @@ describe('live-quiz discovery, end to end', () => {
     await waitFor(() => expect(screen.getByText('Mensdag 2026')).toBeInTheDocument())
     await user.click(screen.getByText('Mensdag 2026'))
 
-    // The overlay is a lazy chunk behind Suspense, and discovery is async
-    // (fetchLiveQuizzes -> resolve the definition locally -> mount).
+    // Wait on the QUESTION, not the title.
+    //
+    // This originally waited for the quiz title and then asserted the
+    // question with a bare `expect` on the next line. That passed on this
+    // machine every time and failed on CI: the overlay is a lazy chunk
+    // behind Suspense and discovery is async (fetchLiveQuizzes -> resolve
+    // the definition locally -> mount), so on a slower runner the header
+    // paints a frame before the question body does, and the bare assertion
+    // fires into that gap.
+    //
+    // The question is also the better thing to wait for on its own merits:
+    // it is the actual proof that the participant overlay rendered, where
+    // the title alone could be printed by some other surface.
     await waitFor(
-      () => expect(screen.getByText('De Grote Pubquiz')).toBeInTheDocument(),
-      { timeout: 4000 },
+      () => expect(screen.getByText('Hoeveel?')).toBeInTheDocument(),
+      { timeout: 8000 },
     )
-    // The live question itself, i.e. the overlay really rendered rather than
-    // some other surface happening to print the title.
-    expect(screen.getByText('Hoeveel?')).toBeInTheDocument()
+    expect(screen.getByText('De Grote Pubquiz')).toBeInTheDocument()
     // And the exit added in 50b8690 is reachable from it.
     expect(screen.getByText(/Hide/)).toBeInTheDocument()
   })
