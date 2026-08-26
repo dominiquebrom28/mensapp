@@ -132,7 +132,13 @@ describe('QuizShell scope="page" -- the new standalone capability', () => {
     render(<QuizShell scope="page" events={[]} users={[]} currentUser={{ role: 'org' }} can={CAN} teamSets={[]} onUpdateEvent={() => {}} />);
     await screen.findByText('Weg Ermee');
 
-    fireEvent.click(screen.getByText('✕ Verwijder “Weg Ermee”'));
+    // Was `getByText('✕ Verwijder “Weg Ermee”')`. The actions moved onto the
+    // row itself (owner request, 2026-08-26), so the visible label no longer
+    // repeats the quiz title -- that repetition only existed because the
+    // strip sat under the whole list and had to say what it acted on. The
+    // title now lives in an `aria-label`, which is the better target anyway:
+    // it asserts the button is findable the way a screen reader finds it.
+    fireEvent.click(screen.getByRole('button', { name: 'Verwijder Weg Ermee' }));
 
     expect(deleteQuiz).toHaveBeenCalledWith('qz-1');
     await waitFor(() => expect(screen.queryByText('Weg Ermee')).not.toBeInTheDocument());

@@ -70,24 +70,40 @@ function totalQuestions(quiz) {
 // land in the full editor. Non-admins get the identical row, minus the
 // click -- a real `<div>`, not a `<button>` pretending to be inert, so
 // nothing here silently claims a role it doesn't have.
-function QuizRow({ quiz, eventName, onOpen, interactive }) {
+// The row is a container, NOT one big button. It used to be a single
+// full-width `<button>`, which meant per-quiz actions could not live on it
+// (nesting a button inside a button is invalid HTML) and had to be exiled
+// to a strip under the whole list -- where each one had to repeat the quiz
+// title to say what it acted on, and read as detached from the thing it
+// belonged to. The owner asked for them on the tile, which is also where
+// they belong.
+//
+// So: the label area is its own button (the open affordance, still fully
+// keyboard-reachable), and the actions are its siblings. No nesting, every
+// action a real `<button>`, and each carries an `aria-label` naming the
+// quiz because the visible text alone ("Present") is ambiguous once it is
+// one of several identical-looking rows.
+function QuizRow({ quiz, eventName, onOpen, interactive, actions }) {
   const nq = normalizeQuiz(quiz);
-  const content = (
+  const rowStyle = { display: 'flex', alignItems: 'center', gap: 12, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: '.9rem 1rem', color: 'var(--cream)', fontFamily: 'var(--font-b)', minHeight: 44, flexWrap: 'wrap' };
+  const labelStyle = { flex: '1 1 220px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 12, background: 'none', border: 'none', padding: 0, margin: 0, textAlign: 'left', color: 'inherit', font: 'inherit', minHeight: 44, cursor: interactive ? 'pointer' : 'default' };
+  const label = (
     <>
       <span aria-hidden="true" style={{ fontSize: '1.5rem' }}>{nq.rounds[0]?.icon || '🎯'}</span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: '.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{quiz.title}</div>
         <div style={{ fontSize: '.74rem', color: 'var(--muted)' }}>{nq.rounds.length} ronde{nq.rounds.length === 1 ? '' : 's'} · {totalQuestions(quiz)} vraag{totalQuestions(quiz) === 1 ? '' : 'en'}{eventName ? ` · ${eventName}` : ' · Losstaand'}</div>
       </span>
-      <Tag color={STATUS_COLOR[quiz.status] || 'var(--muted2)'}>{STATUS_LABEL[quiz.status] || quiz.status}</Tag>
     </>
   );
-  const rowStyle = { width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: '.9rem 1rem', color: 'var(--cream)', fontFamily: 'var(--font-b)', minHeight: 44 };
-  if (!interactive) return <div style={rowStyle}>{content}</div>;
   return (
-    <button type="button" onClick={onOpen} style={{ ...rowStyle, cursor: 'pointer' }}>
-      {content}
-    </button>
+    <div style={rowStyle}>
+      {interactive
+        ? <button type="button" onClick={onOpen} style={labelStyle}>{label}</button>
+        : <div style={labelStyle}>{label}</div>}
+      <Tag color={STATUS_COLOR[quiz.status] || 'var(--muted2)'}>{STATUS_LABEL[quiz.status] || quiz.status}</Tag>
+      {actions}
+    </div>
   );
 }
 
@@ -202,7 +218,10 @@ function QuizPageShell({ events = [], users = [], currentUser, can, teamSets = [
     const wasNew = standaloneEdit === 'new';
     let fullQuiz;
     if (wasNew) {
-      fullQuiz = { ...quiz, id: `qz${Date.now()}`, eventId: null, status: 'ready', scores: {}, memberScores: {}, participants: [], settings: { secret: false, published: false }, rev: 1, createdBy: currentUser?.username || '', createdAt: nowIso, updatedAt: nowIso, finishedAt: null };
+      // Winner-tab brief (2026-08-26): merge, don't overwrite -- a `winner`
+      // override picked before the very first save must survive alongside
+      // the brand-new quiz's literal defaults.
+      fullQuiz = { ...quiz, id: `qz${Date.now()}`, eventId: null, status: 'ready', scores: {}, memberScores: {}, participants: [], settings: { secret: false, published: false, ...(quiz.settings && typeof quiz.settings === 'object' ? quiz.settings : {}) }, rev: 1, createdBy: currentUser?.username || '', createdAt: nowIso, updatedAt: nowIso, finishedAt: null };
     } else {
       const prior = tableQuizzes.find(q => q.id === standaloneEdit.id) || standaloneEdit;
       const priorRev = Number.isFinite(prior.rev) ? prior.rev : 1;
@@ -269,7 +288,24 @@ function QuizPageShell({ events = [], users = [], currentUser, can, teamSets = [
             <EmptyState icon="🧠" title={merged.length === 0 ? 'Nog geen quizzen' : 'Niets in dit filter'} hint={isAdmin ? 'Maak er eentje aan om te beginnen -- los, of gekoppeld aan een event.' : 'Vraag een org/admin om een quiz te starten.'} />
           ) : (
             <div style={{ display: 'grid', gap: 8 }}>
-              {visible.map(q => <QuizRow key={q.id} quiz={q} eventName={eventNameFor(q)} onOpen={() => openQuizRow(q)} interactive={isAdmin} />)}
+              {visible.map(q => (
+                <QuizRow
+                  key={q.id}
+                  quiz={q}
+                  eventName={eventNameFor(q)}
+                  onOpen={() => openQuizRow(q)}
+                  interactive={isAdmin}
+                  actions={isAdmin && !q.eventId && !standaloneEdit && !presenterQuiz ? (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {q.status !== 'finished' && (
+                        <Btn size="sm" variant="ghost" aria-label={`Presenteer ${q.title}`} onClick={() => setPresenterQuiz(normalizeQuiz(q))}>🎤 Present</Btn>
+                      )}
+                      <Btn size="sm" variant="ghost" aria-label={`Dupliceer ${q.title}`} onClick={() => duplicateStandalone(q)}>⧉</Btn>
+                      <Btn size="sm" variant="danger" aria-label={`Verwijder ${q.title}`} onClick={() => removeStandalone(q)}>✕</Btn>
+                    </div>
+                  ) : null}
+                />
+              ))}
             </div>
           )}
         </>
@@ -327,22 +363,6 @@ function QuizPageShell({ events = [], users = [], currentUser, can, teamSets = [
         />
       )}
 
-      {/* Present/duplicate/delete for a standalone quiz row -- kept as a
-          lightweight action strip under the list rather than a second
-          click layer inside `QuizRow` (which is a single full-width button,
-          the same shape `mensgames/MensGamesShell.jsx`'s `TournamentRow`
-          uses), so every action stays a real, keyboard-reachable `<button>`. */}
-      {visible.filter(q => !q.eventId).length > 0 && !standaloneEdit && !presenterQuiz && (
-        <div style={{ display: 'grid', gap: 6 }}>
-          {visible.filter(q => !q.eventId).map(q => (
-            <div key={`actions-${q.id}`} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              {isAdmin && q.status !== 'finished' && <Btn size="sm" variant="ghost" onClick={() => setPresenterQuiz(normalizeQuiz(q))}>🎤 Present &ldquo;{q.title}&rdquo;</Btn>}
-              {isAdmin && <Btn size="sm" variant="ghost" onClick={() => duplicateStandalone(q)}>⧉ Dupliceer &ldquo;{q.title}&rdquo;</Btn>}
-              {isAdmin && <Btn size="sm" variant="danger" onClick={() => removeStandalone(q)}>✕ Verwijder &ldquo;{q.title}&rdquo;</Btn>}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

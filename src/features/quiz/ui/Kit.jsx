@@ -34,8 +34,20 @@ export const Card = ({ children, style = {}, className = "", id }) => (
 );
 
 // ── Copied verbatim from App.jsx (`const Btn =`, line ~111) ────────────────
-export const Btn = ({ children, onClick, variant = "primary", size = "md", style = {}, disabled = false, type = "button" }) => {
-  const sz = { sm: { padding: "6px 14px", fontSize: ".78rem" }, md: { padding: "10px 22px", fontSize: ".88rem" }, lg: { padding: "13px 30px", fontSize: "1rem" } };
+// `...passthrough` is not cosmetic. Without it this component silently
+// swallowed every attribute it did not name -- including `aria-label`, so an
+// icon-only button (`⧉`, `✕`) rendered with no accessible name at all and no
+// error anywhere to say so.
+//
+// The `minHeight`s were missing for the same reason this component exists:
+// it is a byte-for-byte copy taken from App.jsx when the quiz moved out
+// (WP-Q3), and it was copied BEFORE App.jsx's own `Btn` was given real tap
+// targets. So the fix landed on one fork and not the other, and the quiz's
+// `sm` buttons stayed ~27px. Values now match App.jsx and
+// `mensgames/ui/Kit.jsx`: 36/44/48. See docs/ux-plan.md §2.1 -- merging the
+// three is a later phase, blocked on the source-parsing test hack.
+export const Btn = ({ children, onClick, variant = "primary", size = "md", style = {}, disabled = false, type = "button", ...passthrough }) => {
+  const sz = { sm: { padding: "6px 14px", fontSize: ".78rem", minHeight: 36 }, md: { padding: "10px 22px", fontSize: ".88rem", minHeight: 44 }, lg: { padding: "13px 30px", fontSize: "1rem", minHeight: 48 } };
   const vr = {
     primary: { background: "var(--amber)", color: "var(--bg)", border: "none" },
     ghost: { background: "transparent", color: "var(--cream)", border: "1px solid var(--border)" },
@@ -67,7 +79,7 @@ export const Btn = ({ children, onClick, variant = "primary", size = "md", style
   }, [disabled, variant]);
   const onDown = e => { if (!disabled) { const el = e.currentTarget; el._preTr = el.style.transform; el.style.transform = "scale(.96)"; } };
   const onUp = e => { if (!disabled) { const el = e.currentTarget; el.style.transform = el._preTr ?? ""; } }
-  return <button ref={btnRef} type={type} onClick={onClick} disabled={disabled} onMouseEnter={onEnter} onMouseLeave={onLeave} onMouseDown={onDown} onMouseUp={onUp} style={{ borderRadius: "var(--radius-sm)", cursor: disabled ? "not-allowed" : "pointer", fontFamily: "var(--font-b)", fontWeight: 600, transition: "all .18s", opacity: disabled ? .5 : 1, ...computed }}>{children}</button>;
+  return <button ref={btnRef} type={type} onClick={onClick} disabled={disabled} onMouseEnter={onEnter} onMouseLeave={onLeave} onMouseDown={onDown} onMouseUp={onUp} {...passthrough} style={{ borderRadius: "var(--radius-sm)", cursor: disabled ? "not-allowed" : "pointer", fontFamily: "var(--font-b)", fontWeight: 600, transition: "all .18s", opacity: disabled ? .5 : 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, ...computed }}>{children}</button>;
 };
 
 // ── Copied verbatim from App.jsx (`const Inp =`, line ~207) ────────────────
