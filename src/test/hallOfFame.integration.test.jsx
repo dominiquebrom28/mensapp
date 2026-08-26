@@ -8,14 +8,13 @@
 // session via `md-session` (same trick `App.smoke.test.jsx` documents),
 // navigated to the Hall of Fame page via the real Nav button.
 //
-// Two things under test:
-//  1. Tournament champions written by `finishTournament` (WP-J) land in
-//     "Most Awards Won" with NO changes to HallOfFame's existing winners
-//     aggregation -- because they're shaped exactly like a hand-added
-//     `events.winners` entry. This is the "verify it actually happens
-//     rather than assuming" the task asked for.
-//  2. The new blocks (#16): the team trophy cabinet, and the three "other
-//     ideas" categories (Lens Legend, On a Roll, the kretjes tally).
+// Reorg 2026-08-26 (docs/hall-of-fame-spec.md): what used to render inline
+// as seven full-width sections is now a stat strip plus a tile grid, with
+// each section's full list moved wholesale behind its tile's click into the
+// existing `Modal`. Every assertion below describes the same behaviour the
+// pre-reorg version of this file asserted -- only *how* each one is reached
+// changed (open the relevant tile first), never *what* is asserted, per the
+// task brief.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -74,6 +73,32 @@ vi.mock('../supabase.js', async () => {
         ],
         error: null,
       },
+      // A still-secret finished tournament and a still-secret finished quiz,
+      // both linked to evt-2 -- the "two things that will bite you" case
+      // (docs/hall-of-fame-spec.md): `fetchTournamentResults`/
+      // `fetchQuizResults` must exclude both before HallOfFame (or its Roll
+      // of Honour feed, or its Quiz All-Time board) ever sees them.
+      tournaments: {
+        data: [
+          {
+            id: 'trn_secret', name: 'Geheim Toernooi', event_id: 'evt-2', status: 'finished',
+            entrants: [{ id: 'ent_secret', kind: 'player', name: 'Zwijn Secretus', avatar: '🐗' }],
+            rounds: [{ id: 'r1', status: 'done', results: { points: { ent_secret: 99 } } }],
+            settings: { secret: true },
+          },
+        ],
+        error: null,
+      },
+      quizzes: {
+        data: [
+          {
+            id: 'qz_secret', title: 'Geheime Quiz', event_id: 'evt-2', status: 'finished',
+            teams: [], scores: { Geheimhouder: 500 }, member_scores: {}, finished_at: '2026-07-01T00:00:00Z',
+            settings: { secret: true },
+          },
+        ],
+        error: null,
+      },
     }),
     hashPin: async () => 'mock-hash',
   }
@@ -93,7 +118,15 @@ async function openHallOfFame() {
   })
 }
 
-describe('Hall of Fame (#16)', () => {
+// Opens a tile's drill-in Modal by clicking the tile button (matched by its
+// visible title, e.g. "Most Awards", "Lens Legend") -- the "moved wholesale
+// behind a click" half of the 2026-08-26 reorg.
+async function openTile(nameRe) {
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: nameRe }))
+}
+
+describe('Hall of Fame (#16, reorganised into a stat strip + tile grid 2026-08-26)', () => {
   beforeEach(() => {
     localStorage.setItem('md-session', 'u-1')
   })
@@ -101,14 +134,59 @@ describe('Hall of Fame (#16)', () => {
     localStorage.clear()
   })
 
+  it('shows the stat strip (Edities/Lads/Kretjes/Awards) on first paint, no click required', async () => {
+    await openHallOfFame()
+    const main = screen.getByRole('main')
+    const kretjesLabel = within(main).getByText('Kretjes')
+    expect(within(kretjesLabel.parentElement).getByText('8')).toBeInTheDocument()
+    const ladsLabel = within(main).getByText('Lads')
+    expect(within(ladsLabel.parentElement).getByText('2')).toBeInTheDocument()
+    const editiesLabel = within(main).getByText('Edities')
+    expect(within(editiesLabel.parentElement).getByText('2')).toBeInTheDocument()
+    // Spec's literal formula: total winner rows across all events (2: the
+    // manual award + the mens-games one) + team awards (1: aw_1) = 3 -- a
+    // raw sum, deliberately not the Roll of Honour feed's deduped count.
+    const awardsLabel = within(main).getByText('Awards')
+    expect(within(awardsLabel.parentElement).getByText('3')).toBeInTheDocument()
+  })
+
+  it('Roll of Honour tile shows the most recent award and opens the full list on click', async () => {
+    await openHallOfFame()
+    // evt-1 (2025) is the only event carrying awards -- its manual award and
+    // its tournament-authored one are both candidates for "most recent";
+    // either is correct proof the tile surfaces a real award, not a person
+    // ranking.
+    expect(screen.getByRole('button', { name: /roll of honour/i })).toBeInTheDocument()
+    await openTile(/roll of honour/i)
+    const modal = screen.getByRole('heading', { name: /roll of honour/i }).closest('div')
+    expect(within(modal).getByText('De Kraaien')).toBeInTheDocument()
+    expect(within(modal).getByText('Doom')).toBeInTheDocument()
+    // The mens-games win is real-world *one* award, represented twice in the
+    // data (an `events.winners` row AND a `team_sets.awards` TeamAward,
+    // written by the same `finishTournament` call) -- Roll of Honour must
+    // show it once, not once per representation.
+    expect(within(modal).getAllByText(/Mens-Games 2025/i)).toHaveLength(1)
+  })
+
+  it('never leaks a secret tournament champion or a secret quiz winner anywhere on Hall of Fame', async () => {
+    await openHallOfFame()
+    expect(screen.queryByText(/Zwijn Secretus/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Geheimhouder/)).not.toBeInTheDocument()
+    await openTile(/roll of honour/i)
+    expect(screen.queryByText(/Zwijn Secretus/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Geheimhouder/)).not.toBeInTheDocument()
+  })
+
   it('a tournament champion written to events.winners by finishTournament shows up in "Most Awards Won" unaided', async () => {
     await openHallOfFame()
+    await openTile(/most awards/i)
     const section = screen.getByRole('heading', { name: /most awards won/i }).closest('div')
     expect(within(section).getByText('De Kraaien')).toBeInTheDocument()
   })
 
   it('renders the team trophy cabinet for a team set carrying a TeamAward', async () => {
     await openHallOfFame()
+    await openTile(/team trophy cabinet/i)
     expect(screen.getByRole('heading', { name: /team trophy cabinet/i })).toBeInTheDocument()
     expect(screen.getByText('Kroeg Teams')).toBeInTheDocument()
     expect(screen.getByText('🥇 Mens-Games 2025 — 1e plaats')).toBeInTheDocument()
@@ -116,18 +194,14 @@ describe('Hall of Fame (#16)', () => {
 
   it('renders Lens Legend ranking photo uploaders', async () => {
     await openHallOfFame()
+    await openTile(/lens legend/i)
     const section = screen.getByRole('heading', { name: /lens legend/i }).closest('div')
     expect(within(section).getByText('2 photos uploaded')).toBeInTheDocument()
   })
 
-  it('renders the all-time kretjes tally as a single group stat, not a per-person leaderboard', async () => {
-    await openHallOfFame()
-    expect(screen.getByText('8')).toBeInTheDocument()
-    expect(screen.getByText(/kretjes and counting/i)).toBeInTheDocument()
-  })
-
   it('renders "On a Roll" for an attendee with a current streak of 2+', async () => {
     await openHallOfFame()
+    await openTile(/^on a roll/i)
     const section = screen.getByRole('heading', { name: /on a roll/i }).closest('div')
     expect(within(section).getByText('🔥 2')).toBeInTheDocument()
     // Bram missed the most recent event -- streak broken, excluded.

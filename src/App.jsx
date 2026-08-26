@@ -1181,7 +1181,63 @@ const AdminPanel = ({users,onUpdateUsers,onDeleteUser,onClose,saraJayUnlocked,on
 // ─────────────────────────────────────────────────────────────────────────────
 // HALL OF FAME
 // ─────────────────────────────────────────────────────────────────────────────
-const HallOfFame = ({events,users=[],teamSets=[],teamSetsError=null,onRetryTeamSets,quizResults=[]}) => {
+// Reorg 2026-08-26 (docs/hall-of-fame-spec.md): seven full-width sections
+// stacked vertically -- every category cost a scroll to reach, and every one
+// ranked *people* rather than showing the *awards* the owner actually asked
+// to showcase -- become a stat strip plus a tile grid (`HofTile`, one
+// component, eight uses per the spec's own "eight hand-rolled tiles is how
+// the design system forked in the first place" decision). Every computation
+// below is unchanged from before this pass; only the shell around it and the
+// new Roll of Honour feed are new. Each tile's full list/ranking is the same
+// content that used to render inline, moved wholesale behind a click into
+// the existing `Modal` -- never rebuilt, never re-derived.
+//
+// `HofTile` is a real `<button>` (44px+ tall) with a visible focus ring
+// applied via onFocus/onBlur, the same technique `input:focus`/`Btn` already
+// use in this file (App.jsx has no external stylesheet for a `:focus-visible`
+// rule to live in) -- not a `<div onClick>`, the anti-pattern the spec calls
+// out by name.
+const HofTile=({icon,title,onOpen,span=false,children,cta})=>(
+  <button type="button" onClick={onOpen} style={{
+    textAlign:"left",display:"flex",flexDirection:"column",gap:".7rem",
+    background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius)",
+    padding:"1.3rem",cursor:"pointer",color:"inherit",font:"inherit",
+    width:"100%",minHeight:44,gridColumn:span?"span 2":undefined,
+    transition:"border-color .18s",
+  }}
+    onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--border2)";}}
+    onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";}}
+    onFocus={e=>{e.currentTarget.style.outline="3px solid var(--amber2)";e.currentTarget.style.outlineOffset="2px";}}
+    onBlur={e=>{e.currentTarget.style.outline="none";}}>
+    <div style={{display:"flex",alignItems:"center",gap:8,fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--amber2)"}}>
+      <span aria-hidden="true" style={{fontSize:"1.25rem"}}>{icon}</span>{title}
+    </div>
+    <div style={{height:1,background:"var(--border)"}}/>
+    <div style={{flex:1,display:"flex",flexDirection:"column",gap:".55rem"}}>{children}</div>
+    {cta&&<div style={{fontSize:".8rem",color:"var(--amber)",fontWeight:600}}>{cta}</div>}
+  </button>
+);
+// Shared "#1, big" row -- avatar + display name + the number they won it
+// with, per the spec's anatomy diagram. Every tile but Perfect Attendance
+// (a names list, not a single #1) uses this.
+const HofLeader=({name,value,users,medal="🥇"})=>(
+  <div style={{display:"flex",alignItems:"center",gap:10}}>
+    <span aria-hidden="true" style={{fontSize:"1.2rem"}}>{medal}</span>
+    <Avatar name={name} size={36} {...getUA(name,users)}/>
+    <div style={{minWidth:0}}>
+      <div style={{fontFamily:"var(--font-h)",fontSize:"1.02rem",color:"var(--cream)",lineHeight:1.2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{getDisplayName(name,users)}</div>
+      <div style={{fontSize:".78rem",color:"var(--amber)",fontWeight:600,marginTop:2}}>{value}</div>
+    </div>
+  </div>
+);
+// Shared "runners-up: two names, small" row.
+const HofRunnersUp=({names,users})=>(!names||names.length===0)?null:(
+  <div style={{fontSize:".75rem",color:"var(--muted)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{names.map(n=>getDisplayName(n,users)).join(" · ")}</div>
+);
+
+const HallOfFame = ({events,users=[],teamSets=[],teamSetsError=null,onRetryTeamSets,quizResults=[],tournamentResults=[]}) => {
+  const isMobile=useIsMobile();
+  const [openModal,setOpenModal]=useState(null); // null | 'roh'|'attendance'|'roll'|'awards'|'quiz'|'teams'|'lens'|'perfect'
   const allAttendees = {};
   const allWins = {};
   let totalEvents = events.length;
@@ -1281,92 +1337,300 @@ const HallOfFame = ({events,users=[],teamSets=[],teamSetsError=null,onRetryTeamS
   // guarded the same way as everything else here.
   const decoratedSets=(Array.isArray(teamSets)?teamSets:[]).filter(ts=>ts&&Array.isArray(ts.awards)&&ts.awards.filter(a=>a&&typeof a==="object").length>0);
 
+  // Roll of Honour (docs/hall-of-fame-spec.md -- new, the centrepiece): every
+  // award from every event in one place, newest event first. Built off
+  // exactly the two sources `WinnersTab` renders per-event -- `evt.winners`
+  // (hand-added awards, plus any AUTO card already published to a real row,
+  // e.g. `finishTournament`'s `mg-`/`qz-` ids) and the *not-yet-published*
+  // AUTO cards for a finished quiz/tournament linked to that event -- so a
+  // result lands here the instant it would land on its own event's Winners
+  // tab, never before and never twice. Mirrors `WinnersTab`'s own
+  // `finishedQuizzesForEvt`/`quizWinners`/`tournamentWinners` blocks (App.jsx
+  // ~2864-2909) rather than reasoning about the shape from scratch.
+  //
+  // Deliberately excludes `team_sets.awards` (the Team Trophy Cabinet's own
+  // source, read separately below): every `TeamAward` there is written by
+  // the exact same `finishTournament` call that already writes the matching
+  // `mg-<tournamentId>-<entrantId>` row to `evt.winners`
+  // (`features/awards/publishResults.js`) -- folding both in here would show
+  // the same real-world win twice in one feed. The Team Trophy Cabinet tile
+  // keeps reading `team_sets.awards` directly, unchanged.
+  //
+  // Secret tournaments/unpublished quizzes: two independent guards here,
+  // mirroring `WinnersTab` exactly -- this invariant has already broken
+  // twice on this project, both times member-visible. `quizResults`/
+  // `tournamentResults` already exclude a `settings.secret===true` row at
+  // the fetch layer (`features/quiz/results.js`/
+  // `features/mensgames/tournamentResults.js`); the `!secret` filters below
+  // are the second, so a bug in either alone still can't leak one here.
+  const rohFeed=[];
+  events.forEach(evt=>{
+    (evt.winners||[]).forEach(w=>{
+      if(!w||typeof w!=="object")return;
+      rohFeed.push({id:w.id,icon:w.icon||"🏆",category:w.category,winner:w.winner,detail:w.detail,eventName:evt.name});
+    });
+    const evtQuizIds=new Set((evt.quizzes||[]).map(q=>q&&q.id));
+    const finishedQuizzesForEvt=[
+      ...(evt.quizzes||[]),
+      ...(quizResults||[]).filter(q=>q&&q.eventId===evt.id&&!evtQuizIds.has(q.id)),
+    ];
+    finishedQuizzesForEvt
+      .filter(q=>q&&q.status==="finished"&&!(q.settings&&q.settings.secret===true))
+      .filter(quiz=>!isQuizAlreadyPublished(quiz,evt.winners||[]))
+      .forEach(quiz=>{
+        const resolved=resolveQuizWinner(quiz);
+        if(!resolved)return;
+        rohFeed.push({id:`quiz-winner-${quiz.id}`,icon:resolved.avatar,category:`🧠 ${quiz.title}`,winner:resolved.name,detail:resolved.detail,eventName:evt.name});
+      });
+    (tournamentResults||[])
+      .filter(t=>t&&t.eventId===evt.id&&t.status==="finished"&&!(t.settings&&t.settings.secret===true))
+      .filter(t=>!isTournamentAlreadyPublished(t,evt.winners||[]))
+      .forEach(t=>{
+        const placement=tournamentWinnerPlacement(t);
+        if(!placement)return;
+        rohFeed.push({id:`mens-winner-${t.id}`,icon:placement.avatar,category:`🏆 ${t.name}`,winner:placement.name,detail:placement.detail,eventName:evt.name});
+      });
+  });
+  // Newest event first -- `events` is fetched `.order("date")` ascending
+  // (App.jsx boot), so a plain reverse puts the latest edition's awards
+  // first while keeping each event's own awards grouped together in the
+  // order they were pushed above (real winners, then AUTO); there is no
+  // per-award timestamp in the schema to sort on instead.
+  const rohFeedByRecency=[...rohFeed].reverse();
+
+  // Team with the most awards (Team Trophy Cabinet tile's #1) -- aggregated
+  // across every decorated team set, keyed by set+team so two unrelated sets
+  // can't collide on a reused id.
+  const teamAwardTotals=[];
+  decoratedSets.forEach(ts=>{
+    const teams=Array.isArray(ts.teams)?ts.teams:[];
+    const byTeam={};
+    ts.awards.filter(a=>a&&typeof a==="object").forEach(a=>{
+      const key=typeof a.teamId==="string"&&a.teamId?a.teamId:"__onbekend__";
+      (byTeam[key]||(byTeam[key]=[])).push(a);
+    });
+    Object.entries(byTeam).forEach(([teamId,list])=>{
+      teamAwardTotals.push({key:`${ts.id}:${teamId}`,team:teams.find(t=>t&&t.id===teamId)||null,count:list.length});
+    });
+  });
+  teamAwardTotals.sort((a,b)=>b.count-a.count);
+
+  // Stat strip's Awards number, per spec: "total winner rows across all
+  // events + team awards" -- a raw sum of the two source tables' sizes, not
+  // the Roll of Honour feed's deduped count above (that dedup exists so the
+  // *tile* doesn't show one real-world win twice; this headline number is
+  // deliberately the two tables added together, exactly as the spec's own
+  // stat-strip table defines it).
+  const statAwardsTotal=events.reduce((s,e)=>s+(Array.isArray(e.winners)?e.winners.length:0),0)
+    +decoratedSets.reduce((s,ts)=>s+ts.awards.filter(a=>a&&typeof a==="object").length,0);
+
+  const anyTileVisible=rohFeedByRecency.length>0||attendance.length>0||streaks.length>0||winners.length>0
+    ||quizBoard.length>0||teamAwardTotals.length>0||!!teamSetsError||photographers.length>0||perfect.length>0;
+
   const podiumColors = ["var(--gold)","var(--muted)","#cd7f32"];
   const podiumEmojis = ["🥇","🥈","🥉"];
 
   return(
-    <div style={{display:"grid",gap:"2rem"}}>
+    <div style={{display:"grid",gap:"1.6rem"}}>
       <div className="fu" style={{textAlign:"center",padding:"1.5rem 0 0"}}>
         <div style={{fontSize:"3rem",marginBottom:".4rem"}}>🏅</div>
         <H size="2.5rem" style={{marginBottom:".3rem"}}>Hall of Fame</H>
         <p style={{color:"var(--muted)",fontSize:".88rem"}}>{totalEvents} editions · The legends live here</p>
       </div>
 
-      {/* Perfect attendance */}
-      {perfect.length>0&&(
-        <Card className="fu1" style={{background:"linear-gradient(135deg,#1f1609,#2e1e0a)",borderColor:"var(--border2)",textAlign:"center",padding:"2rem"}}>
-          <div style={{fontSize:"2rem",marginBottom:".5rem"}}>🐐</div>
-          <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber2)",marginBottom:".8rem"}}>Perfect Attendance</div>
-          <div style={{display:"flex",justifyContent:"center",gap:"1rem",flexWrap:"wrap"}}>
-            {perfect.map((p)=>(
-              <div key={p.name} style={{display:"flex",alignItems:"center",gap:8}}>
-                <Avatar name={p.name} size={38} {...getUA(p.name,users)}/>
-                <div>
-                  <div style={{fontWeight:600,fontSize:".95rem"}}>{getDisplayName(p.name,users)}</div>
-                  <div style={{fontSize:".72rem",color:"var(--amber)"}}>All {totalEvents} events</div>
+      {/* Stat strip -- one row, four numbers, no interaction (spec §1): the
+          context everything below sits in, visible on first paint with zero
+          scroll and zero clicks. */}
+      <Card className="fu1" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:".5rem",padding:"1.1rem .6rem",textAlign:"center"}}>
+        {[["Edities",totalEvents],["Lads",attendance.length],["Kretjes",totalKretjes],["Awards",statAwardsTotal]].map(([label,value])=>(
+          <div key={label}>
+            <div style={{fontFamily:"var(--font-h)",fontSize:"1.5rem",color:"var(--amber2)",lineHeight:1.1}}>{value}</div>
+            <div style={{fontSize:".62rem",color:"var(--muted)",letterSpacing:".05em",textTransform:"uppercase",marginTop:2}}>{label}</div>
+          </div>
+        ))}
+      </Card>
+
+      {/* Decision (spec): a tile with no data does not render, and an empty
+          Hall of Fame shows the stat strip plus one honest empty state --
+          never a page padded out with "Nog geen X" cards. */}
+      {!anyTileVisible&&(
+        <Card className="fu2" style={{textAlign:"center",padding:"4rem",color:"var(--muted)"}}>
+          {events.length===0
+            ?"No events yet — the Hall of Fame will fill up as you play!"
+            :"Nog geen awards of records om te tonen — die komen vanzelf."}
+        </Card>
+      )}
+
+      {/* Tile grid -- 3 across desktop, 2 tablet, 1 phone via the same
+          `repeat(auto-fit,minmax(...))` idiom every other responsive grid in
+          this file already uses (e.g. Members' `minmax(150px,1fr)`). Roll of
+          Honour spans two tracks on anything wide enough to have two
+          (`useIsMobile`, not a raw `grid-column:span 2`, which would force
+          the grid to grow an implicit 2nd column -- and overflow -- on a
+          narrow phone that only has room for one). */}
+      <div className="fu2" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:"1rem"}}>
+        {rohFeedByRecency.length>0&&(()=>{
+          const top=rohFeedByRecency[0];
+          const runners=rohFeedByRecency.slice(1,3).map(a=>a.winner);
+          return(
+            <HofTile icon="🏅" title="Roll of Honour" span={!isMobile} onOpen={()=>setOpenModal("roh")} cta={`Bekijk alle ${rohFeedByRecency.length} →`}>
+              <HofLeader name={top.winner} users={users} value={`${top.category} · ${top.eventName}`}/>
+              <HofRunnersUp names={runners} users={users}/>
+            </HofTile>
+          );
+        })()}
+
+        {attendance.length>0&&(
+          <HofTile icon="📅" title="Attendance" onOpen={()=>setOpenModal("attendance")} cta={`Bekijk alle ${attendance.length} →`}>
+            <HofLeader name={attendance[0].name} users={users} value={`${attendance[0].attended} van ${totalEvents}`}/>
+            <HofRunnersUp names={attendance.slice(1,3).map(a=>a.name)} users={users}/>
+          </HofTile>
+        )}
+
+        {streaks.length>0&&(
+          <HofTile icon="🔥" title="On a Roll" onOpen={()=>setOpenModal("roll")} cta={`Bekijk alle ${streaks.length} →`}>
+            <HofLeader name={streaks[0].name} users={users} value={`${streaks[0].streak} op rij`}/>
+            <HofRunnersUp names={streaks.slice(1,3).map(s=>s.name)} users={users}/>
+          </HofTile>
+        )}
+
+        {winners.length>0&&(
+          <HofTile icon="🏆" title="Most Awards" onOpen={()=>setOpenModal("awards")} cta={`Bekijk alle ${winners.length} →`}>
+            <HofLeader name={winners[0].name} users={users} value={`${winners[0].count} award${winners[0].count!==1?"s":""}`}/>
+            <HofRunnersUp names={winners.slice(1,3).map(w=>w.name)} users={users}/>
+          </HofTile>
+        )}
+
+        {quizBoard.length>0&&(
+          <HofTile icon="🧠" title="Quiz All-Time" onOpen={()=>setOpenModal("quiz")} cta={`Bekijk alle ${quizBoard.length} →`}>
+            <HofLeader name={quizBoard[0].name} users={users} value={`${quizBoard[0].total} pts`}/>
+            <HofRunnersUp names={quizBoard.slice(1,3).map(p=>p.name)} users={users}/>
+          </HofTile>
+        )}
+
+        {/* Team Trophy Cabinet: a failed read gets its own error tile
+            (never silently "no teams" -- there may well be a cabinet, we
+            simply couldn't reach it) rather than being suppressed like a
+            genuinely-empty tile would be. */}
+        {teamAwardTotals.length>0&&(
+          <HofTile icon="🏆" title="Team Trophy Cabinet" onOpen={()=>setOpenModal("teams")} cta={`Bekijk alle ${teamAwardTotals.length} →`}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span aria-hidden="true" style={{fontSize:"1.2rem"}}>🥇</span>
+              <span aria-hidden="true" style={{fontSize:"1.4rem",lineHeight:1}}>{teamAwardTotals[0].team?.avatar||"🎯"}</span>
+              <div style={{minWidth:0}}>
+                <div style={{fontFamily:"var(--font-h)",fontSize:"1.02rem",color:"var(--cream)",lineHeight:1.2}}>{teamAwardTotals[0].team?.name||"Onbekend team"}</div>
+                <div style={{fontSize:".78rem",color:"var(--amber)",fontWeight:600,marginTop:2}}>{teamAwardTotals[0].count} award{teamAwardTotals[0].count!==1?"s":""}</div>
+              </div>
+            </div>
+            <HofRunnersUp names={teamAwardTotals.slice(1,3).map(t=>t.team?.name||"Onbekend team")} users={[]}/>
+          </HofTile>
+        )}
+        {teamAwardTotals.length===0&&teamSetsError&&(
+          <HofTile icon="🏆" title="Team Trophy Cabinet" onOpen={()=>setOpenModal("teams")} cta="Opnieuw proberen →">
+            <div role="alert" style={{fontSize:".8rem",color:"var(--red)"}}>⚠️ Kon de teams-bibliotheek niet laden.</div>
+          </HofTile>
+        )}
+
+        {photographers.length>0&&(
+          <HofTile icon="📸" title="Lens Legend" onOpen={()=>setOpenModal("lens")} cta={`Bekijk alle ${photographers.length} →`}>
+            <HofLeader name={photographers[0].name} users={users} value={`${photographers[0].count} foto's`}/>
+            <HofRunnersUp names={photographers.slice(1,3).map(p=>p.name)} users={users}/>
+          </HofTile>
+        )}
+
+        {perfect.length>0&&(
+          <HofTile icon="🐐" title="Perfect Attendance" onOpen={()=>setOpenModal("perfect")} cta={`Bekijk alle ${perfect.length} →`}>
+            <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+              {perfect.slice(0,4).map(p=>(
+                <div key={p.name} style={{display:"flex",alignItems:"center",gap:6}}>
+                  <Avatar name={p.name} size={26} {...getUA(p.name,users)}/>
+                  <span style={{fontSize:".85rem",fontWeight:600}}>{getDisplayName(p.name,users)}</span>
+                </div>
+              ))}
+              {perfect.length>4&&<span style={{fontSize:".8rem",color:"var(--muted)",alignSelf:"center"}}>+{perfect.length-4}</span>}
+            </div>
+            <div style={{fontSize:".78rem",color:"var(--amber)"}}>All {totalEvents} events</div>
+          </HofTile>
+        )}
+      </div>
+
+      {/* Drill-in modals (spec §3) -- each is the section that rendered
+          inline before this reorganisation, moved wholesale: same content,
+          same full attendance dot grid, just opened on demand. */}
+      {openModal==="roh"&&(
+        <Modal onClose={()=>setOpenModal(null)} maxWidth={640}>
+          <H>🏅 Roll of Honour</H>
+          <div style={{display:"grid",gap:".6rem"}}>
+            {rohFeedByRecency.map(a=>(
+              <div key={a.id} style={{display:"flex",gap:10,alignItems:"flex-start",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".8rem 1rem"}}>
+                <span style={{fontSize:"1.3rem"}}>{a.icon}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:".72rem",color:"var(--muted)",letterSpacing:".05em",textTransform:"uppercase"}}>{a.category}</div>
+                  <div style={{fontFamily:"var(--font-h)",fontSize:"1.05rem",color:"var(--amber2)"}}>{a.winner}</div>
+                  <div style={{fontSize:".78rem",color:"var(--muted)",marginTop:2}}>{a.eventName}{a.detail?` · ${a.detail}`:""}</div>
                 </div>
               </div>
             ))}
           </div>
-        </Card>
+        </Modal>
       )}
 
-      {/* Attendance podium */}
-      <div className="fu2">
-        <H>📅 Attendance Record</H>
-        {attendance.slice(0,3).length>0&&(
-          <div style={{display:"flex",alignItems:"flex-end",justifyContent:"center",gap:"1rem",marginBottom:"1.5rem"}}>
-            {[attendance[1],attendance[0],attendance[2]].filter(Boolean).map((p,i)=>{
-              const realIdx=i===0?1:i===1?0:2;
-              const h=[120,160,90][realIdx];
-              return(
-                <div key={p.name} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
-                  <Avatar name={p.name} size={40} {...getUA(p.name,users)}/>
-                  <div style={{fontWeight:600,fontSize:".9rem"}}>{getDisplayName(p.name,users)}</div>
-                  <div style={{fontSize:"1.2rem"}}>{podiumEmojis[realIdx]}</div>
-                  <div style={{width:80,height:h,background:podiumColors[realIdx]+"33",border:`2px solid ${podiumColors[realIdx]}`,borderRadius:"8px 8px 0 0",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column"}}>
-                    <div style={{fontFamily:"var(--font-h)",fontSize:"1.4rem",color:podiumColors[realIdx],fontWeight:900}}>{p.attended}</div>
-                    <div style={{fontSize:".65rem",color:"var(--muted)"}}>events</div>
+      {openModal==="attendance"&&(
+        <Modal onClose={()=>setOpenModal(null)} maxWidth={640}>
+          <H>📅 Attendance Record</H>
+          {attendance.slice(0,3).length>0&&(
+            <div style={{display:"flex",alignItems:"flex-end",justifyContent:"center",gap:"1rem",marginBottom:"1.5rem"}}>
+              {[attendance[1],attendance[0],attendance[2]].filter(Boolean).map((p,i)=>{
+                const realIdx=i===0?1:i===1?0:2;
+                const h=[120,160,90][realIdx];
+                return(
+                  <div key={p.name} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
+                    <Avatar name={p.name} size={40} {...getUA(p.name,users)}/>
+                    <div style={{fontWeight:600,fontSize:".9rem"}}>{getDisplayName(p.name,users)}</div>
+                    <div style={{fontSize:"1.2rem"}}>{podiumEmojis[realIdx]}</div>
+                    <div style={{width:80,height:h,background:podiumColors[realIdx]+"33",border:`2px solid ${podiumColors[realIdx]}`,borderRadius:"8px 8px 0 0",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column"}}>
+                      <div style={{fontFamily:"var(--font-h)",fontSize:"1.4rem",color:podiumColors[realIdx],fontWeight:900}}>{p.attended}</div>
+                      <div style={{fontSize:".65rem",color:"var(--muted)"}}>events</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div style={{display:"grid",gap:".6rem"}}>
+            {attendance.map((a,i)=>(
+              <div key={a.name} style={{display:"flex",alignItems:"center",gap:"1rem",background:"var(--bg2)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",border:"1px solid var(--border)"}}>
+                <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:i<3?podiumColors[i]:"var(--muted2)",minWidth:28,textAlign:"center"}}>{i+1}</div>
+                <Avatar name={a.name} size={32} {...getUA(a.name,users)}/>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:600,fontSize:".9rem"}}>{getDisplayName(a.name,users)}</div>
+                  <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>
+                    {a.attended} attended · {a.missed} missed
+                    {a.attended===totalEvents&&totalEvents>0&&<span style={{color:"var(--amber)",marginLeft:6}}>🐐 Perfect</span>}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
-        <div style={{display:"grid",gap:".6rem"}}>
-          {attendance.map((a,i)=>(
-            <div key={a.name} style={{display:"flex",alignItems:"center",gap:"1rem",background:"var(--bg2)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",border:"1px solid var(--border)"}}>
-              <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:i<3?podiumColors[i]:"var(--muted2)",minWidth:28,textAlign:"center"}}>{i+1}</div>
-              <Avatar name={a.name} size={32} {...getUA(a.name,users)}/>
-              <div style={{flex:1}}>
-                <div style={{fontWeight:600,fontSize:".9rem"}}>{getDisplayName(a.name,users)}</div>
-                <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>
-                  {a.attended} attended · {a.missed} missed
-                  {a.attended===totalEvents&&totalEvents>0&&<span style={{color:"var(--amber)",marginLeft:6}}>🐐 Perfect</span>}
+                <div style={{display:"flex",gap:3}}>
+                  {events.map(evt=>{
+                    const att=evt.attendees.find(x=>x.name===a.name);
+                    const s=att?.status;
+                    const color=["went","going"].includes(s)?"var(--green)":["absent","not coming"].includes(s)?"var(--red)":"var(--muted2)";
+                    return<div key={evt.id} title={`${evt.name}: ${s||"?"}`} style={{width:8,height:8,borderRadius:"50%",background:color}}/>;
+                  })}
+                </div>
+                <div style={{background:"var(--bg3)",borderRadius:8,padding:"4px 10px",textAlign:"center",minWidth:44}}>
+                  <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",lineHeight:1}}>{Math.round(a.attended/Math.max(totalEvents,1)*100)}%</div>
                 </div>
               </div>
-              <div style={{display:"flex",gap:3}}>
-                {events.map(evt=>{
-                  const att=evt.attendees.find(x=>x.name===a.name);
-                  const s=att?.status;
-                  const color=["went","going"].includes(s)?"var(--green)":["absent","not coming"].includes(s)?"var(--red)":"var(--muted2)";
-                  return<div key={evt.id} title={`${evt.name}: ${s||"?"}`} style={{width:8,height:8,borderRadius:"50%",background:color}}/>;
-                })}
-              </div>
-              <div style={{background:"var(--bg3)",borderRadius:8,padding:"4px 10px",textAlign:"center",minWidth:44}}>
-                <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber)",lineHeight:1}}>{Math.round(a.attended/Math.max(totalEvents,1)*100)}%</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+            ))}
+          </div>
+        </Modal>
+      )}
 
-      {/* On a roll -- current consecutive attendance streak (#16 "other ideas") */}
-      {streaks.length>0&&(
-        <div className="fu2">
+      {openModal==="roll"&&(
+        <Modal onClose={()=>setOpenModal(null)} maxWidth={560}>
           <H>🔥 On a Roll</H>
           <div style={{display:"grid",gap:".6rem"}}>
-            {streaks.slice(0,5).map((s,i)=>(
+            {streaks.map((s,i)=>(
               <div key={s.name} style={{display:"flex",alignItems:"center",gap:"1rem",background:"var(--bg2)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",border:"1px solid var(--border)"}}>
                 <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:i<3?podiumColors[i]:"var(--muted2)",minWidth:28,textAlign:"center"}}>{i+1}</div>
                 <Avatar name={s.name} size={32} {...getUA(s.name,users)}/>
@@ -1375,12 +1639,11 @@ const HallOfFame = ({events,users=[],teamSets=[],teamSetsError=null,onRetryTeamS
               </div>
             ))}
           </div>
-        </div>
+        </Modal>
       )}
 
-      {/* Awards leaderboard */}
-      {winners.length>0&&(
-        <div className="fu3">
+      {openModal==="awards"&&(
+        <Modal onClose={()=>setOpenModal(null)} maxWidth={640}>
           <H>🏆 Most Awards Won</H>
           <div style={{display:"grid",gap:".6rem"}}>
             {winners.map((w,i)=>(
@@ -1404,74 +1667,65 @@ const HallOfFame = ({events,users=[],teamSets=[],teamSetsError=null,onRetryTeamS
               </div>
             ))}
           </div>
-        </div>
+        </Modal>
       )}
 
-      {/* Team trophy cabinet (#16 §6.4) -- team sets decorated by a
-          finished tournament (WP-J) or a hand-added award. A failed read
-          used to just silently show nothing here, same lie as everywhere
-          else teamSets is read: there may well be a cabinet, we simply
-          couldn't reach it. */}
-      {decoratedSets.length===0&&teamSetsError&&(
-        <div className="fu3">
+      {openModal==="teams"&&(
+        <Modal onClose={()=>setOpenModal(null)} maxWidth={720}>
           <H>🏆 Team Trophy Cabinet</H>
-          <TeamSetsErrorNotice onRetry={onRetryTeamSets}/>
-        </div>
-      )}
-      {decoratedSets.length>0&&(
-        <div className="fu3">
-          <H>🏆 Team Trophy Cabinet</H>
-          <div style={{display:"grid",gap:"1rem"}}>
-            {decoratedSets.map(ts=>{
-              const teams=Array.isArray(ts.teams)?ts.teams:[];
-              const awards=ts.awards.filter(a=>a&&typeof a==="object");
-              const byTeam={};
-              awards.forEach(a=>{
-                const key=typeof a.teamId==="string"&&a.teamId?a.teamId:"__onbekend__";
-                if(!byTeam[key])byTeam[key]=[];
-                byTeam[key].push(a);
-              });
-              const rows=Object.entries(byTeam).map(([teamId,list])=>({teamId,team:teams.find(t=>t&&t.id===teamId)||null,list}));
-              return(
-                <Card key={ts.id}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:".9rem"}}>
-                    <span style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--amber2)"}}>{ts.name||"Naamloze teams"}</span>
-                    {ts.category&&<span style={{background:"rgba(232,148,58,.15)",border:"1px solid rgba(232,148,58,.3)",borderRadius:20,padding:"2px 9px",fontSize:".7rem",fontFamily:"var(--font-b)",fontWeight:600,color:"var(--amber2)",letterSpacing:".04em"}}>{ts.category}</span>}
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:".85rem"}}>
-                    {rows.map(({teamId,team,list})=>(
-                      <div key={teamId} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".85rem"}}>
-                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:".5rem"}}>
-                          <span style={{fontSize:"1.2rem",lineHeight:1}}>{team?.avatar||"🎯"}</span>
-                          <span style={{fontFamily:"var(--font-h)",fontSize:".9rem",color:"var(--amber2)"}}>{team?.name||"Onbekend team"}</span>
-                        </div>
-                        {Array.isArray(team?.members)&&team.members.length>0&&(
-                          <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:".6rem"}}>
-                            {team.members.filter(m=>typeof m==="string"&&m).map((m,mi)=>(
-                              <Avatar key={mi} name={m} size={22} {...getUA(m,users)}/>
+          {decoratedSets.length===0&&teamSetsError&&<TeamSetsErrorNotice onRetry={onRetryTeamSets}/>}
+          {decoratedSets.length>0&&(
+            <div style={{display:"grid",gap:"1rem"}}>
+              {decoratedSets.map(ts=>{
+                const teams=Array.isArray(ts.teams)?ts.teams:[];
+                const awards=ts.awards.filter(a=>a&&typeof a==="object");
+                const byTeam={};
+                awards.forEach(a=>{
+                  const key=typeof a.teamId==="string"&&a.teamId?a.teamId:"__onbekend__";
+                  if(!byTeam[key])byTeam[key]=[];
+                  byTeam[key].push(a);
+                });
+                const rows=Object.entries(byTeam).map(([teamId,list])=>({teamId,team:teams.find(t=>t&&t.id===teamId)||null,list}));
+                return(
+                  <Card key={ts.id}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:".9rem"}}>
+                      <span style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--amber2)"}}>{ts.name||"Naamloze teams"}</span>
+                      {ts.category&&<span style={{background:"rgba(232,148,58,.15)",border:"1px solid rgba(232,148,58,.3)",borderRadius:20,padding:"2px 9px",fontSize:".7rem",fontFamily:"var(--font-b)",fontWeight:600,color:"var(--amber2)",letterSpacing:".04em"}}>{ts.category}</span>}
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:".85rem"}}>
+                      {rows.map(({teamId,team,list})=>(
+                        <div key={teamId} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".85rem"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:".5rem"}}>
+                            <span style={{fontSize:"1.2rem",lineHeight:1}}>{team?.avatar||"🎯"}</span>
+                            <span style={{fontFamily:"var(--font-h)",fontSize:".9rem",color:"var(--amber2)"}}>{team?.name||"Onbekend team"}</span>
+                          </div>
+                          {Array.isArray(team?.members)&&team.members.length>0&&(
+                            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:".6rem"}}>
+                              {team.members.filter(m=>typeof m==="string"&&m).map((m,mi)=>(
+                                <Avatar key={mi} name={m} size={22} {...getUA(m,users)}/>
+                              ))}
+                            </div>
+                          )}
+                          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                            {list.map((a,ai)=>(
+                              <div key={a.id||ai} style={{fontSize:".76rem",color:"var(--cream)",background:"var(--gold)14",border:"1px solid var(--gold)44",borderRadius:6,padding:"3px 8px"}}>
+                                {a.label||"🏆 Award"}
+                              </div>
                             ))}
                           </div>
-                        )}
-                        <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                          {list.map((a,ai)=>(
-                            <div key={a.id||ai} style={{fontSize:".76rem",color:"var(--cream)",background:"var(--gold)14",border:"1px solid var(--gold)44",borderRadius:6,padding:"3px 8px"}}>
-                              {a.label||"🏆 Award"}
-                            </div>
-                          ))}
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        </div>
+                      ))}
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </Modal>
       )}
 
-      {/* Quiz leaderboard */}
-      {quizBoard.length>0&&(
-        <div className="fu3">
+      {openModal==="quiz"&&(
+        <Modal onClose={()=>setOpenModal(null)} maxWidth={560}>
           <H>🧠 Quiz All-Time Scores</H>
           <div style={{display:"grid",gap:".6rem"}}>
             {quizBoard.map((p,i)=>(
@@ -1483,15 +1737,14 @@ const HallOfFame = ({events,users=[],teamSets=[],teamSetsError=null,onRetryTeamS
               </div>
             ))}
           </div>
-        </div>
+        </Modal>
       )}
 
-      {/* Lens Legend -- most photos uploaded (#16 "other ideas") */}
-      {photographers.length>0&&(
-        <div className="fu3">
+      {openModal==="lens"&&(
+        <Modal onClose={()=>setOpenModal(null)} maxWidth={560}>
           <H>📸 Lens Legend</H>
           <div style={{display:"grid",gap:".6rem"}}>
-            {photographers.slice(0,10).map((p,i)=>(
+            {photographers.map((p,i)=>(
               <div key={p.name} style={{display:"flex",alignItems:"center",gap:"1rem",background:"var(--bg2)",borderRadius:"var(--radius-sm)",padding:".9rem 1.1rem",border:"1px solid var(--border)"}}>
                 <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:i<3?podiumColors[i]:"var(--muted2)",minWidth:28,textAlign:"center"}}>{i+1}</div>
                 <Avatar name={p.name} size={32} {...getUA(p.name,users)}/>
@@ -1500,20 +1753,25 @@ const HallOfFame = ({events,users=[],teamSets=[],teamSetsError=null,onRetryTeamS
               </div>
             ))}
           </div>
-        </div>
+        </Modal>
       )}
 
-      {/* All-time kretjes tally -- a group bragging-rights number, not a
-          per-person leaderboard (#16 "other ideas") */}
-      {totalKretjes>0&&(
-        <Card className="fu3" style={{textAlign:"center",padding:"1.8rem",background:"linear-gradient(135deg,#1f1609,#2e1e0a)",borderColor:"var(--border2)"}}>
-          <div style={{fontSize:"2rem",marginBottom:".3rem"}}>🍺</div>
-          <div style={{fontFamily:"var(--font-h)",fontSize:"2.2rem",color:"var(--amber2)"}}>{totalKretjes}</div>
-          <div style={{fontSize:".82rem",color:"var(--muted)",marginTop:4}}>kretjes and counting, across every Mensday</div>
-        </Card>
+      {openModal==="perfect"&&(
+        <Modal onClose={()=>setOpenModal(null)} maxWidth={520}>
+          <H>🐐 Perfect Attendance</H>
+          <div style={{display:"flex",flexDirection:"column",gap:".7rem"}}>
+            {perfect.map((p)=>(
+              <div key={p.name} style={{display:"flex",alignItems:"center",gap:10,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:".7rem 1rem"}}>
+                <Avatar name={p.name} size={38} {...getUA(p.name,users)}/>
+                <div>
+                  <div style={{fontWeight:600,fontSize:".95rem"}}>{getDisplayName(p.name,users)}</div>
+                  <div style={{fontSize:".72rem",color:"var(--amber)"}}>All {totalEvents} events</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Modal>
       )}
-
-      {events.length===0&&<Card style={{textAlign:"center",padding:"4rem",color:"var(--muted)"}}>No events yet — the Hall of Fame will fill up as you play!</Card>}
     </div>
   );
 };
@@ -5765,7 +6023,7 @@ export default function App(){
       <main style={{maxWidth:880,margin:"0 auto",padding:"78px 1.2rem 4rem"}}>
         <AnnouncementBanner announcements={announcements} currentUser={currentUser} onArchive={archiveAnnouncement} onHardDelete={hardDeleteAnnouncement} onReactivate={reactivateAnnouncement} onEdit={ann=>{setEditingAnn(ann);setShowAnnounce(true);}} onNew={()=>{setEditingAnn(null);setShowAnnounce(true);}}/>
         {pageView==="home"&&<Home events={events} onOpen={openEvent} onNew={()=>setNewEvent(true)} currentUser={currentUser} users={users} onTeams={openTeams} onTimer={openTimer} onQuiz={openQuiz} onMensGames={openMensGames} mensGamesUnlocked={mensGamesUnlocked} onSaraJay={openSaraJay} saraJayUnlocked={saraJayUnlocked}/>}
-        {pageView==="hof"&&<HallOfFame events={events} users={users} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} quizResults={quizResults}/>}
+        {pageView==="hof"&&<HallOfFame events={events} users={users} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} quizResults={quizResults} tournamentResults={tournamentResults}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser} quizResults={quizResults}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)} quizResults={quizResults}/>}
         {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)} quizResults={quizResults} tournamentResults={tournamentResults}/>}

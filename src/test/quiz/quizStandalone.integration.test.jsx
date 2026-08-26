@@ -110,8 +110,13 @@ describe('the quiz as a standalone tool, reached through the real Nav', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /hall of fame/i })).toBeInTheDocument())
     await user.click(screen.getAllByRole('button', { name: /hall of fame/i })[0])
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Hall of Fame' })).toBeInTheDocument())
+    // Hall of Fame's 2026-08-26 reorg (docs/hall-of-fame-spec.md) moved this
+    // leaderboard behind the "Quiz All-Time" tile's click -- same underlying
+    // content, opened on demand instead of always rendered inline.
+    await user.click(screen.getByRole('button', { name: /quiz all-time/i }))
 
-    const section = screen.getByRole('heading', { name: /quiz all-time scores/i }).closest('div')
+    const heading = await screen.findByRole('heading', { name: /quiz all-time scores/i })
+    const section = heading.closest('div')
     // Bram: 25 (evt.quizzes' QUIZ_AUTO) + 50 (the standalone quiz) = 75,
     // across 2 quizzes -- proves the merge adds on top rather than only
     // showing one source.
