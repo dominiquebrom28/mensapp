@@ -85,8 +85,12 @@ describe('MensGamesShell — secret tournaments (2026-08-24)', () => {
     });
     render(<MensGamesShell scope="page" events={[]} teamSets={[]} currentUser={{ display_name: 'Bram' }} canManage={false} />);
 
-    await waitFor(() => expect(screen.queryByText(/toernooien laden/i)).not.toBeInTheDocument());
-    expect(screen.getByText(/1 geheim toernooi/i)).toBeInTheDocument();
+    // Wait for the thing being asserted, not for the loading state to go.
+    // "Loading finished" and "the row I care about is on screen" are not the
+    // same moment, and two tests in this repo have already failed on CI for
+    // exactly that gap while passing on a faster machine.
+    await waitFor(() => expect(screen.getByText(/1 geheim toernooi/i)).toBeInTheDocument());
+    expect(screen.queryByText(/toernooien laden/i)).not.toBeInTheDocument();
   });
 
   it('scopes to the event\'s own tournaments AND still hides secret ones from a non-editor there too', async () => {
