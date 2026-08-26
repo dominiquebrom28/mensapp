@@ -3,10 +3,12 @@
 // reached from Nav/Home because a quiz can now exist without an event, the
 // owner's own framing: "its own general feature, that CAN be connected to an
 // event") and the event tab ("Quiz" on `TABS`). Mirrors
-// `mensgames/MensGamesShell.jsx`'s scope split -- `QuizPage.jsx` and
-// `QuizTabMount.jsx` are the two lazy default-export entry points App.jsx's
-// `lazy(() => import(...))` calls need, this is where the actual UI lives so
-// nothing drifts between the two mount points.
+// `mensgames/MensGamesShell.jsx`'s scope split. There is one lazy entry
+// point now, `QuizPage.jsx`: the event tab and its `QuizTabMount.jsx` were
+// deleted 2026-08-26 when the quiz became a standalone tool. The `scope`
+// prop and its `"event"` branch survive -- the scoping logic still filters
+// quizzes to one event -- but nothing mounts this with `scope="event"`
+// today.
 //
 // `scope="event"` is a pure relocation of what `EventPage` used to own
 // inline (the `quizDash` boolean + the `QuizTab`/`QuizDashboard` pair) --

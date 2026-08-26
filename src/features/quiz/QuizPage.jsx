@@ -5,7 +5,9 @@
 // `lazy(() => import("./features/quiz/QuizPage.jsx"))`, mirroring
 // `mensgames/MensGamesPage.jsx`; this file's only job is to be that lazy
 // default export and set `scope`. The actual UI lives in `QuizShell.jsx`,
-// shared with `QuizTabMount.jsx`.
+// It used to be shared with a `QuizTabMount.jsx` event-tab mount, deleted
+// 2026-08-26 when the quiz became a standalone tool -- this is the only
+// entry point now.
 import QuizShell from './QuizShell.jsx';
 
 export default function QuizPage(props) {

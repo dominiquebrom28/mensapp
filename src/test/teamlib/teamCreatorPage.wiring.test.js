@@ -28,7 +28,11 @@ function componentBody(name) {
 }
 
 const teamCreator = componentBody('TeamCreatorPage')
-const teamsTab = componentBody('TeamsTab')
+// `TeamsTab` (and its own §5.2-row-1 "Loskoppelen" wiring, formerly checked
+// here) was removed from App.jsx 2026-08-26 -- the owner dropped the event
+// page's Teams tab entirely; Team Creator's library is the sole home for
+// team sets now. See `libraryActions.writeFailure.test.js`'s header for the
+// matching update on the write-failure side.
 
 describe('TeamCreatorPage wiring (#6 select-all)', () => {
   it('the "Uit app" picker has both a select-all and a deselect-all action', () => {
@@ -139,21 +143,5 @@ describe('TeamCreatorPage wiring (#10 archive/restore)', () => {
 
   it('renders awards as trophy chips', () => {
     expect(teamCreator).toMatch(/\(ts\.awards\|\|\[\]\)\.length>0/)
-  })
-})
-
-describe('TeamsTab wiring (§5.2 row 1 — "Verwijder" -> "Loskoppelen")', () => {
-  it('no longer destroys the team set outright -- it unlinks via the teamlib api', () => {
-    expect(teamsTab).toMatch(/Loskoppelen/)
-    expect(teamsTab).not.toMatch(/>Verwijder</)
-    expect(teamsTab).toMatch(/const result=await unlinkTeamSetFromEvent\(ts,evt\.id\)/)
-  })
-
-  it('only lists sets that are active AND linked to this event', () => {
-    expect(teamsTab).toMatch(/ts\.status!=="archived"&&\(ts\.eventIds\|\|\[\]\)\.includes\(evt\.id\)/)
-  })
-
-  it('shows a captain badge', () => {
-    expect(teamsTab).toMatch(/👑/)
   })
 })

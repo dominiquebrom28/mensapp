@@ -21,6 +21,13 @@
 // button/tile don't add noise to assertions that aren't about it -- Sara Jay
 // itself is out of scope for this file except the one test below that
 // locks both, to prove the two labels no longer collide.
+//
+// UPDATE (2026-08-26): the owner removed the event page's Mens-Games 🏆 tab
+// outright (stand-alone Tool now, reached via Tools/Home; results flow back
+// to Winners & Highlights automatically instead of the tab existing at
+// all). `MensGamesTab.jsx`'s mock stays -- it's now the thing that proves
+// the event-tab lazy chunk never loads, locked *or* unlocked, rather than
+// proving locked-state gating specifically.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
@@ -241,7 +248,15 @@ describe('mens-games admin toggle -- locked (default)', () => {
     expect(screen.queryByText('Sara Jay or JAI')).not.toBeInTheDocument()
   })
 
-  it('drops the "Mens-Games 🏆" tab from an event page entirely', async () => {
+  // 2026-08-26 UPDATE: this used to be "drops the tab because the feature is
+  // locked" -- the owner has since removed the event page's Mens-Games 🏆 tab
+  // entirely, unconditionally (mens-games is a stand-alone Tool now, reached
+  // via Tools/Home, with results flowing back to Winners & Highlights
+  // instead). This test still holds for the locked case; its unlocked
+  // twin below ("...even once mens-games is unlocked") is what actually
+  // proves the tab is gone *because it no longer exists*, not because it's
+  // still locked.
+  it('never shows a "Mens-Games 🏆" tab on an event page while locked', async () => {
     const { default: App } = await import('../App.jsx')
     render(<App />)
     await goHome()
@@ -326,18 +341,22 @@ describe('mens-games admin toggle -- unlocked via the system row', () => {
     })
   })
 
-  it('shows the "Mens-Games 🏆" tab on an event page, and it loads the real (mocked) tab component', async () => {
+  // 2026-08-26: replaces the old "shows the tab on an event page" test --
+  // the owner removed the event page's Mens-Games 🏆 tab outright, so being
+  // *unlocked* no longer brings it back. This is the actual proof the tab
+  // is gone unconditionally, not merely still locked (the sibling test of
+  // the same name in the "locked" describe above only proves the latter).
+  // `MensGamesTab.jsx`'s lazy chunk must never load from an event page at
+  // all now, regardless of the toggle -- only the top-level route (covered
+  // by the "opens the real route" test above) still mounts it.
+  it('never shows a "Mens-Games 🏆" tab on an event page, even once mens-games is unlocked', async () => {
     const { default: App } = await import('../App.jsx')
     render(<App />)
     await goHome()
     await openEventPage()
 
-    const tabBtn = screen.getByRole('button', { name: 'Mens-Games 🏆' })
-    fireEvent.click(tabBtn)
-    await waitFor(() => {
-      expect(screen.getByTestId('mens-games-tab-stub')).toBeInTheDocument()
-    })
-    expect(mensGamesTabLoaded).toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Mens-Games 🏆' })).not.toBeInTheDocument()
+    expect(mensGamesTabLoaded).not.toHaveBeenCalled()
   })
 
   it('the AdminPanel toggle shows Live', async () => {

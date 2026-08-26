@@ -3,7 +3,9 @@
 // belong to an event. `App.jsx` mounts this via
 // `lazy(() => import("./features/mensgames/MensGamesPage.jsx"))` (§5.3);
 // this file's only job is to be that lazy default export and set `scope`.
-// The actual UI lives in `MensGamesShell.jsx`, shared with `MensGamesTab.jsx`.
+// The actual UI lives in `MensGamesShell.jsx`. It used to be shared with a
+// `MensGamesTab.jsx` event-tab mount, deleted 2026-08-26 when mens-games left
+// the event page for the top level -- this is the only entry point now`.
 import MensGamesShell from './MensGamesShell.jsx';
 
 export default function MensGamesPage(props) {

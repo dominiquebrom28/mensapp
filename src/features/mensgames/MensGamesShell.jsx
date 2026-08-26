@@ -1,11 +1,14 @@
-// Shared internals for both mount points (docs/mensgames-spec.md §4.6):
-// the top-level page (`pageView==="mensgames"`, reached from Nav/Home
-// because a tournament can exist without an event) and the event tab
-// (`"Mens-Games 🏆"` on `TABS`, tournaments where `event_id===evt.id`).
-// Both mount the *same* component with a different `scope` -- `MensGamesPage.jsx`
-// and `MensGamesTab.jsx` are just the two lazy default-export entry points
-// App.jsx's two `lazy(() => import(...))` calls need (§5.3); this is where
-// the actual UI lives, so nothing drifts between the two mount points.
+// The UI for mens-games (docs/mensgames-spec.md §4.6), behind one lazy
+// entry point: `MensGamesPage.jsx`, the top-level page reached from
+// Nav/Home.
+//
+// It was two. The `"Mens-Games 🏆"` event tab and its `MensGamesTab.jsx`
+// entry point were deleted 2026-08-26 when the owner moved mens-games out
+// of the event page for good: it is a standalone tool, and an event now
+// shows its tournament results through Winners & Highlights instead. The
+// `scope` prop and its `"event"` branch survive because the scoping logic
+// is still what filters tournaments to one event -- but nothing mounts
+// this with `scope="event"` today.
 import { useEffect, useMemo, useState } from 'react';
 import MensGamesStyles from './ui/styles.jsx';
 import { Btn, EmptyState, ErrorState, H, Inp, LoadingBlock, Modal, Switch, Tag } from './ui/Kit.jsx';

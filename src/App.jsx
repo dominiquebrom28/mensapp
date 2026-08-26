@@ -3,7 +3,13 @@ import { supabase, hashPin } from "./supabase.js";
 import { isSafeImageUrl, isSafeVideoUrl } from "./features/trailer/safeUrl.js";
 import { hasSeenTrailer } from "./features/trailer/seen.js";
 import { hasDismissedTeaser, dismissTeaser } from "./features/teaser/dismissed.js";
-import { fetchTeamSets, saveTeamSet, deleteTeamSet, archiveTeamSet, unarchiveTeamSet, unlinkTeamSetFromEvent } from "./features/teamlib/api.js";
+// `unlinkTeamSetFromEvent` no longer has a caller here -- it only ever
+// backed the event page's Teams tab (`TeamsTab`'s own `unlink`), removed
+// 2026-08-26 along with the tab itself. Still exported from teamlib/api.js
+// and covered by its own test; not deleted there since that file is out of
+// this change's scope and the function may find a new caller once Team
+// Creator grows its own "linked event history" view (mirroring mens-games').
+import { fetchTeamSets, saveTeamSet, deleteTeamSet, archiveTeamSet, unarchiveTeamSet } from "./features/teamlib/api.js";
 import { blankTeamSet, setCaptain, removeMember, teamSetSummary, namesFromUsers, mergeNames, generateTeams, resizeTeams, splitPreview } from "./features/teamlib/model.js";
 // `TEAM_AVATARS` moved to the quiz feature in the Q3 pure-move (docs/
 // quiz-unification-spec.md §8.3 -- one of the six declarations that
@@ -18,16 +24,26 @@ import { TEAM_AVATARS } from "./features/quiz/model.js";
 const EventTrailer = lazy(() => import("./features/trailer/EventTrailer.jsx"));
 // Mens-games (docs/mensgames-spec.md §5.3): lazy like the trailer -- must
 // not add to the main chunk. App.jsx never fetches tournaments itself; the
-// feature owns its own Supabase I/O once either of these actually mounts.
+// feature owns its own Supabase I/O once this actually mounts.
+// `MensGamesTab` (the event-tab mount) is gone -- the owner's 2026-08-26
+// decision retired the event page's Quiz/Teams/Mens-Games 🏆 tabs; Mens-Games
+// is reached exclusively through this top-level page now (Tools/Home).
 const MensGamesPage = lazy(() => import("./features/mensgames/MensGamesPage.jsx"));
-const MensGamesTab  = lazy(() => import("./features/mensgames/MensGamesTab.jsx"));
+// Eager, deliberately not in the lazy chunk (mirrors `fetchQuizResults`
+// below, docs/quiz-unification-spec.md §8.1's "eager, tiny" reasoning):
+// selects only the columns `WinnersTab`'s tournament-AUTO-card needs, never
+// the tournament's whole row, and never a secret one -- see the module for
+// why `entrants`/`rounds` (not just a flat `scores` column, which
+// tournaments have no equivalent of) are unavoidable here.
+import { fetchTournamentResults, isTournamentAlreadyPublished, tournamentWinnerPlacement } from "./features/mensgames/tournamentResults.js";
 // Quiz (docs/quiz-unification-spec.md §8.1/§8.3/§14 decision 1, WP-Q7/Q8):
-// same lazy-mount pattern as Mens-games above, now dual-mounted the same way
-// too -- `QuizPage` (top-level, `pageView==="quiz"`) and `QuizTabMount`
-// (event tab) both lazily load `QuizShell.jsx`, ~2,250 lines/90-110kB out of
-// the main chunk. `QuizTab`/`QuizDashboard` are no longer imported here
-// directly -- `QuizShell.jsx` owns mounting them now (§8.3 item 3: EventPage
-// drops its own `quizDash` state).
+// same lazy-mount pattern as Mens-games above. `QuizTabMount` (the event-tab
+// mount) is gone for the same 2026-08-26 reason as `MensGamesTab` above --
+// only `QuizPage` (top-level, `pageView==="quiz"`) still lazily loads
+// `QuizShell.jsx`, ~2,250 lines/90-110kB out of the main chunk. `QuizTab`/
+// `QuizDashboard` are no longer imported here directly -- `QuizShell.jsx`
+// owns mounting them now (§8.3 item 3: EventPage drops its own `quizDash`
+// state).
 // Eager, deliberately not in the lazy chunk (docs/quiz-unification-spec.md
 // §4.5/§8.1): discovery has to run for someone who never opens the quiz at
 // all, since finding a live quiz is what invites them in. `fetchQuizResults`
@@ -38,7 +54,6 @@ import { useLiveQuizWatch } from "./features/quiz/liveWatch.js";
 import { fetchQuiz } from "./features/quiz/api.js";
 import { fetchQuizResults, isQuizAlreadyPublished } from "./features/quiz/results.js";
 const QuizPage = lazy(() => import("./features/quiz/QuizPage.jsx"));
-const QuizTabMount = lazy(() => import("./features/quiz/QuizTabMount.jsx"));
 const QuizParticipantView = lazy(() => import("./features/quiz/QuizParticipantView.jsx"));
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1934,12 +1949,20 @@ const EventCard = ({evt,onOpen,compact=false,currentUser,users=[]}) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // EVENT PAGE
 // ─────────────────────────────────────────────────────────────────────────────
-const TABS=["Overview","Polls","Quiz","Teams","Photos","Winners & Highlights","FAQ","Kretjes 🍺","Mens-Games 🏆"];
+// Quiz/Teams/Mens-Games 🏆 dropped 2026-08-26 (owner decision): the event
+// page stops being a place you *operate* those tools -- each is a
+// stand-alone top-level Tool now (Team Creator, Mens-Games, Quiz), reachable
+// from Tools/Home, with its own linked-event history. Results still flow
+// back to the event, automatically, through Winners & Highlights (see
+// `WinnersTab`'s tournament-AUTO-card block below, mirroring the existing
+// quiz one) -- nobody types them in here anymore.
+const TABS=["Overview","Polls","Photos","Winners & Highlights","FAQ","Kretjes 🍺"];
 
-// Shared read-failure notice for every teamSets read site (TeamsTab,
-// TeamCreatorPage's library, QuizBuilder's team picker, HallOfFame's
-// trophy cabinet -- EntrantPicker has its own equivalent in mensgames/ui,
-// wired to the same `teamSetsError` string). `fetchTeamSets` (teamlib/
+// Shared read-failure notice for every teamSets read site (TeamCreatorPage's
+// library, QuizBuilder's team picker, HallOfFame's trophy cabinet --
+// EntrantPicker has its own equivalent in mensgames/ui, wired to the same
+// `teamSetsError` string; the event page's own Teams tab used to be a fourth
+// site but was removed 2026-08-26). `fetchTeamSets` (teamlib/
 // api.js) now reports {ok,error,teamSets} instead of a bare [] on failure,
 // specifically so this is distinguishable from "the library is genuinely
 // empty" -- rendering that as "Nog geen teams" would be a lie: the data
@@ -1952,108 +1975,14 @@ const TeamSetsErrorNotice=({onRetry})=>(
   </div>
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TEAMS TAB
-// ─────────────────────────────────────────────────────────────────────────────
-const TeamsTab=({evt,teamSets=[],teamSetsError=null,onRetryTeamSets,onTeamSetsChanged,currentUser,users=[]})=>{
-  // Library sets, filtered down to "active and actually linked to this
-  // event" -- an archived set, or one only used elsewhere, has no business
-  // showing up on an event's Teams tab. §5.2 row 1.
-  const linked=teamSets.filter(ts=>ts.status!=="archived"&&(ts.eventIds||[]).includes(evt.id));
-  const isAdmin=can.editEvent(currentUser);
-  const [unlinkError,setUnlinkError]=useState(false);
-  // "Verwijder" -> "Loskoppelen": this set lives in the shared library now,
-  // so destroying it from inside one event would take it away from every
-  // other event (and any tournament) that references it too. This only
-  // drops the link between this event and the set; the set itself, and its
-  // other links, are untouched.
-  const unlink=async ts=>{
-    setUnlinkError(false);
-    const result=await unlinkTeamSetFromEvent(ts,evt.id);
-    if(result.ok)onTeamSetsChanged?.(prev=>prev.map(x=>x.id===ts.id?result.teamSet:x));
-    else setUnlinkError(true);
-  };
-  if(linked.length===0)return(
-    teamSetsError?<TeamSetsErrorNotice onRetry={onRetryTeamSets}/>:
-    <div style={{textAlign:"center",padding:"3rem 1rem",color:"var(--muted)"}}>
-      <div style={{fontSize:"2.5rem",marginBottom:"1rem"}}>🎲</div>
-      <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",marginBottom:".5rem",color:"var(--cream)"}}>Geen teams gekoppeld</div>
-      <div style={{fontSize:".85rem"}}>Genereer teams via de Team Creator en koppel ze aan dit event.</div>
-    </div>
-  );
-  return(
-    <div style={{display:"grid",gap:"1.2rem"}}>
-      {unlinkError&&<div role="alert" style={{color:"var(--red)",fontSize:".85rem",fontWeight:600}}>Loskoppelen mislukt — probeer opnieuw.</div>}
-      {linked.map(ts=>{
-        const summary=teamSetSummary(ts);
-        return(
-        <Card key={ts.id}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:8}}>
-            <div>
-              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                <span style={{fontFamily:"var(--font-h)",fontSize:"1.05rem",color:"var(--amber2)"}}>{ts.name}</span>
-                {ts.category&&<span style={{background:"rgba(232,148,58,.15)",border:"1px solid rgba(232,148,58,.3)",borderRadius:20,padding:"2px 9px",fontSize:".7rem",fontFamily:"var(--font-b)",fontWeight:600,color:"var(--amber2)",letterSpacing:".04em"}}>{ts.category}</span>}
-              </div>
-              <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:2}}>{summary.teamCount} teams · {summary.memberCount} deelnemers</div>
-            </div>
-            {isAdmin&&(
-              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3}}>
-                <Btn onClick={()=>unlink(ts)} variant="danger" size="sm" title="Ontkoppelt dit team-overzicht van dit event -- de teams blijven bewaard in de bibliotheek (Team Creator) en bij andere events waar ze gekoppeld zijn.">Loskoppelen</Btn>
-                {/* Visible caption, not just a hover title -- this is scored
-                    at a bar on phones, where :hover/title never fires. */}
-                <span style={{fontSize:".64rem",color:"var(--muted2)",textAlign:"right",maxWidth:180}}>blijft in de bibliotheek</span>
-              </div>
-            )}
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(175px,1fr))",gap:".75rem"}}>
-            {(ts.teams||[]).map((team,i)=>{
-              const col=TEAM_COLORS[i%TEAM_COLORS.length];
-              const members=Array.isArray(team.members)?team.members:[];
-              return(
-                <div key={team.id} style={{background:"var(--bg3)",border:`1px solid ${col}44`,borderRadius:"var(--radius-sm)",padding:".85rem"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:".5rem"}}>
-                    <span style={{fontSize:"1.2rem",lineHeight:1}}>{team.avatar||"🎯"}</span>
-                    <span style={{fontFamily:"var(--font-h)",fontSize:".9rem",color:col}}>{team.name}</span>
-                    {team.captain&&<span style={{fontSize:".68rem",color:"var(--gold)",background:"rgba(201,146,42,.14)",border:"1px solid rgba(201,146,42,.4)",borderRadius:20,padding:"1px 8px",marginLeft:"auto"}}>👑 {team.captain}</span>}
-                  </div>
-                  <div style={{display:"flex",flexDirection:"column",gap:0}}>
-                    {members.map((name,j)=>{
-                      const u=users.find(x=>(x.display_name||x.username)===name);
-                      return(
-                        <div key={j} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",borderTop:j>0?"1px solid var(--border)":"none"}}>
-                          {u?<Avatar name={u.username} size={18} index={u.animal_avatar??u.avatar??0} photoUrl={u.photo_url||""}/>:<div style={{width:18,height:18,borderRadius:"50%",background:"var(--bg4)",border:"1px solid var(--border)",flexShrink:0}}/>}
-                          <span style={{fontSize:".82rem",color:"var(--cream)"}}>{name}{team.captain===name&&<span style={{color:"var(--gold)"}}> 👑</span>}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-        );
-      })}
-    </div>
-  );
-};
-
-const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif,autoOpenTrailerId,onAutoTrailerConsumed,teamSets=[],teamSetsError=null,onRetryTeamSets,onTeamSetsChanged,mensGamesUnlocked,quizResults=[]})=>{
-  // Locked mens-games has no equivalent in the Sara Jay pattern (that
-  // feature lives outside events entirely) -- per spec, a visible tab
-  // leading to a locked page is worse than no tab, so it's dropped from the
-  // tab bar rather than shown disabled. If a stale initialTab (e.g. from a
-  // notification deep link) still points at it while locked, fall back to
-  // Overview instead of opening on a tab that no longer exists.
-  const [tab,setTab]=useState((initialTab==="Mens-Games 🏆"&&!mensGamesUnlocked)?"Overview":(initialTab||"Overview"));
-  const visibleTabs=mensGamesUnlocked?TABS:TABS.filter(t=>t!=="Mens-Games 🏆");
-  // Same "no slipping through on stale state" guard as the top-level
-  // pageView==="mensgames" route: if an admin locks the feature while
-  // someone is already sat on this tab, bounce them to Overview rather than
-  // leaving the (now content-less, per the render guard below) tab selected.
-  useEffect(()=>{
-    if(!mensGamesUnlocked&&tab==="Mens-Games 🏆")setTab("Overview");
-  },[mensGamesUnlocked,tab]);
+const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[],initialTab,scrollToId,onSendNotif,autoOpenTrailerId,onAutoTrailerConsumed,quizResults=[],tournamentResults=[]})=>{
+  // Quiz/Teams/Mens-Games 🏆 dropped 2026-08-26 (see `TABS`'s own comment
+  // above) -- no notification ever deep-links to one of the three removed
+  // tabs (grep-verified: `tab:` literals in `diffEvents` only ever name
+  // Overview/Polls/FAQ/Photos/Winners & Highlights), but a stale one from
+  // before this change, or any other unrecognised value, still falls back
+  // to Overview rather than opening on a tab that no longer exists.
+  const [tab,setTab]=useState(TABS.includes(initialTab)?initialTab:"Overview");
   useEffect(()=>{
     if(!scrollToId)return;
     const t=setTimeout(()=>{
@@ -2076,8 +2005,8 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
   // and the overlay live one level up and auto-open here the same way they
   // used to (App root checks `pageView==="event" && activeEvent.id===
   // liveQuiz.eventId`). `quizDash` (the "Open Quiz Dashboard" modal) moved
-  // into `QuizShell.jsx`'s event scope, mounted via the `QuizTabMount` tab
-  // below instead of being owned by this component.
+  // into `QuizShell.jsx`'s event scope, owned by the standalone Quiz tool
+  // page now (§ TABS comment above) rather than by this component.
   const countdown=useCountdown(evt.date,evt.start_time);
   const isPast=evt.archived;
   const isAdmin=can.editEvent(currentUser);
@@ -2243,7 +2172,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
       </div>
 
       <div className="fu1" style={{display:"flex",gap:".2rem",borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
-        {visibleTabs.map(t=>(
+        {TABS.map(t=>(
           <TabBtn key={t} active={tab===t} onClick={()=>setTab(t)} style={{whiteSpace:"nowrap"}}>{t}</TabBtn>
         ))}
       </div>
@@ -2251,13 +2180,10 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
       <div className="fu2">
         {tab==="Overview"             &&<OverviewTab evt={evt} onUpdate={onUpdate} isPast={isPast} currentUser={currentUser} users={users} onSendNotif={onSendNotif}/>}
         {tab==="Polls"                &&<PollsTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users} onSendNotif={onSendNotif}/>}
-        {tab==="Quiz"                 &&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><QuizTabMount evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} users={users} can={can} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} onSendNotif={onSendNotif}/></Suspense>}
-        {tab==="Teams"                &&<TeamsTab evt={evt} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} onTeamSetsChanged={onTeamSetsChanged} currentUser={currentUser} users={users}/>}
         {tab==="Photos"               &&<PhotosTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
-        {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} quizResults={quizResults}/>}
+        {tab==="Winners & Highlights" &&<WinnersTab evt={evt} onUpdate={onUpdate} currentUser={currentUser} isPast={isPast} quizResults={quizResults} tournamentResults={tournamentResults}/>}
         {tab==="FAQ"                  &&<FAQTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
         {tab==="Kretjes 🍺"           &&<KretjesTab evt={evt} onUpdate={onUpdate} currentUser={currentUser}/>}
-        {tab==="Mens-Games 🏆"&&mensGamesUnlocked&&<Suspense fallback={<div style={{padding:"2rem 0",textAlign:"center",color:"var(--muted)",fontSize:".85rem"}}>Laden…</div>}><MensGamesTab evt={evt} events={events} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={onRetryTeamSets} currentUser={currentUser} canManage={can.runTournament(currentUser)} onUpdateEvent={onUpdate} onTeamSetsChanged={onTeamSetsChanged} onSendNotif={onSendNotif}/></Suspense>}
       </div>
 
       {/* Live presentation banner — fixed at top of screen */}
@@ -2916,7 +2842,7 @@ const PhotosTab=({evt,onUpdate,currentUser})=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // WINNERS TAB
 // ─────────────────────────────────────────────────────────────────────────────
-const WinnersTab=({evt,onUpdate,currentUser,quizResults=[]})=>{
+const WinnersTab=({evt,onUpdate,currentUser,quizResults=[],tournamentResults=[]})=>{
   const [addingW,setAddingW]=useState(false);const [addingH,setAddingH]=useState(false);
   const [editW,setEditW]=useState(null);const [editH,setEditH]=useState(null);
   const winners=evt.winners||[];const highlights=evt.highlights||[];
@@ -2951,6 +2877,31 @@ const WinnersTab=({evt,onUpdate,currentUser,quizResults=[]})=>{
       const detail=isTeam&&team?.members?.length?`${topScore} pts · ${team.members.join(", ")}`:`${topScore} pts`;
       return{id:`quiz-winner-${quiz.id}`,icon:isTeam?(team?.avatar||"🎯"):"🧠",category:`🧠 ${quiz.title}`,winner:topName,detail,topScore};
     }).filter(Boolean);
+  // Owner decision, 2026-08-26: the event page dropped its Mens-Games 🏆 tab
+  // -- tournaments are a stand-alone tool now, and results flow back to this
+  // tab automatically instead. Exact mirror of the quiz block above (one
+  // pattern, not two): an "AUTO" card per tournament that is linked to this
+  // event, finished, and not already covered by a real award row (the same
+  // `mg-<tournamentId>-<entrantId>` ids `pushWinnersToEvent` writes,
+  // matched via `isTournamentAlreadyPublished` (`features/mensgames/
+  // tournamentResults.js`'s own version of `isQuizAlreadyPublished`).
+  //
+  // **Secret tournaments never reach this line at all** -- two independent
+  // checks, deliberately redundant (this invariant has already leaked
+  // through two separate channels once on this project): `tournamentResults`
+  // itself already excludes `settings.secret===true` rows at the fetch
+  // layer (`fetchTournamentResults`), and the `!t.settings?.secret` filter
+  // below is the second, so a bug in either one alone still can't leak a
+  // secret tournament's result onto a member-visible tab.
+  const tournamentWinners=(tournamentResults||[])
+    .filter(t=>t&&t.eventId===evt.id&&t.status==="finished"&&!(t.settings&&t.settings.secret))
+    .filter(t=>!isTournamentAlreadyPublished(t,winners))
+    .map(t=>{
+      const placement=tournamentWinnerPlacement(t);
+      if(!placement)return null;
+      return{id:`mens-winner-${t.id}`,icon:placement.avatar,category:`🏆 ${t.name}`,winner:placement.name,detail:placement.detail};
+    }).filter(Boolean);
+  const autoWinners=[...quizWinners,...tournamentWinners];
   return(
     <div style={{display:"grid",gap:"1.8rem"}}>
       <div>
@@ -2958,9 +2909,9 @@ const WinnersTab=({evt,onUpdate,currentUser,quizResults=[]})=>{
           <H style={{marginBottom:0}}>🏆 Awards & Winners</H>
           {isAdmin&&<Btn onClick={()=>setAddingW(true)} size="sm">+ Add Award</Btn>}
         </div>
-        {winners.length===0&&quizWinners.length===0&&<Card style={{textAlign:"center",padding:"2.5rem",color:"var(--muted)"}}><div style={{fontSize:"2.5rem",marginBottom:".8rem"}}>🏆</div><div style={{fontFamily:"var(--font-h)",marginBottom:".4rem"}}>No awards yet</div></Card>}
+        {winners.length===0&&autoWinners.length===0&&<Card style={{textAlign:"center",padding:"2.5rem",color:"var(--muted)"}}><div style={{fontSize:"2.5rem",marginBottom:".8rem"}}>🏆</div><div style={{fontFamily:"var(--font-h)",marginBottom:".4rem"}}>No awards yet</div></Card>}
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:"1rem"}}>
-          {quizWinners.map(w=>(
+          {autoWinners.map(w=>(
             <div key={w.id} style={{background:"var(--bg2)",border:"1px solid rgba(139,92,246,.35)",borderRadius:"var(--radius)",padding:"1.2rem",position:"relative",overflow:"hidden"}}>
               <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,#6c63ff,#a78bfa,#6c63ff)"}}/>
               <div style={{position:"absolute",top:8,right:10,fontSize:".6rem",background:"rgba(139,92,246,.18)",color:"#a78bfa",borderRadius:4,padding:"1px 7px",letterSpacing:".07em",fontWeight:700}}>AUTO</div>
@@ -5198,18 +5149,19 @@ export default function App(){
   const [events,setEvents]=useState(SEED_EVENTS);
   const [users,setUsers]=useState(SEED_USERS);
   // Team library (docs/mensgames-spec.md §2.3): eager, tiny, lives at the
-  // App root because it has three non-lazy consumers (EventPage's Teams
-  // tab, QuizDashboard/QuizBuilder, TeamCreatorPage) -- same reasoning as
+  // App root because it has non-lazy consumers (QuizDashboard/QuizBuilder,
+  // TeamCreatorPage, HallOfFame's trophy cabinet) -- same reasoning as
   // `events`/`users` above, unlike mens-games' own lazy-loaded state.
+  // (EventPage's own Teams tab used to be a fourth consumer; removed
+  // 2026-08-26 -- Team Creator is the sole home for team sets now.)
   const [teamSets,setTeamSets]=useState([]);
   // Distinguishes "the library is genuinely empty" from "we couldn't reach
   // it" (fetchTeamSets now reports {ok,error,teamSets} instead of a bare
   // [] on failure -- teamlib/api.js). A short, fixed Dutch string when the
   // last read failed, null once a read succeeds again. Threaded down to
-  // every read site (TeamsTab, TeamCreatorPage's library, QuizBuilder's
-  // team picker, EntrantPicker, HallOfFame's trophy cabinet) so none of
-  // them can show a false "nothing here yet" for a read that actually
-  // failed.
+  // every read site (TeamCreatorPage's library, QuizBuilder's team picker,
+  // EntrantPicker, HallOfFame's trophy cabinet) so none of them can show a
+  // false "nothing here yet" for a read that actually failed.
   const [teamSetsError,setTeamSetsError]=useState(null);
   // Finished-quiz archive (docs/quiz-unification-spec.md §8.1/§8.3 item 9,
   // WP-Q8) -- eager, tiny, same reasoning as `teamSets` above:
@@ -5222,6 +5174,14 @@ export default function App(){
   // nothing -- the legacy per-event data these three consumers already read
   // keeps working even if this fetch is down.
   const [quizResults,setQuizResults]=useState([]);
+  // Finished-tournament archive -- exact mirror of `quizResults` above, for
+  // `WinnersTab`'s tournament-AUTO-card (2026-08-26, part of the same tab
+  // removal that dropped Mens-Games 🏆 from the event page). Same never-
+  // reject contract as `fetchQuizResults` (`features/mensgames/
+  // tournamentResults.js`): a failed read just leaves this at `[]`, and the
+  // real award rows `finishTournament` already writes to `events.winners`
+  // keep rendering regardless.
+  const [tournamentResults,setTournamentResults]=useState([]);
   const [currentUser,setCurrentUser]=useState(null);
   const [authView,setAuthView]=useState("login");
   const [activeId,setActiveId]=useState(null);
@@ -5305,7 +5265,8 @@ export default function App(){
       supabase.from("announcements").select("*").order("created_at",{ascending:false}),
       fetchTeamSets(),
       fetchQuizResults(),
-    ]).then(async([{data:evts},{data:usrs},{data:anns},teamSetsRes,quizResultsRes])=>{
+      fetchTournamentResults(),
+    ]).then(async([{data:evts},{data:usrs},{data:anns},teamSetsRes,quizResultsRes,tournamentResultsRes])=>{
       setTeamSets(teamSetsRes.ok?teamSetsRes.teamSets:[]);
       setTeamSetsError(teamSetsRes.ok?null:"Kon de teams-bibliotheek niet laden. Controleer je verbinding.");
       // Never blocks boot and has no dedicated error banner -- see this
@@ -5313,6 +5274,9 @@ export default function App(){
       // resolves ({ok,error,quizResults}, never a rejection), same contract
       // `fetchTeamSets` has.
       setQuizResults(quizResultsRes.ok?quizResultsRes.quizResults:[]);
+      // Same never-reject contract, same "no dedicated error banner" call --
+      // see `tournamentResults`' own declaration above.
+      setTournamentResults(tournamentResultsRes.ok?tournamentResultsRes.tournamentResults:[]);
       const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});
       if(anns&&anns.length){
         const sjRow=anns.find(r=>r.id==="__sara_jay__");
@@ -5353,10 +5317,10 @@ export default function App(){
     });
   };
 
-  // Manual retry for every teamSets read site's error state (TeamsTab,
-  // TeamCreatorPage's library, QuizBuilder's team picker, EntrantPicker,
-  // HallOfFame's trophy cabinet) -- same body the 30s poll below uses, so a
-  // lad who hits "Opnieuw proberen" doesn't have to wait out the interval.
+  // Manual retry for every teamSets read site's error state (TeamCreatorPage's
+  // library, QuizBuilder's team picker, EntrantPicker, HallOfFame's trophy
+  // cabinet) -- same body the 30s poll below uses, so a lad who hits
+  // "Opnieuw proberen" doesn't have to wait out the interval.
   const reloadTeamSets=()=>{
     fetchTeamSets().then(res=>{
       if(res.ok){setTeamSets(res.teamSets);setTeamSetsError(null);}
@@ -5370,12 +5334,18 @@ export default function App(){
     fetchQuizResults().then(res=>{if(res.ok)setQuizResults(res.quizResults);});
   };
 
+  // Exact mirror of `reloadQuizResults` above, for `tournamentResults`.
+  const reloadTournamentResults=()=>{
+    fetchTournamentResults().then(res=>{if(res.ok)setTournamentResults(res.tournamentResults);});
+  };
+
   useEffect(()=>{
     boot();
 
     const poll=setInterval(()=>{
       reloadTeamSets();
       reloadQuizResults();
+      reloadTournamentResults();
       supabase.from("announcements").select("*").order("created_at",{ascending:false}).then(({data})=>{if(data&&data.length){const fromDbAnn=r=>({id:r.id,title:r.title,body:r.body||"",createdBy:r.created_by||r.createdBy||"",createdAt:r.created_at||r.createdAt||"",active:r.active!==false});const sjRow=data.find(r=>r.id==="__sara_jay__");if(sjRow){const v=sjRow.active!==false;setSaraJayUnlocked(v);localStorage.setItem("md-sj-unlocked",JSON.stringify(v));}const mgRow=data.find(r=>r.id==="__mens_games__");if(mgRow){const v=mgRow.active!==false;setMensGamesUnlocked(v);localStorage.setItem("md-mg-unlocked",JSON.stringify(v));}const delRow=data.find(r=>r.id==="__deleted_notifs__");if(delRow){try{const raw=JSON.parse(delRow.body||"null");if(raw){const ids=new Set(Array.isArray(raw)?raw:(raw.ids||[]));const cb=Array.isArray(raw)?"": (raw.cleared_before||"");setDeletedNotifIds(ids);if(cb)setClearedBefore(cb);setNotifications(prev=>{const next=prev.filter(n=>!ids.has(n.id)&&(!cb||n.timestamp>cb));const cu=currentUserRef.current;if(cu)localStorage.setItem(`md-notifs-${cu.id}`,JSON.stringify(next));return next;});}}catch{/* ignore malformed announcement JSON from Supabase */}}const SYSTEM_IDS=new Set(["__sara_jay__","__mens_games__","__deleted_notifs__"]);const mapped=data.filter(r=>!SYSTEM_IDS.has(r.id)).map(fromDbAnn);setAnnouncements(mapped);localStorage.setItem("md-announcements",JSON.stringify(mapped));}});
       supabase.from("users").select("*").then(({data})=>{
         if(data){
@@ -5792,7 +5762,7 @@ export default function App(){
         {pageView==="hof"&&<HallOfFame events={events} users={users} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} quizResults={quizResults}/>}
         {pageView==="members"&&<MembersPage users={users} events={events} onOpenMember={openMember} currentUser={currentUser} quizResults={quizResults}/>}
         {pageView==="member"&&activeMember&&<MemberProfile user={activeMember} events={events} currentUser={currentUser} onEdit={()=>setEditingProfile(true)} quizResults={quizResults}/>}
-        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} onTeamSetsChanged={setTeamSets} mensGamesUnlocked={mensGamesUnlocked} quizResults={quizResults}/>}
+        {pageView==="event"&&activeEvent&&<EventPage key={activeId+(notifNav?.tab||"")} evt={activeEvent} onUpdate={updateEvent} onSyncEvt={data=>setEvents(prev=>prev.map(e=>e.id===data.id?data:e))} onDelete={()=>deleteEvent(activeId)} currentUser={currentUser} users={users} events={events} initialTab={notifNav?.tab} scrollToId={notifNav?.targetId} onSendNotif={sendNotifToAll} autoOpenTrailerId={autoTrailerId} onAutoTrailerConsumed={()=>setAutoTrailerId(null)} quizResults={quizResults} tournamentResults={tournamentResults}/>}
         {pageView==="updates"&&<UpdatesPage notifications={notifications.filter(n=>!deletedNotifIds.has(n.id)&&(!clearedBefore||n.timestamp>clearedBefore))} notifLastRead={notifLastRead} currentUser={currentUser} onMarkAllRead={()=>{const t=new Date().toISOString();setNotifLastRead(t);localStorage.setItem("notif-read",t);}} onOpenEvent={openEvent} onClearSelf={()=>{setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);}} onDeleteSelf={id=>{setNotifications(prev=>{const next=prev.filter(n=>n.id!==id);if(currentUser)localStorage.setItem(`md-notifs-${currentUser.id}`,JSON.stringify(next));return next;});}} onClearUpdates={async()=>{const cb=new Date().toISOString();const allIds=[...new Set([...deletedNotifIds,...notifications.map(n=>n.id)])];const newSet=new Set(allIds);setDeletedNotifIds(newSet);setClearedBefore(cb);setNotifications([]);if(currentUser)localStorage.removeItem(`md-notifs-${currentUser.id}`);const body=JSON.stringify({ids:allIds,cleared_before:cb});await supabase.from("announcements").upsert({id:"__deleted_notifs__",title:"__deleted_notifs__",body,created_by:"system",created_at:new Date().toISOString(),active:false});supabase.channel("notif-ctrl").send({type:"broadcast",event:"clear-notifs",payload:{ids:allIds,cleared_before:cb}});}} onDeleteNotif={deleteNotifForAll}/>}
         {pageView==="teams"&&<TeamCreatorPage users={users} events={events} currentUser={currentUser} teamSets={teamSets} teamSetsError={teamSetsError} onRetryTeamSets={reloadTeamSets} onTeamSetsChanged={setTeamSets}/>}
         {pageView==="timer"&&<TimerPage/>}

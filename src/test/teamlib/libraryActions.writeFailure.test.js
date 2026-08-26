@@ -1,14 +1,23 @@
-// Regression coverage for "four write actions fail completely silently":
-// `doArchive`, `doUnarchive`, `doDelete` (TeamCreatorPage) and `unlink`
-// (TeamsTab) used to check `result.ok` and, on failure, do nothing at all --
-// no banner, no state change, the button just looked dead. Same bug class
+// Regression coverage for "three write actions fail completely silently":
+// `doArchive`, `doUnarchive`, `doDelete` (TeamCreatorPage) used to check
+// `result.ok` and, on failure, do nothing at all -- no banner, no state
+// change, the button just looked dead. Same bug class
 // `updateEvent.writeFailure.test.js` covers for `updateEvent` -- this uses
 // the identical "slice the real, current source text, eval it" extraction
-// technique (these are local closures inside App.jsx's `TeamCreatorPage`/
-// `TeamsTab`, not module-scope exports), wrapped in a small factory that
-// supplies their free variables (the teamlib api calls, `onTeamSetsChanged`,
-// the new error-state setters, and -- for `unlink` -- `evt`) explicitly,
-// exactly what a real render would close over.
+// technique (these are local closures inside App.jsx's `TeamCreatorPage`,
+// not module-scope exports), wrapped in a small factory that supplies their
+// free variables (the teamlib api calls, `onTeamSetsChanged`, the new
+// error-state setters) explicitly, exactly what a real render would close
+// over.
+//
+// UPDATE (2026-08-26): this file used to cover a fourth action, `unlink`
+// (`TeamsTab`'s own write-failure guard for `unlinkTeamSetFromEvent`).
+// `TeamsTab` was removed along with the event page's Teams tab (owner
+// decision, same date) -- Team Creator's library is the sole home for team
+// sets now, and the "unlink this set from event X" action went with the tab
+// it lived in. `unlinkTeamSetFromEvent` itself is untouched and still
+// covered directly in `teamlib/api.test.js`; there is simply no more UI
+// caller of it to regression-test here.
 import { describe, it, expect, vi } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -47,12 +56,6 @@ function makeDoUnarchive({ unarchiveTeamSet, onTeamSetsChanged, setLibraryAction
   const source = extractConstSource('const doUnarchive=async ts=>{')
   const fn = new Function('unarchiveTeamSet', 'onTeamSetsChanged', 'setLibraryActionError', `${source}\nreturn doUnarchive;`)
   return fn(unarchiveTeamSet, onTeamSetsChanged, setLibraryActionError)
-}
-
-function makeUnlink({ unlinkTeamSetFromEvent, evt, onTeamSetsChanged, setUnlinkError }) {
-  const source = extractConstSource('const unlink=async ts=>{')
-  const fn = new Function('unlinkTeamSetFromEvent', 'evt', 'onTeamSetsChanged', 'setUnlinkError', `${source}\nreturn unlink;`)
-  return fn(unlinkTeamSetFromEvent, evt, onTeamSetsChanged, setUnlinkError)
 }
 
 const TS = { id: 'ts_1', name: 'Groep A', teams: [], eventIds: ['evt-1'], status: 'active', awards: [] }
@@ -144,29 +147,7 @@ describe('TeamCreatorPage doArchive / doUnarchive', () => {
   })
 })
 
-describe('TeamsTab unlink', () => {
-  it('on failure: surfaces unlinkError, does not touch local state', async () => {
-    const unlinkTeamSetFromEvent = vi.fn(async () => ({ ok: false, error: { message: 'boom' } }))
-    const onTeamSetsChanged = vi.fn()
-    const setUnlinkError = vi.fn()
-    const unlink = makeUnlink({ unlinkTeamSetFromEvent, evt: { id: 'evt-1' }, onTeamSetsChanged, setUnlinkError })
-
-    await unlink(TS)
-
-    expect(onTeamSetsChanged).not.toHaveBeenCalled()
-    expect(setUnlinkError).toHaveBeenCalledWith(true)
-  })
-
-  it('on success: updates local state, clears any previous error', async () => {
-    const unlinkTeamSetFromEvent = vi.fn(async () => ({ ok: true, teamSet: { ...TS, eventIds: [] } }))
-    const onTeamSetsChanged = vi.fn()
-    const setUnlinkError = vi.fn()
-    const unlink = makeUnlink({ unlinkTeamSetFromEvent, evt: { id: 'evt-1' }, onTeamSetsChanged, setUnlinkError })
-
-    await unlink(TS)
-
-    expect(onTeamSetsChanged).toHaveBeenCalledTimes(1)
-    expect(setUnlinkError).toHaveBeenCalledWith(false)
-    expect(setUnlinkError).not.toHaveBeenCalledWith(true)
-  })
-})
+// `describe('TeamsTab unlink', ...)` removed 2026-08-26 -- see this file's
+// header UPDATE note. `TeamsTab` and its `unlink` closure no longer exist in
+// App.jsx; `unlinkTeamSetFromEvent`'s own success/failure contract is still
+// covered directly in `teamlib/api.test.js`.
