@@ -68,11 +68,18 @@ export function combineFinishedQuizzes(events, tableQuizzes) {
  * rather than throwing, an update matching zero rows without erroring), so
  * the count is surfaced and the UI says so rather than leaving a gap.
  *
- * Only the legacy half can be counted here: `fetchQuizResults()` filters
- * secret quizzes server-side before this ever sees them, by design (§7.3 —
- * a member's stats bumping pre-reveal is itself a tell). So this
- * undercounts for table-only quizzes, and the copy must not promise a
- * total.
+ * Only the legacy half can be counted here: `fetchQuizResults()` drops
+ * secret quizzes before this ever sees them, by design (§7.3 — a member's
+ * stats bumping pre-reveal is itself a tell). So this undercounts for
+ * table-only quizzes, and the copy must not promise a total.
+ *
+ * NOTE — that drop is a client-side `.filter()` in `results.js`, NOT a
+ * server-side control. An earlier version of this comment said
+ * "server-side", which was wrong and is exactly the kind of claim a future
+ * reviewer would trust instead of re-checking. Secrecy here is a UI
+ * property only: `quizzes` and `tournaments` are readable in full by
+ * anyone holding the public anon key, so a secret quiz is *hidden*, not
+ * confidential. See the maintenance report for 2026-08-31.
  */
 export function combineFinishedQuizzesWithHidden(events, tableQuizzes) {
   const eventList = Array.isArray(events) ? events : [];
