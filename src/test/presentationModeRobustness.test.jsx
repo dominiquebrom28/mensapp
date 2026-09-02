@@ -163,6 +163,7 @@ function extractPresentationMode() {
     'dayHeadingLabel',
     'padTimeForSort',
     'scheduleDayTimeOrder',
+    'buildScheduleSummary',
     'useIsMobile',
   ]
   const raw =
@@ -254,17 +255,23 @@ describe('PresentationMode viewer robustness: out-of-range clamp (3.5a)', () => 
     ).not.toThrow()
 
     // Presenter (on a much longer schedule) broadcasts display position 9 --
-    // this viewer only has 1 stop (total = 2: intro + 1 stop). No realIdx
-    // field, so this exercises the legacy-idx clamp path too.
+    // this viewer only has 1 stop (total = 3: intro + 1 stop + summary). No
+    // realIdx field, so this exercises the legacy-idx clamp path too.
     act(() => {
       fakeSupabase.lastChannel._handlers['broadcast:slide']({ payload: { idx: 9, revealedSecrets: [] } })
     })
     expect(() => advanceFade()).not.toThrow()
 
-    // Clamped to the last valid slide (this viewer's only real stop), not a
-    // crash and not stuck on the intro.
+    // Clamped to the last valid slide (this viewer's own summary, added
+    // 2026-09-02 -- the true last slide since, not "Only Stop"'s own
+    // dedicated slide), not a crash and not stuck on the intro. "Only Stop"
+    // still appears as TEXT (it's one line in the summary's own list), so
+    // that alone wouldn't distinguish landing here from landing on its
+    // dedicated slide -- the absent per-stop badge and present summary
+    // heading do.
+    expect(screen.getByText('📋 The Full Day')).toBeInTheDocument()
     expect(screen.getByText('Only Stop')).toBeInTheDocument()
-    expect(screen.getByText('Stop 1 / 1')).toBeInTheDocument()
+    expect(screen.queryByText('Stop 1 / 1')).not.toBeInTheDocument()
   })
 
   it('a negative/undefined idx never goes below the intro slide', () => {
@@ -307,8 +314,15 @@ describe('PresentationMode viewer robustness: out-of-range clamp (3.5a)', () => 
         />,
       ),
     ).not.toThrow()
-    // Clamped to the last valid slide (Second), never a dead screen.
+    // Clamped to the last valid slide -- the summary, added 2026-09-02, is
+    // now the true last slide (total = 4: intro + 2 stops + summary), not
+    // "Second"'s own dedicated slide. "Second" still appears as text (one
+    // line in the summary's list, same as "First"), so the summary heading
+    // and the absent per-stop badge are what actually prove we're on the
+    // summary rather than "Second"'s own slide.
+    expect(screen.getByText('📋 The Full Day')).toBeInTheDocument()
     expect(screen.getByText('Second')).toBeInTheDocument()
+    expect(screen.queryByText('Stop 2 / 2')).not.toBeInTheDocument()
   })
 
   it('this viewer\'s OWN schedule shrinking after mount (independent of any broadcast) re-clamps idx instead of dereferencing a removed stop', () => {
@@ -334,8 +348,16 @@ describe('PresentationMode viewer robustness: out-of-range clamp (3.5a)', () => 
     // no broadcast involved, just a prop change.
     const shrunk = { ...evt, schedule: [{ activity: 'A', day: 0, time: '09:00', secret: false }] }
     expect(() => rerender(<PresentationMode evt={shrunk} onUpdate={() => {}} isPresenter={false} onClose={() => {}} />)).not.toThrow()
+    // Was pinned to C (real index 2), now gone -- the shrink-clamp pulls
+    // `idx` back to this viewer's own new `total-1`, which (since
+    // 2026-09-02) is the summary, not "A"'s own dedicated slide (with only
+    // 1 stop left, that would've been the old behavior's landing spot).
+    // Never a dereference of the removed stop either way -- the crash this
+    // test guards against.
+    expect(screen.getByText('📋 The Full Day')).toBeInTheDocument()
     expect(screen.getByText('A')).toBeInTheDocument()
     expect(screen.queryByText('C')).not.toBeInTheDocument()
+    expect(screen.queryByText('Stop 1 / 1')).not.toBeInTheDocument()
   })
 })
 
@@ -543,7 +565,7 @@ describe('PresentationMode dot navigation: secret/revealed colouring never leaks
     }
     render(<PresentationMode evt={evt} onUpdate={() => {}} isPresenter={false} onClose={() => {}} />)
     const dots = document.querySelectorAll('div[style*="justify-content: center"][style*="bottom"] > button')
-    expect(dots.length).toBe(4) // intro + 3 stops
+    expect(dots.length).toBe(5) // intro + 3 stops + summary (added 2026-09-02)
     dots.forEach((dot) => {
       expect(dot.style.background).not.toBe('rgba(224, 85, 85, 0.5)')
       expect(dot.style.background).not.toBe('rgba(76, 175, 125, 0.6)')

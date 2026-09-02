@@ -2349,7 +2349,12 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
           // the same idea one layer more robust: a stop's own stable id
           // (survives a live reorder, not just an add/remove) -- see
           // PresentationMode for the full rationale on all four.
-          setSchedLive({idx:p.idx??0,realIdx:p.realIdx,stopId:p.stopId,revealedSecrets:p.revealedSecrets??[],revealedStopIds:p.revealedStopIds});
+          // `isSummary` is the same idea for the final summary slide (added
+          // 2026-09-02): it has no stop of its own to carry a
+          // realIdx/stopId, so it needs this explicit marker instead --
+          // passed through here untouched, same as the other four, so a
+          // late joiner's very first `currentLive` already agrees with it.
+          setSchedLive({idx:p.idx??0,realIdx:p.realIdx,stopId:p.stopId,isSummary:p.isSummary,revealedSecrets:p.revealedSecrets??[],revealedStopIds:p.revealedStopIds});
           setPresenterDetected(true);
         } else if(seenPresenter){
           resetPresenter(); // presenter actually ended (we had confirmed they were there)
@@ -2358,7 +2363,7 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
       .on('broadcast',{event:'slide'},({payload})=>{
         // Keep schedLive current while dismissed so Rejoin shows the right slide
         seenPresenter=true;
-        setSchedLive({idx:payload.idx??0,realIdx:payload.realIdx,stopId:payload.stopId,revealedSecrets:payload.revealedSecrets??[],revealedStopIds:payload.revealedStopIds});
+        setSchedLive({idx:payload.idx??0,realIdx:payload.realIdx,stopId:payload.stopId,isSummary:payload.isSummary,revealedSecrets:payload.revealedSecrets??[],revealedStopIds:payload.revealedStopIds});
       })
       .subscribe();
     return()=>supabase.removeChannel(ch);
@@ -3710,9 +3715,30 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   // sees any stop missing one -- from then on every client (this one, and
   // every viewer via the existing `postgres_changes` subscription) works
   // off the same real ids instead of each separately inventing a fallback.
+  // Local-only sentinel marking "pinned to the summary slide" in
+  // pinnedStopIdRef further down -- deliberately a plain string, not a
+  // Symbol: this whole function body re-runs every render, and a Symbol
+  // literal would mint a NEW, unequal identity each time, silently
+  // breaking every `===` comparison against a value a previous render's
+  // pass through this code already stored in the ref. Never sent over the
+  // wire (the summary broadcast payload further down omits
+  // stopId/realIdx for the summary slide entirely rather than reusing
+  // this -- see that effect's own comment for why). Doesn't collide with
+  // any real stop id -- those are always `_localstop-N` or `sid-...` (see
+  // withStopIds/makeStopId).
+  const SUMMARY_PIN='__pm-summary-pin__';
   const withStopIds=stops=>stops.map((s,i)=>s.id?s:{...s,id:`_localstop-${i}`});
   const allStops=withStopIds(evt.schedule||[]);
-  const total=allStops.length+1;
+  // +2, not +1: intro, then one slide per stop, then a final summary slide
+  // (the whole day + the meenemen list, screen-friendly for a photo, owner
+  // request 2026-09-02) -- see resolveLiveIdx/applySlide/the outgoing
+  // broadcast effect below for why the summary needed its own explicit
+  // `isSummary` wire marker rather than just reusing the existing "no
+  // stop" (`stopId:null`) shape the intro already uses (that shape means
+  // "intro" to any build, old or new -- reusing it for the summary would
+  // snap every viewer back to the intro the instant a presenter reached
+  // it).
+  const total=allStops.length+2;
   // Display order only, by (day,time) -- everything below that addresses a
   // stop by index (revealedSecrets, toggleReveal's mutation, the broadcast
   // payload) still uses its real index in `allStops`/evt.schedule via
@@ -3763,6 +3789,12 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   // valid slide instead of a dead screen.
   const resolveLiveIdx=live=>{
     if(!live)return 0;
+    // The summary slide has no stop of its own to resolve through
+    // resolvePayloadRealIdx (it's an aggregate view, not one specific
+    // stop) -- checked first, unconditionally: whatever THIS client's own
+    // `total` is, the summary is always its last slide, independent of
+    // whether its schedule length matches the presenter's.
+    if(live.isSummary)return total-1;
     const r=resolvePayloadRealIdx(live,allStops,order);
     let ni;
     if(r.found)ni=r.realIdx===null?0:order.indexOf(r.realIdx)+1;
@@ -3801,7 +3833,7 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   // resolved incoming slide (`applySlide`) below, always in lockstep with
   // `idx` itself (same fade-timing) so it's never briefly out of sync with
   // what's actually on screen.
-  const pinnedStopIdRef=useRef(initialIdx===0?null:(allStops[order[initialIdx-1]]?.id??null));
+  const pinnedStopIdRef=useRef(initialIdx===0?null:initialIdx===total-1?SUMMARY_PIN:(allStops[order[initialIdx-1]]?.id??null));
   useEffect(()=>{onPresenterLeftRef.current=onPresenterLeft;},[onPresenterLeft]);
   useEffect(()=>{evtRef.current=evt;},[evt]);
   useEffect(()=>{idxRef.current=idx;},[idx]);
@@ -3835,9 +3867,19 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   // differs from the current one, so it can't loop.
   useEffect(()=>{
     if(pinnedStopIdRef.current==null)return;
+    // Pinned to the summary slide -- its position is always `total-1`,
+    // independent of stop order, so re-derive it directly rather than
+    // hunting for it in `order` (it isn't a stop; it's never in there).
+    // This is the summary's own equivalent of the reorder self-heal below:
+    // a stop added/removed while parked on the summary shifts `total-1`
+    // itself, and this keeps `idx` following it there too.
+    if(pinnedStopIdRef.current===SUMMARY_PIN){
+      if(idx!==total-1)setIdx(total-1);
+      return;
+    }
     const pos=order.findIndex(ri=>allStops[ri]?.id===pinnedStopIdRef.current);
     if(pos!==-1&&pos+1!==idx)setIdx(pos+1);
-  },[order,allStops,idx]);
+  },[order,allStops,idx,total]);
   // Presenter-only: the first time this presenter's own schedule has ANY
   // stop missing a real `id`, write real ids back onto `evt.schedule` (see
   // `withStopIds` above for the full rationale). Solo/viewer never write to
@@ -3873,7 +3915,7 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
       ch.subscribe(async status=>{
         if(status==='SUBSCRIBED'){
           const legacyRevealed=toLegacyRevealed(withStopIds(evtRef.current.schedule||[]),revealedRef.current);
-          ch.track({presenting:true,idx:idxRef.current,realIdx:null,stopId:null,revealedSecrets:legacyRevealed,revealedStopIds:revealedRef.current});
+          ch.track({presenting:true,idx:idxRef.current,realIdx:null,stopId:null,isSummary:false,revealedSecrets:legacyRevealed,revealedStopIds:revealedRef.current});
         }
       });
     } else {
@@ -3890,14 +3932,22 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
       const applySlide=payload=>{
         seenPresenter=true;
         const mySchedule=withStopIds(evtRef.current.schedule||[]);
-        const myTotal=mySchedule.length+1;
+        const myTotal=mySchedule.length+2;
         const myOrder=mySchedule.map((_,i)=>i).sort((a,b)=>scheduleDayTimeOrder(mySchedule[a],mySchedule[b]));
-        const r=resolvePayloadRealIdx(payload,mySchedule,myOrder);
         let ni;
-        if(r.found)ni=r.realIdx===null?0:myOrder.indexOf(r.realIdx)+1;
-        else ni=payload.idx??0;
+        // Summary check first, same as resolveLiveIdx above and for the
+        // same reason: it isn't a stop, so it never goes through
+        // resolvePayloadRealIdx at all -- it resolves to THIS client's own
+        // last slide regardless of whether its schedule length matches the
+        // presenter's.
+        if(payload.isSummary)ni=myTotal-1;
+        else{
+          const r=resolvePayloadRealIdx(payload,mySchedule,myOrder);
+          if(r.found)ni=r.realIdx===null?0:myOrder.indexOf(r.realIdx)+1;
+          else ni=payload.idx??0;
+        }
         ni=Math.max(0,Math.min(myTotal-1,ni));
-        const resolvedId=ni===0?null:(mySchedule[myOrder[ni-1]]?.id??null);
+        const resolvedId=ni===0?null:(ni===myTotal-1?SUMMARY_PIN:(mySchedule[myOrder[ni-1]]?.id??null));
         if(ni!==idxRef.current){
           setFading(true);
           setTimeout(()=>{pinnedStopIdRef.current=resolvedId;setIdx(ni);setFading(false);},230);
@@ -3957,12 +4007,28 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
     if(!isPresenter||!chRef.current)return;
     const mySchedule=withStopIds(evtRef.current.schedule||[]);
     const myOrder=mySchedule.map((_,i)=>i).sort((a,b)=>scheduleDayTimeOrder(mySchedule[a],mySchedule[b]));
-    const realIdx=idx===0?null:myOrder[idx-1];
-    const stopId=idx===0?null:(mySchedule[myOrder[idx-1]]?.id??null);
+    const myTotal=mySchedule.length+2;
+    const isSummarySlide=idx===myTotal-1;
+    // The summary carries no `realIdx`/`stopId` at all -- not `null` (that
+    // shape already means "the intro" to a build that predates this
+    // feature: resolvePayloadRealIdx's own `if(payload.stopId===null)
+    // return{found:true,realIdx:null}` branch, unchanged above, exists for
+    // exactly the intro and would otherwise snap every such client back to
+    // it) -- just `isSummary:true` plus the plain legacy `idx`. A build
+    // that predates `isSummary` entirely never looks at it, finds no
+    // `stopId`/`realIdx` either (both `undefined`, not `null` -- neither
+    // resolvePayloadRealIdx branch above matches `undefined`), falls
+    // through to `{found:false}`, and lands on its own historical
+    // `idx`-as-display-position behavior -- clamped into ITS OWN range by
+    // the pre-existing `Math.min(total-1,ni)` in both resolveLiveIdx and
+    // applySlide, so it lands on its own last real slide, never a dead
+    // screen and never a wrong snap to the intro.
+    const realIdx=isSummarySlide?undefined:(idx===0?null:myOrder[idx-1]);
+    const stopId=isSummarySlide?undefined:(idx===0?null:(mySchedule[myOrder[idx-1]]?.id??null));
     const revealedStopIds=revealedRef.current;
     const revealedSecrets=toLegacyRevealed(mySchedule,revealedStopIds);
-    chRef.current.track({presenting:true,idx,realIdx,stopId,revealedSecrets,revealedStopIds});
-    chRef.current.send({type:'broadcast',event:'slide',payload:{idx,realIdx,stopId,revealedSecrets,revealedStopIds}});
+    chRef.current.track({presenting:true,idx,realIdx,stopId,isSummary:isSummarySlide,revealedSecrets,revealedStopIds});
+    chRef.current.send({type:'broadcast',event:'slide',payload:{idx,realIdx,stopId,isSummary:isSummarySlide,revealedSecrets,revealedStopIds}});
   },[idx,isPresenter,evt]);
 
   const toggleReveal=useCallback((stopIdx,stopId)=>{
@@ -3977,8 +4043,8 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
       // same stop's own stable id, passed by the caller alongside it.
       const mySchedule=withStopIds(evtRef.current.schedule||[]);
       const revealedSecrets=toLegacyRevealed(mySchedule,next);
-      chRef.current.track({presenting:true,idx:idxRef.current,realIdx:stopIdx,stopId,revealedSecrets,revealedStopIds:next});
-      chRef.current.send({type:'broadcast',event:'slide',payload:{idx:idxRef.current,realIdx:stopIdx,stopId,revealedSecrets,revealedStopIds:next}});
+      chRef.current.track({presenting:true,idx:idxRef.current,realIdx:stopIdx,stopId,isSummary:false,revealedSecrets,revealedStopIds:next});
+      chRef.current.send({type:'broadcast',event:'slide',payload:{idx:idxRef.current,realIdx:stopIdx,stopId,isSummary:false,revealedSecrets,revealedStopIds:next}});
     }
     const e=evtRef.current;
     const updatedSchedule=(e.schedule||[]).map((s,i)=>(s.id?s.id===stopId:i===stopIdx)?{...s,secret:!revealing}:s);
@@ -4006,7 +4072,8 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
       // than trusting a stale closure.
       const freshStops=withStopIds(evtRef.current.schedule||[]);
       const freshOrder=freshStops.map((_,i)=>i).sort((a,b)=>scheduleDayTimeOrder(freshStops[a],freshStops[b]));
-      pinnedStopIdRef.current=n===0?null:(freshStops[freshOrder[n-1]]?.id??null);
+      const freshTotal=freshStops.length+2;
+      pinnedStopIdRef.current=n===0?null:(n===freshTotal-1?SUMMARY_PIN:(freshStops[freshOrder[n-1]]?.id??null));
       setIdx(n);
       setFading(false);
     },230);
@@ -4033,8 +4100,9 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
   if(locallyDismissed)return null;
 
   const isIntro=idx===0;
-  const stopIdx=isIntro?-1:order[idx-1];
-  const stop=isIntro?null:allStops[stopIdx];
+  const isSummary=idx===total-1; // always the last slide -- see `total`'s own comment above
+  const stopIdx=(isIntro||isSummary)?-1:order[idx-1];
+  const stop=(isIntro||isSummary)?null:allStops[stopIdx];
   const isSecret=!!stop?.secret;
   const isRevealed=!!stop&&revealedSecrets.includes(stop.id);
   const isHidden=isSecret&&!isRevealed; // secret and not yet revealed
@@ -4074,7 +4142,7 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
       </div>
 
       {/* Main content */}
-      <div style={{position:"absolute",inset:0,display:"flex",alignItems:isIntro?"center":"flex-end",justifyContent:"center",padding:isIntro?"2rem":isMobile?"3rem 1.2rem 5.5rem":"3rem 5rem 5.5rem",opacity:fading?0:1,transition:"opacity .2s ease",zIndex:10}}>
+      <div style={{position:"absolute",inset:0,display:"flex",alignItems:isIntro?"center":isSummary?"stretch":"flex-end",justifyContent:"center",padding:isIntro?"2rem":isSummary?(isMobile?"5.5rem 1rem 1.6rem":"6rem 3rem 2.2rem"):isMobile?"3rem 1.2rem 5.5rem":"3rem 5rem 5.5rem",opacity:fading?0:1,transition:"opacity .2s ease",zIndex:10}}>
         {isIntro?(
           <div style={{textAlign:"center",maxWidth:780}}>
             {(evt.type||evt.theme)&&<div style={{fontSize:".82rem",color:"var(--amber)",letterSpacing:".22em",textTransform:"uppercase",fontWeight:700,marginBottom:"1.4rem",opacity:.9}}>
@@ -4088,6 +4156,90 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
               {publicCount} stop{publicCount!==1?"s":""} on the menu{allStops.length>publicCount&&isPresenter?` · ${allStops.length-publicCount} secret`:""}
               <div style={{height:1,width:36,background:"rgba(255,255,255,.14)"}}/>
             </div>}
+          </div>
+        ):isSummary?(
+          /* ── Final slide, all three modes: the whole day + the meenemen
+             list, screen-friendly for a photo (owner request 2026-09-02).
+             Day grouping/labels are sourced from `buildScheduleSummary` --
+             the exact same choke point OverviewTab's own "Summary" view
+             already uses -- called with isEditor:true purely for that
+             grouping/labeling (`dayHeadingLabel`-driven), never consumed
+             for a stop's own content. The reveal decision for each row is
+             DELIBERATELY NOT derived from buildScheduleSummary's own
+             per-stop shape (which carries no id, so any way of getting
+             back to one -- a positional walk, a content-key lookup --
+             is a second mechanism the per-stop slide's own reveal check
+             doesn't have to go through, and a prior version of this slide
+             shipped exactly that kind of lookup silently wrong under a
+             flaky-write condition this file's own tests didn't cover).
+             Instead each row reads straight off the same real stop object
+             (`allStops[ri]`, real persisted `id` and all) via the EXACT
+             SAME expression the per-stop slide's own `isHidden` above
+             uses: `secret && !revealedSecrets.includes(id)`. There is no
+             remaining path for the two to disagree -- not a lag window, a
+             content mismatch, or anything else -- because there is no
+             second computation left to disagree through. This is also why
+             a stop revealed this session shows in full here even while
+             `evt.schedule`'s own persisted `secret` flag hasn't (or, per
+             the harness-only case this was diagnosed against, ever won't)
+             catch up: `revealedSecrets` is this component's own session
+             state, synced instantly over the broadcast channel same as
+             every other reveal-aware bit of this component, and reflects
+             the presenter's actual on-screen state regardless of what the
+             underlying event row says. Masking behaves identically for the
+             presenter and everyone else on this one slide, deliberately:
+             this is the screen the whole room is looking at (and
+             photographing), not a presenter-only cue like the per-stop
+             slides above. */
+          <div style={{width:"100%",maxWidth:1000,height:"100%",overflowY:"auto",display:"grid",gap:isMobile?"1rem":"1.3rem",paddingBottom:"1.4rem"}}>
+            {(()=>{
+              const dayMeta=buildScheduleSummary(evt.schedule||[],evt.date,true).days.map(d=>({day:d.day,label:d.label}));
+              let stillHidden=0;
+              const days=dayMeta.map(({day,label})=>{
+                const stops=order.map(ri=>allStops[ri]).filter(stop=>(stop.day??0)===day).map(stop=>{
+                  const hidden=!!stop.secret&&!revealedSecrets.includes(stop.id);
+                  if(hidden)stillHidden++;
+                  return{time:stop.time||"",activity:stop.activity||"",location:stop.location||"",hidden};
+                }).filter(s=>!s.hidden);
+                return{day,label,stops};
+              }).filter(day=>day.stops.length>0);
+              const bring=Array.isArray(evt.bring)?evt.bring:[];
+              const isEmpty=days.length===0&&stillHidden===0&&bring.length===0;
+              return(
+                <>
+                  <div style={{textAlign:"center"}}>
+                    <div style={{fontSize:".85rem",color:"var(--amber)",letterSpacing:".2em",textTransform:"uppercase",fontWeight:700,marginBottom:".5rem"}}>📋 The Full Day</div>
+                    <div style={{fontFamily:"var(--font-h)",fontSize:"clamp(1.6rem,4.5vw,2.6rem)",color:"#fff"}}>{evt.name}</div>
+                  </div>
+                  {isEmpty&&<div style={{textAlign:"center",color:"rgba(255,255,255,.5)",fontSize:"1.15rem",padding:"2rem 1rem"}}>Nothing to sum up yet.</div>}
+                  {days.map(day=>(
+                    <div key={day.day} style={{display:"grid",gap:".5rem"}}>
+                      {days.length>1&&<div style={{fontSize:".85rem",color:"var(--amber)",letterSpacing:".1em",textTransform:"uppercase",fontWeight:700}}>{day.label}</div>}
+                      {day.stops.map((s,i)=>(
+                        <div key={i} style={{display:"flex",gap:14,alignItems:"baseline",padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,.14)",flexWrap:"wrap"}}>
+                          {s.time&&<span style={{fontFamily:"var(--font-h)",color:"var(--amber)",fontWeight:700,fontSize:"1.15rem",minWidth:64,flexShrink:0}}>{s.time}</span>}
+                          <span style={{color:"#fff",fontWeight:700,fontSize:"1.15rem"}}>{s.activity}</span>
+                          {s.location&&<span style={{color:"rgba(255,255,255,.65)",fontSize:"1rem"}}>· {s.location}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  {stillHidden>0&&(
+                    <div style={{textAlign:"center",padding:"1rem",background:"rgba(224,85,85,.12)",border:"1px solid rgba(224,85,85,.35)",borderRadius:12}}>
+                      <span style={{fontSize:"1.05rem",color:"var(--red)",fontWeight:700}}>🔒 {stillHidden} stop{stillHidden!==1?"s":""} still a secret</span>
+                    </div>
+                  )}
+                  {bring.length>0&&(
+                    <div style={{marginTop:isMobile?".4rem":".8rem"}}>
+                      <div style={{fontSize:".85rem",color:"var(--amber)",letterSpacing:".1em",textTransform:"uppercase",fontWeight:700,marginBottom:".6rem"}}>🎒 Bring This</div>
+                      <div style={{display:"grid",gap:".4rem"}}>
+                        {bring.map((item,i)=><div key={i} style={{fontSize:"1.1rem",color:"#fff",fontWeight:600}}>• {item}</div>)}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         ):(
           /* ── Viewer sees a mystery slide for unrevealed secret stops ── */

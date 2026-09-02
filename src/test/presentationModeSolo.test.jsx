@@ -157,6 +157,7 @@ function extractPresentationMode() {
     'dayHeadingLabel',
     'padTimeForSort',
     'scheduleDayTimeOrder',
+    'buildScheduleSummary',
     'useIsMobile',
   ]
   const raw =
@@ -329,7 +330,7 @@ describe('PresentationMode solo mode', () => {
     const evt = makeEvt() // stop index 1 (display position 2) is the secret one
     render(<PresentationMode evt={evt} onUpdate={() => {}} isPresenter={false} isSolo={true} onClose={() => {}} />)
     const dots = document.querySelectorAll('div[style*="justify-content: center"][style*="bottom"] > button')
-    expect(dots.length).toBe(4) // intro + 3 stops
+    expect(dots.length).toBe(5) // intro + 3 stops + summary (added 2026-09-02)
     dots.forEach((dot, i) => {
       if (i === 2) return // the current/active dot is amber regardless -- not the property under test
       // Neither the "secret, unrevealed" red nor the "secret, revealed"

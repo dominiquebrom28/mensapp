@@ -186,6 +186,7 @@ function extractPresentationMode() {
     'dayHeadingLabel',
     'padTimeForSort',
     'scheduleDayTimeOrder',
+    'buildScheduleSummary',
     'useIsMobile',
   ]
   const raw =
@@ -354,13 +355,30 @@ describe('PresentationMode index indirection (day/time display order vs real sch
     })
   })
 
-  it('last slide (slide 4 of 4) behaves: Next button is hidden, Prev button is present', () => {
+  // Was "last slide (slide 4 of 4) ... Next button is hidden" before the
+  // trailing summary slide existed (2026-09-02): the last STOP is no longer
+  // the last SLIDE (the summary follows it), so Next must now stay visible
+  // here -- reaching the true last slide, and Next disappearing there
+  // instead, is covered by the dedicated summary-slide tests below.
+  it('the last stop (slide 4 of 4 stops) is followed by the summary -- Next stays visible there, Prev too', () => {
     const evt = makeEvt()
     render(<PresentationMode evt={evt} onUpdate={() => {}} isPresenter={true} onClose={() => {}} />)
     const dots = document.querySelectorAll('div[style*="justify-content: center"][style*="bottom"] > button')
     fireEvent.click(dots[4])
     advanceFade()
     expect(screen.getByText(EXPECTED_ACTIVITIES[3])).toBeInTheDocument()
+    expect(screen.getByText('→')).toBeInTheDocument()
+    expect(screen.getByText('←')).toBeInTheDocument()
+  })
+
+  it('the summary slide (dot 5, after all 4 stops) is the true last slide: Next hidden, Prev present', () => {
+    const evt = makeEvt()
+    render(<PresentationMode evt={evt} onUpdate={() => {}} isPresenter={true} onClose={() => {}} />)
+    const dots = document.querySelectorAll('div[style*="justify-content: center"][style*="bottom"] > button')
+    expect(dots.length).toBe(6) // intro + 4 stops + summary
+    fireEvent.click(dots[5])
+    advanceFade()
+    expect(screen.getByText('📋 The Full Day')).toBeInTheDocument()
     expect(screen.queryByText('→')).not.toBeInTheDocument()
     expect(screen.getByText('←')).toBeInTheDocument()
   })
