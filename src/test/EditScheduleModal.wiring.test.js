@@ -31,15 +31,15 @@ function getEditScheduleModalBody() {
 }
 
 describe('EditScheduleModal -> Modal wiring (source-level regression guard)', () => {
-  it('passes onBackdropClose that saves the in-progress schedule (does not silently discard on backdrop click)', () => {
+  it('passes onBackdropClose that saves the in-progress schedule AND the meenemen list (does not silently discard on backdrop click)', () => {
     const body = getEditScheduleModalBody()
-    expect(body).toMatch(/<Modal\s+onClose=\{onClose\}\s+onBackdropClose=\{\(\)\s*=>\s*onSave\(sched\)\}/)
+    expect(body).toMatch(/<Modal\s+onClose=\{onClose\}\s+onBackdropClose=\{\(\)\s*=>\s*onSave\(\{schedule:sched,bring:cleanBring\(\)\}\)\}/)
   })
 
   it('keeps "Discard changes" wired to plain onClose, not onSave -- discard must still discard', () => {
     const body = getEditScheduleModalBody()
-    // The Save button explicitly calls onSave(sched)...
-    expect(body).toMatch(/<Btn onClick=\{\(\)=>onSave\(sched\)\}>Save<\/Btn>/)
+    // The Save button explicitly calls onSave({schedule,bring})...
+    expect(body).toMatch(/<Btn onClick=\{\(\)=>onSave\(\{schedule:sched,bring:cleanBring\(\)\}\)\}>Save<\/Btn>/)
     // ...while the discard button calls onClose directly, with nothing
     // save-shaped anywhere in its onClick.
     const discardBtnMatch = body.match(/<Btn onClick=\{([^}]*)\} variant="ghost">Discard changes<\/Btn>/)
@@ -48,14 +48,16 @@ describe('EditScheduleModal -> Modal wiring (source-level regression guard)', ()
     expect(discardBtnMatch[1]).not.toMatch(/onSave/)
   })
 
-  it('the single call site wires onSave to persist (onUpdate) and close, and onClose to close only (no persistence)', () => {
+  it('the single call site wires onSave to persist BOTH schedule and bring (onUpdate) and close, and onClose to close only (no persistence)', () => {
     const callSite = source
       .split('\n')
       .find((line) => line.includes('<EditScheduleModal') && line.includes('onSave='))
     expect(callSite, 'EditScheduleModal call site not found').toBeTruthy()
 
-    // onSave: must call onUpdate(...) (persist) AND close the modal.
-    expect(callSite).toMatch(/onSave=\{sched=>\{onUpdate\(\{\.\.\.evt,schedule:sched\}\);setEditSched\(false\)\}\}/)
+    // onSave: must call onUpdate(...) with both schedule and bring (persist)
+    // AND close the modal -- the meenemen list is event-level, so it rides
+    // along on the exact same save as the schedule, not a separate write.
+    expect(callSite).toMatch(/onSave=\{\(\{schedule,bring\}\)=>\{onUpdate\(\{\.\.\.evt,schedule,bring\}\);setEditSched\(false\)\}\}/)
 
     // onClose: must ONLY close -- no onUpdate call in its body, i.e. no
     // persistence happens on a plain discard.

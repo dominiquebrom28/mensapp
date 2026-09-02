@@ -559,6 +559,28 @@ const padTimeForSort=t=>{
 // (ties keep their existing relative order) so manual reordering via the
 // editor's ↑/↓ still shows through whenever times are equal or blank.
 const scheduleDayTimeOrder=(a,b)=>((a.day??0)-(b.day??0))||padTimeForSort(a.time).localeCompare(padTimeForSort(b.time));
+// Pure data shape for the schedule's compact "Summary" view (OverviewTab's
+// view toggle, alongside the existing per-stop "Stops" view) -- the single
+// choke point that decides what a non-editor is allowed to see. A secret
+// stop's activity/location/note must never reach a non-editor; rather than
+// trust every render branch to remember that, this function is the one
+// place that filters, so a regression here fails a test instead of leaking
+// a surprise. An editor (can.editSchedule) gets every stop, secret or not,
+// exactly as the existing "Stops" view already behaves.
+const buildScheduleSummary=(schedule,dateStr,isEditor)=>{
+  const sorted=[...schedule].sort(scheduleDayTimeOrder);
+  const hiddenCount=schedule.filter(s=>s.secret).length;
+  const visible=isEditor?sorted:sorted.filter(s=>!s.secret);
+  const days=[];
+  visible.forEach(s=>{
+    const day=s.day??0;
+    let group=days.find(g=>g.day===day);
+    if(!group){group={day,label:dayHeadingLabel(dateStr,day),stops:[]};days.push(group);}
+    group.stops.push({time:s.time||"",activity:s.activity||"",location:s.location||"",secret:!!s.secret});
+  });
+  days.sort((a,b)=>a.day-b.day);
+  return{days,hiddenCount};
+};
 // Boundary adapter for the trailer feature (src/features/trailer/). The
 // trailer now plays the event's real, owner-produced video and ends on a
 // single end-card view -- direction change from the owner, 2026-08-21. The
@@ -2479,6 +2501,12 @@ const EventPage=({evt,onUpdate,onSyncEvt,onDelete,currentUser,users=[],events=[]
 const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
   const [editSched,setEditSched]=useState(false);
   const [notifyPending,setNotifyPending]=useState(null);
+  // "Stops" (the existing per-stop cards) vs "Summary" (one compact,
+  // screenshot-friendly overview grouped by day, plus the meenemen list) --
+  // the same schedule seen two ways, not a second feature to keep in sync
+  // (three tabs were deleted from this page already; this stays a toggle on
+  // the block that's already here, not a new tab).
+  const [scheduleView,setScheduleView]=useState("stops");
   const statusOpts=isPast?["went","absent"]:["going","maybe","not coming"];
   const colorOf=s=>statusMap[s]?.color??"var(--muted)";
   const isAdmin=can.editEvent(currentUser);
@@ -2586,15 +2614,76 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
 
       {/* ── Schedule — Sneak Peek ── */}
       <Card style={{background:"linear-gradient(135deg,var(--bg2),#1c1408)"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"1.2rem"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"1.2rem",flexWrap:"wrap",gap:10}}>
           <div>
             <H style={{marginBottom:3}}>{isPast?"📋 What Went Down":"👀 What's on the Menu"}</H>
-            {!isPast&&evt.schedule.length>0&&<div style={{fontSize:".75rem",color:"var(--muted)"}}>The agenda is locked. Here&apos;s a taste of what&apos;s coming.</div>}
+            {!isPast&&scheduleView==="stops"&&evt.schedule.length>0&&<div style={{fontSize:".75rem",color:"var(--muted)"}}>The agenda is locked. Here&apos;s a taste of what&apos;s coming.</div>}
+            {scheduleView==="summary"&&<div style={{fontSize:".75rem",color:"var(--muted)"}}>One overview, screenshot-ready.</div>}
           </div>
-          {isAdmin&&<Btn onClick={()=>setEditSched(true)} variant="ghost" size="sm">✎ Edit</Btn>}
+          <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
+            {(evt.schedule.length>0||(evt.bring&&evt.bring.length>0))&&(
+              <div role="group" aria-label="Schedule view" style={{display:"flex",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",overflow:"hidden"}}>
+                {[{id:"stops",label:"Stops"},{id:"summary",label:"Summary"}].map(({id,label})=>(
+                  <button key={id} type="button" aria-pressed={scheduleView===id} onClick={()=>setScheduleView(id)} style={{minHeight:44,padding:"0 16px",border:"none",cursor:"pointer",fontFamily:"var(--font-b)",fontWeight:700,fontSize:".78rem",background:scheduleView===id?"var(--amber)":"transparent",color:scheduleView===id?"var(--bg)":"var(--muted)"}}>{label}</button>
+                ))}
+              </div>
+            )}
+            {isAdmin&&<Btn onClick={()=>setEditSched(true)} variant="ghost" size="sm">✎ Edit</Btn>}
+          </div>
         </div>
 
-        {evt.schedule.length===0&&(
+        {scheduleView==="summary"&&(()=>{
+          const summary=buildScheduleSummary(evt.schedule,evt.date,isScheduleEditor);
+          const bring=Array.isArray(evt.bring)?evt.bring:[];
+          const isEmpty=summary.days.length===0&&summary.hiddenCount===0&&bring.length===0;
+          return(
+            <div style={{display:"grid",gap:"1rem"}}>
+              {/* Self-contained header -- this card is the thing that gets
+                  screenshotted into a group chat, so it must carry its own
+                  event identity rather than relying on page chrome that
+                  won't be in the screenshot. */}
+              <div style={{textAlign:"center",paddingBottom:".7rem",borderBottom:"1px solid var(--border)"}}>
+                <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber2)",fontWeight:700}}>{evt.name}</div>
+                <div style={{fontSize:".76rem",color:"var(--muted)",marginTop:2}}>{formatEventDateRange(evt.date,evt.end_date)}{evt.location?` · ${evt.location}`:""}</div>
+              </div>
+
+              {isEmpty&&(
+                <div style={{textAlign:"center",padding:"1.5rem 1rem",color:"var(--muted)",fontSize:".82rem"}}>Nog niets om samen te vatten.</div>
+              )}
+
+              {summary.days.map(day=>(
+                <div key={day.day} style={{display:"grid",gap:".3rem"}}>
+                  {summary.days.length>1&&<div style={{fontSize:".68rem",color:"var(--amber)",letterSpacing:".08em",fontWeight:700}}>{day.label}</div>}
+                  {day.stops.map((s,i)=>(
+                    <div key={i} style={{display:"flex",gap:8,alignItems:"baseline",fontSize:".83rem",padding:"3px 0",borderBottom:"1px solid var(--border)"}}>
+                      {s.secret&&<span aria-hidden="true" style={{flexShrink:0}}>🔒</span>}
+                      {s.time&&<span style={{fontFamily:"var(--font-h)",color:"var(--amber)",fontWeight:700,flexShrink:0,minWidth:40}}>{s.time}</span>}
+                      <span style={{color:"var(--amber2)",fontWeight:600,flexShrink:0}}>{s.activity}</span>
+                      {s.location&&<span style={{color:"var(--muted)",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>· {s.location}</span>}
+                    </div>
+                  ))}
+                </div>
+              ))}
+
+              {summary.hiddenCount>0&&(
+                <div style={{textAlign:"center",padding:".6rem",background:"var(--bg3)",borderRadius:"var(--radius-sm)",border:"1px solid var(--border)"}}>
+                  <span style={{fontSize:".78rem",color:"var(--muted)"}}>🔒 {summary.hiddenCount} stop{summary.hiddenCount!==1?"s":""} nog geheim — wordt later onthuld</span>
+                </div>
+              )}
+
+              {bring.length>0&&(
+                <div>
+                  <div style={{fontSize:".68rem",color:"var(--amber)",letterSpacing:".08em",fontWeight:700,marginBottom:6}}>🎒 MEENEMEN</div>
+                  <div style={{display:"grid",gap:4}}>
+                    {bring.map((item,i)=><div key={i} style={{fontSize:".83rem",color:"var(--cream)"}}>• {item}</div>)}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {scheduleView==="stops"&&evt.schedule.length===0&&(
           <div style={{textAlign:"center",padding:"2.5rem 1rem",color:"var(--muted)"}}>
             <div style={{fontSize:"2.5rem",marginBottom:".6rem"}}>🔒</div>
             <div style={{fontFamily:"var(--font-h)",fontSize:"1rem",color:"var(--amber2)",marginBottom:".3rem"}}>Schedule under wraps</div>
@@ -2603,7 +2692,7 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
           </div>
         )}
 
-        {(()=>{
+        {scheduleView==="stops"&&(()=>{
           const sortedSchedule=[...evt.schedule].sort(scheduleDayTimeOrder);
           const visibleStops=isScheduleEditor?sortedSchedule:sortedSchedule.filter(s=>!s.secret);
           const hiddenCount=evt.schedule.filter(s=>s.secret).length;
@@ -2678,7 +2767,7 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
             </>
           );
         })()}
-        {editSched&&<EditScheduleModal evt={evt} onSave={sched=>{onUpdate({...evt,schedule:sched});setEditSched(false)}} onClose={()=>setEditSched(false)}/>}
+        {editSched&&<EditScheduleModal evt={evt} onSave={({schedule,bring})=>{onUpdate({...evt,schedule,bring});setEditSched(false)}} onClose={()=>setEditSched(false)}/>}
       </Card>
 
       {/* Attendees full list */}
@@ -4099,6 +4188,26 @@ const makeStopId=()=>`sid-${Date.now().toString(36)}-${Math.random().toString(36
 const EditScheduleModal=({evt,onSave,onClose})=>{
   const [sched,setSched]=useState(evt.schedule.map(s=>({...blankStop,...s})));
   const [iconPicker,setIconPicker]=useState(null);
+  // Event-level "meenemen" (packing list) -- deliberately ONE list for the
+  // whole event, not attached to individual stops. The owner was offered
+  // per-stop `bring` and declined it ("No just let me make a list for them
+  // to bring to the whole thing."), so this never reads from or writes to
+  // `sched` above. `bring` may not exist as a column yet (see `updateEvent`
+  // -- the owner has been given the migration but may not have run it);
+  // that's handled entirely on the write side, not here.
+  const [bring,setBring]=useState(Array.isArray(evt.bring)?evt.bring:[]);
+  const addBringItem=()=>setBring(b=>[...b,""]);
+  const updateBringItem=(i,v)=>setBring(b=>b.map((x,j)=>j===i?v:x));
+  const removeBringItem=i=>setBring(b=>b.filter((_,j)=>j!==i));
+  const moveBringItem=(i,d)=>setBring(b=>{
+    const j=i+d;
+    if(j<0||j>=b.length)return b;
+    const next=[...b];[next[i],next[j]]=[next[j],next[i]];
+    return next;
+  });
+  // Blank rows the admin never filled in are dropped on save, not stored --
+  // matches nothing else in the schedule editor silently persisting empties.
+  const cleanBring=()=>bring.map(b=>b.trim()).filter(Boolean);
   const upd=(i,f,v)=>setSched(s=>s.map((r,j)=>j===i?{...r,[f]:v}:r));
   const stopDay=s=>s.day??0;
   const dayCount=Math.max(1,eventDayCount(evt.date,evt.end_date));
@@ -4152,7 +4261,7 @@ const EditScheduleModal=({evt,onSave,onClose})=>{
     </div>
     );
   };
-  return(<Modal onClose={onClose} onBackdropClose={()=>onSave(sched)} maxWidth={640}><H>Edit Schedule</H><div style={{display:"grid",gap:".9rem"}}>
+  return(<Modal onClose={onClose} onBackdropClose={()=>onSave({schedule:sched,bring:cleanBring()})} maxWidth={640}><H>Edit Schedule</H><div style={{display:"grid",gap:".9rem"}}>
     {!isMultiDay&&overflowIdxs.length===0
       ? <>{sched.map((s,i)=>renderStop(i))}<Btn onClick={()=>setSched(s=>[...s,{...blankStop,id:makeStopId()}])} variant="subtle" size="sm">+ Add Stop</Btn></>
       : <>
@@ -4172,7 +4281,25 @@ const EditScheduleModal=({evt,onSave,onClose})=>{
         )}
       </>
     }
-    <div style={{display:"flex",gap:8,alignItems:"center"}}><Btn onClick={()=>onSave(sched)}>Save</Btn><Btn onClick={onClose} variant="ghost">Discard changes</Btn><span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span></div>
+    {/* Event-level "meenemen" -- ONE list for the whole event, deliberately
+        separate from the per-stop editors above (see the docblock on
+        `bring` state, top of this component). */}
+    <div style={{borderTop:"1px solid var(--border)",paddingTop:".9rem",display:"grid",gap:".5rem"}}>
+      <Lbl>🎒 Meenemen</Lbl>
+      {bring.length===0&&<div style={{fontSize:".76rem",color:"var(--muted)"}}>Nog niets op de lijst.</div>}
+      {bring.map((item,i)=>(
+        <div key={i} style={{display:"flex",gap:6,alignItems:"center"}}>
+          <Inp value={item} onChange={e=>updateBringItem(i,e.target.value)} placeholder="bv. regenjas"/>
+          <div style={{display:"flex",gap:4,flexShrink:0}}>
+            <Btn onClick={()=>moveBringItem(i,-1)} variant="ghost" size="sm" disabled={i===0} style={{padding:"6px 9px",minHeight:44,minWidth:44}}>↑</Btn>
+            <Btn onClick={()=>moveBringItem(i,1)} variant="ghost" size="sm" disabled={i===bring.length-1} style={{padding:"6px 9px",minHeight:44,minWidth:44}}>↓</Btn>
+            <Btn onClick={()=>removeBringItem(i)} variant="danger" size="sm" style={{padding:"6px 9px",minHeight:44,minWidth:44}}>✕</Btn>
+          </div>
+        </div>
+      ))}
+      <Btn onClick={addBringItem} variant="subtle" size="sm" style={{minHeight:44}}>+ Item toevoegen</Btn>
+    </div>
+    <div style={{display:"flex",gap:8,alignItems:"center"}}><Btn onClick={()=>onSave({schedule:sched,bring:cleanBring()})}>Save</Btn><Btn onClick={onClose} variant="ghost">Discard changes</Btn><span style={{color:"var(--muted)",fontSize:".7rem"}}>Clicking outside saves automatically</span></div>
   </div></Modal>);
 };
 
@@ -5784,6 +5911,23 @@ export default function App(){
   // this call (never leaves the UI showing a change that isn't really
   // saved) and surfaces `writeError` so it's impossible to miss.
   const updateEvent=async updated=>{
+    // `bring` (the event-level "meenemen" / packing list, EditScheduleModal's
+    // meenemen editor) is a column the owner may not have migrated yet
+    // (`alter table events add column if not exists bring jsonb not null
+    // default '[]'::jsonb;`). This is the exact `kretjes` incident again if
+    // left undetected -- a field written before its column existed broke
+    // every event save from 2 May until someone noticed, silently. So a
+    // missing-`bring`-column failure is detected by code (Postgres "column
+    // does not exist" 42703, or PostgREST's schema-cache miss PGRST204) AND
+    // by the message actually naming `bring` -- never swallows an unrelated
+    // missing-column error under this path -- and only ever fires when the
+    // payload itself carries a `bring` key. On a match the write is retried
+    // once with `bring` stripped, so everything else in the same save
+    // (schedule edits, RSVPs, anything) still lands, and the admin is told
+    // in plain text, in the UI, exactly what to run -- never a console
+    // warning nobody reads.
+    const MISSING_BRING_COLUMN_SQL="alter table events add column if not exists bring jsonb not null default '[]'::jsonb;";
+    const isMissingBringColumnError=err=>!!err&&(err.code==="42703"||err.code==="PGRST204")&&/bring/i.test(`${err.message||""} ${err.details||""} ${err.hint||""}`);
     if(typeof updated==="function"){
       let before=null,changed=null;
       setEvents(prev=>{
@@ -5795,7 +5939,19 @@ export default function App(){
       if(!changed)return;
       const{error}=await supabase.from("events").upsert([changed]);
       if(error){
-        console.error("Event update failed:",error);
+        if(isMissingBringColumnError(error)&&Object.prototype.hasOwnProperty.call(changed,"bring")){
+          const{bring:_omit,...withoutBring}=changed;
+          const{error:retryError}=await supabase.from("events").upsert([withoutBring]);
+          if(!retryError){
+            console.error("Event update: 'bring' column missing, saved the rest without it:",error);
+            setEvents(prev=>prev.map(e=>e.id===activeId?withoutBring:e));
+            setWriteError(`The "meenemen" list wasn't saved — the rest of your changes were. Ask an admin to run this in Supabase: ${MISSING_BRING_COLUMN_SQL}`);
+            return;
+          }
+          console.error("Event update failed (retry without 'bring' also failed):",retryError);
+        } else {
+          console.error("Event update failed:",error);
+        }
         setEvents(prev=>prev.map(e=>e.id===activeId?(before??e):e));
         setWriteError("Save failed — your change wasn't saved. Please try again.");
         return;
@@ -5809,7 +5965,19 @@ export default function App(){
       });
       const{error}=await supabase.from("events").upsert([updated]);
       if(error){
-        console.error("Event update failed:",error);
+        if(isMissingBringColumnError(error)&&Object.prototype.hasOwnProperty.call(updated,"bring")){
+          const{bring:_omit,...withoutBring}=updated;
+          const{error:retryError}=await supabase.from("events").upsert([withoutBring]);
+          if(!retryError){
+            console.error("Event update: 'bring' column missing, saved the rest without it:",error);
+            setEvents(prev=>prev.map(e=>e.id===updated.id?withoutBring:e));
+            setWriteError(`The "meenemen" list wasn't saved — the rest of your changes were. Ask an admin to run this in Supabase: ${MISSING_BRING_COLUMN_SQL}`);
+            return;
+          }
+          console.error("Event update failed (retry without 'bring' also failed):",retryError);
+        } else {
+          console.error("Event update failed:",error);
+        }
         setEvents(prev=>prev.map(e=>e.id===updated.id?(before??e):e));
         setWriteError("Save failed — your change wasn't saved. Please try again.");
         return;

@@ -75,6 +75,28 @@ function makeFakeSupabase(result) {
   }
 }
 
+// Fake supabase for the missing-`bring`-column tests: results are consumed
+// in order, one per `.upsert()` call (so the FIRST call -- the optimistic
+// write -- can fail while the SECOND -- updateEvent's own retry without
+// `bring` -- succeeds, or vice versa). The last queued result repeats if
+// more calls happen than results were queued, so a test that expects only
+// one call can still assert `.length` precisely via `upsertCalls`.
+function makeSequencedFakeSupabase(results) {
+  const upsertCalls = []
+  let i = 0
+  return {
+    upsertCalls,
+    from: (table) => ({
+      upsert: (rows) => {
+        upsertCalls.push({ table, rows })
+        const result = results[Math.min(i, results.length - 1)]
+        i += 1
+        return Promise.resolve(result)
+      },
+    }),
+  }
+}
+
 beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
@@ -190,5 +212,139 @@ describe('updateEvent (function form, i.e. onUpdate(prev=>({...prev,...})) -- th
 
     expect(supabase.upsertCalls).toEqual([])
     expect(setWriteError).not.toHaveBeenCalled()
+  })
+})
+
+// Migration-hazard coverage: `bring` (the event-level "meenemen" list,
+// EditScheduleModal's meenemen editor) is a column the owner has been given
+// a migration for but may not have run yet. This is the exact `kretjes`
+// incident again if left undetected -- a field written before its column
+// existed silently broke every event save from 2 May until someone
+// noticed. These tests pin that a missing-`bring`-column failure never
+// takes down the rest of the save, and never fails silently.
+describe('updateEvent -- missing `bring` column (the "meenemen" migration has not run yet)', () => {
+  it('object form: on a PostgREST schema-cache miss (PGRST204) naming `bring`, retries without it -- the rest of the update lands, and the admin is told the exact SQL to run', async () => {
+    const original = { id: 'e1', name: 'Old', schedule: [] }
+    const events = makeEventsState([original])
+    const supabase = makeSequencedFakeSupabase([
+      { error: { code: 'PGRST204', message: "Could not find the 'bring' column of 'events' in the schema cache" } },
+      { error: null },
+    ])
+    const setWriteError = vi.fn()
+    const updateEvent = makeUpdateEvent({ activeId: 'e1', setEvents: events.setEvents, supabase, setWriteError })
+
+    const updated = { id: 'e1', name: 'Old', schedule: [{ activity: 'New stop' }], bring: ['Regenjas'] }
+    await updateEvent(updated)
+
+    // Two upsert attempts: the original (with `bring`) that failed, then the
+    // retry with `bring` stripped.
+    expect(supabase.upsertCalls).toHaveLength(2)
+    expect(supabase.upsertCalls[0].rows).toEqual([updated])
+    expect(supabase.upsertCalls[1].rows).toEqual([{ id: 'e1', name: 'Old', schedule: [{ activity: 'New stop' }] }])
+
+    // The schedule edit survives -- it landed on the retry -- but `bring`
+    // is NOT on local state either, matching what actually made it into the
+    // database (never show a change as saved when it wasn't).
+    const saved = events.get().find((e) => e.id === 'e1')
+    expect(saved.schedule).toEqual([{ activity: 'New stop' }])
+    expect(saved).not.toHaveProperty('bring')
+
+    // The admin is told in plain text, with the actual SQL to run -- never
+    // just a console warning nobody reads.
+    expect(setWriteError).toHaveBeenCalledTimes(1)
+    const [message] = setWriteError.mock.calls[0]
+    expect(typeof message).toBe('string')
+    expect(message).toMatch(/meenemen/i)
+    expect(message).toContain("alter table events add column if not exists bring jsonb not null default '[]'::jsonb;")
+  })
+
+  it('object form: also recognised via a raw Postgres 42703 "column does not exist" error', async () => {
+    const events = makeEventsState([{ id: 'e1', name: 'Old' }])
+    const supabase = makeSequencedFakeSupabase([
+      { error: { code: '42703', message: 'column "bring" of relation "events" does not exist' } },
+      { error: null },
+    ])
+    const setWriteError = vi.fn()
+    const updateEvent = makeUpdateEvent({ activeId: 'e1', setEvents: events.setEvents, supabase, setWriteError })
+
+    await updateEvent({ id: 'e1', name: 'New', bring: ['x'] })
+
+    expect(supabase.upsertCalls).toHaveLength(2)
+    expect(events.get()).toEqual([{ id: 'e1', name: 'New' }])
+    expect(setWriteError.mock.calls[0][0]).toContain('alter table events')
+  })
+
+  it('never fires for an unrelated missing-column error that happens to share the same code -- only matches when the message actually names `bring`', async () => {
+    const original = { id: 'e1', name: 'Old' }
+    const events = makeEventsState([original])
+    const supabase = makeSequencedFakeSupabase([
+      { error: { code: '42703', message: 'column "some_other_field" of relation "events" does not exist' } },
+    ])
+    const setWriteError = vi.fn()
+    const updateEvent = makeUpdateEvent({ activeId: 'e1', setEvents: events.setEvents, supabase, setWriteError })
+
+    await updateEvent({ id: 'e1', name: 'New', bring: ['x'] })
+
+    // No retry attempted -- this is a genuinely different failure.
+    expect(supabase.upsertCalls).toHaveLength(1)
+    // Full rollback, generic failure message -- not the bring-specific one.
+    expect(events.get()).toEqual([original])
+    expect(setWriteError.mock.calls[0][0]).not.toMatch(/meenemen/i)
+  })
+
+  it('does not attempt a pointless retry when the payload never carried a `bring` key at all, even if the error text happens to mention it', async () => {
+    const original = { id: 'e1', name: 'Old' }
+    const events = makeEventsState([original])
+    const supabase = makeSequencedFakeSupabase([
+      { error: { code: 'PGRST204', message: "Could not find the 'bring' column" } },
+    ])
+    const setWriteError = vi.fn()
+    const updateEvent = makeUpdateEvent({ activeId: 'e1', setEvents: events.setEvents, supabase, setWriteError })
+
+    await updateEvent({ id: 'e1', name: 'New' }) // no `bring` key on this payload
+
+    expect(supabase.upsertCalls).toHaveLength(1) // no retry -- stripping a key that isn't there wouldn't change anything
+    expect(events.get()).toEqual([original]) // rolled back like any other failed write
+  })
+
+  it('if the retry without `bring` ALSO fails, the whole write is rolled back (including the schedule change) and the generic failure message is shown, not the bring-specific one', async () => {
+    const original = { id: 'e1', name: 'Old', schedule: [] }
+    const events = makeEventsState([original])
+    const supabase = makeSequencedFakeSupabase([
+      { error: { code: 'PGRST204', message: "Could not find the 'bring' column of 'events'" } },
+      { error: { message: 'network down on the retry too' } },
+    ])
+    const setWriteError = vi.fn()
+    const updateEvent = makeUpdateEvent({ activeId: 'e1', setEvents: events.setEvents, supabase, setWriteError })
+
+    await updateEvent({ id: 'e1', name: 'New', schedule: [{ activity: 'lost too' }], bring: ['x'] })
+
+    expect(supabase.upsertCalls).toHaveLength(2)
+    // Fully rolled back -- the schedule edit does NOT survive when even the
+    // fallback write fails, unlike the successful-retry case above.
+    expect(events.get()).toEqual([original])
+    const [message] = setWriteError.mock.calls[0]
+    expect(message).not.toMatch(/meenemen/i)
+    expect(message.length).toBeGreaterThan(0)
+  })
+
+  it('function form (e.g. a functional onUpdate) gets the exact same fallback treatment', async () => {
+    const original = { id: 'e1', kretjes: 3 }
+    const events = makeEventsState([original])
+    const supabase = makeSequencedFakeSupabase([
+      { error: { code: '42703', message: 'column "bring" of relation "events" does not exist' } },
+      { error: null },
+    ])
+    const setWriteError = vi.fn()
+    const updateEvent = makeUpdateEvent({ activeId: 'e1', setEvents: events.setEvents, supabase, setWriteError })
+
+    await updateEvent((e) => ({ ...e, kretjes: e.kretjes + 1, bring: ['Zonnebrand'] }))
+
+    expect(supabase.upsertCalls).toHaveLength(2)
+    expect(supabase.upsertCalls[1].rows).toEqual([{ id: 'e1', kretjes: 4 }])
+    const saved = events.get().find((e) => e.id === 'e1')
+    expect(saved).toEqual({ id: 'e1', kretjes: 4 })
+    expect(saved).not.toHaveProperty('bring')
+    expect(setWriteError.mock.calls[0][0]).toContain('bring jsonb')
   })
 })
