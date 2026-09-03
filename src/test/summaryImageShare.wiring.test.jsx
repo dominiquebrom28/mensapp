@@ -140,40 +140,7 @@ describe('Overview Summary view — share/download as image', () => {
       localStorage.setItem('md-session', 'u-2')
     })
 
-    it('a device that can share files gets the share button, and clicking it calls navigator.share with the PNG', async () => {
-      const shareMock = vi.fn(async () => {})
-      navigator.canShare = vi.fn(() => true)
-      navigator.share = shareMock
-
-      const user = await openSummaryView()
-      const btn = screen.getByRole('button', { name: '📤 Deel als afbeelding' })
-      await user.click(btn)
-
-      await waitFor(() => expect(shareMock).toHaveBeenCalledTimes(1))
-      const call = shareMock.mock.calls[0][0]
-      expect(call.files).toHaveLength(1)
-      expect(call.files[0].type).toBe('image/png')
-      expect(call.files[0].name).toMatch(/^zomerweekend-2026-2026-09-11-summary\.png$/)
-      expect(call.title).toBe('Zomerweekend 2026')
-
-      // Background/scale/a library-level timeout were all actually wired
-      // through to the capture call, not left at the library's defaults.
-      expect(mockDomToBlob).toHaveBeenCalledWith(
-        expect.any(HTMLElement),
-        expect.objectContaining({
-          backgroundColor: expect.any(String),
-          scale: expect.any(Number),
-          timeout: expect.any(Number),
-        }),
-      )
-
-      // No error surfaced, button back to its resting label.
-      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-      await waitFor(() => expect(screen.getByRole('button', { name: '📤 Deel als afbeelding' })).not.toBeDisabled())
-    })
-
-    it('a device that cannot share files falls back to a plain download (no share call)', async () => {
-      navigator.share = vi.fn(async () => {}) // present, but...
+    it('clicking the button downloads the PNG with a sensible filename -- download is the only path now, per the owner (2026-09-03)', async () => {
       navigator.canShare = vi.fn(() => false) // ...cannot share files
 
       let capturedAnchor = null
@@ -192,7 +159,6 @@ describe('Overview Summary view — share/download as image', () => {
       expect(capturedAnchor).not.toBeNull()
       expect(capturedAnchor.download).toMatch(/^zomerweekend-2026-2026-09-11-summary\.png$/)
       expect(capturedAnchor.href).toBe('blob:mock-url')
-      expect(navigator.share).not.toHaveBeenCalled()
 
       // The object URL is revoked ~1s later (real `setTimeout`, not
       // mocked) -- wait for that to actually happen *before* unstubbing
@@ -205,15 +171,13 @@ describe('Overview Summary view — share/download as image', () => {
     })
 
     it('pads the exported image without touching the on-screen card -- capture target is a padded offscreen wrapper around a CLONE, and the real card never leaves the page', async () => {
-      navigator.canShare = vi.fn(() => true)
-      navigator.share = vi.fn(async () => {})
 
       const user = await openSummaryView()
       // Unique to the summary card's own header (not duplicated in Nav,
       // unlike the event name).
       const visibleLocationLine = screen.getByText(/· Camping De Lach/)
 
-      await user.click(screen.getByRole('button', { name: '📤 Deel als afbeelding' }))
+      await user.click(screen.getByRole('button', { name: '⬇ Download als afbeelding' }))
 
       await waitFor(() => expect(mockDomToBlob).toHaveBeenCalledTimes(1))
       const capturedNode = mockDomToBlob.mock.calls[0][0]
@@ -232,8 +196,6 @@ describe('Overview Summary view — share/download as image', () => {
     })
 
     it("the exported image's width tracks the real, on-screen card's width -- not a fixed/shrunk value (regression: an unconstrained offscreen wrapper used to shrink-wrap to ~340px regardless of the real ~795px card)", async () => {
-      navigator.canShare = vi.fn(() => true)
-      navigator.share = vi.fn(async () => {})
 
       const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect
       let stubbedWidth = 795
@@ -243,7 +205,7 @@ describe('Overview Summary view — share/download as image', () => {
 
       try {
         const user = await openSummaryView()
-        await user.click(screen.getByRole('button', { name: '📤 Deel als afbeelding' }))
+        await user.click(screen.getByRole('button', { name: '⬇ Download als afbeelding' }))
         await waitFor(() => expect(mockDomToBlob).toHaveBeenCalledTimes(1))
         const firstCapture = mockDomToBlob.mock.calls[0][0]
         expect(firstCapture.firstElementChild.style.width).toBe('795px')
@@ -253,7 +215,7 @@ describe('Overview Summary view — share/download as image', () => {
         // happened to match once.
         stubbedWidth = 500
         mockDomToBlob.mockClear()
-        await user.click(screen.getByRole('button', { name: '📤 Deel als afbeelding' }))
+        await user.click(screen.getByRole('button', { name: '⬇ Download als afbeelding' }))
         await waitFor(() => expect(mockDomToBlob).toHaveBeenCalledTimes(1))
         const secondCapture = mockDomToBlob.mock.calls[0][0]
         expect(secondCapture.firstElementChild.style.width).toBe('500px')
@@ -262,40 +224,18 @@ describe('Overview Summary view — share/download as image', () => {
       }
     })
 
-    it('the user cancelling the native share sheet (AbortError) is a normal outcome, not a reported failure', async () => {
-      navigator.canShare = vi.fn(() => true)
-      navigator.share = vi.fn(async () => {
-        throw new DOMException('cancelled by user', 'AbortError')
-      })
-
-      const user = await openSummaryView()
-      const btn = screen.getByRole('button', { name: '📤 Deel als afbeelding' })
-      await user.click(btn)
-
-      await waitFor(() => expect(navigator.share).toHaveBeenCalledTimes(1))
-      // Never shows an error for a cancel, and the button becomes usable
-      // again rather than staying stuck on "working".
-      await waitFor(() => expect(screen.getByRole('button', { name: '📤 Deel als afbeelding' })).not.toBeDisabled())
-      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    })
-
     it('a real failure (image generation itself throwing) is surfaced visibly, not swallowed', async () => {
-      navigator.canShare = vi.fn(() => true)
-      navigator.share = vi.fn(async () => {})
       mockDomToBlob.mockReset().mockRejectedValue(new Error('rasterisation boom'))
 
       const user = await openSummaryView()
-      const btn = screen.getByRole('button', { name: '📤 Deel als afbeelding' })
+      const btn = screen.getByRole('button', { name: '⬇ Download als afbeelding' })
       await user.click(btn)
 
       expect(await screen.findByRole('alert')).toHaveTextContent('Kon de afbeelding niet maken')
-      expect(navigator.share).not.toHaveBeenCalled()
-      await waitFor(() => expect(screen.getByRole('button', { name: '📤 Deel als afbeelding' })).not.toBeDisabled())
+      await waitFor(() => expect(screen.getByRole('button', { name: '⬇ Download als afbeelding' })).not.toBeDisabled())
     })
 
     it('a capture that NEVER settles (the exact upstream failure that forced the html-to-image → modern-screenshot switch) is recovered by a hard timeout -- real error, actionable copy, button re-enabled, no permanent spinner', async () => {
-      navigator.canShare = vi.fn(() => true)
-      navigator.share = vi.fn(async () => {})
       // A promise that neither resolves nor rejects, ever -- reproduces the
       // reported real-browser symptom exactly (no blob, no error, button
       // stuck on "Bezig met afbeelding…" indefinitely) so this test would
@@ -303,7 +243,7 @@ describe('Overview Summary view — share/download as image', () => {
       mockDomToBlob.mockReset().mockReturnValue(new Promise(() => {}))
 
       await openSummaryView()
-      const btn = screen.getByRole('button', { name: '📤 Deel als afbeelding' })
+      const btn = screen.getByRole('button', { name: '⬇ Download als afbeelding' })
 
       vi.useFakeTimers()
       try {
@@ -326,19 +266,16 @@ describe('Overview Summary view — share/download as image', () => {
 
         expect(screen.getByRole('alert')).toHaveTextContent('Kon de afbeelding niet maken')
         expect(screen.getByRole('alert')).toHaveTextContent('screenshot')
-        expect(screen.getByRole('button', { name: '📤 Deel als afbeelding' })).not.toBeDisabled()
-        expect(navigator.share).not.toHaveBeenCalled()
-      } finally {
+        expect(screen.getByRole('button', { name: '⬇ Download als afbeelding' })).not.toBeDisabled()
+        } finally {
         vi.useRealTimers()
       }
     }, 15000)
 
     it("the secret stop's activity/location/note never reach the node handed to the capture library", async () => {
-      navigator.canShare = vi.fn(() => true)
-      navigator.share = vi.fn(async () => {})
 
       const user = await openSummaryView()
-      await user.click(screen.getByRole('button', { name: '📤 Deel als afbeelding' }))
+      await user.click(screen.getByRole('button', { name: '⬇ Download als afbeelding' }))
 
       await waitFor(() => expect(mockDomToBlob).toHaveBeenCalledTimes(1))
       const capturedNode = mockDomToBlob.mock.calls[0][0]
@@ -355,11 +292,9 @@ describe('Overview Summary view — share/download as image', () => {
     })
 
     it("an editor's captured node DOES include the secret stop -- same as the existing Stops view already shows them", async () => {
-      navigator.canShare = vi.fn(() => true)
-      navigator.share = vi.fn(async () => {})
 
       const user = await openSummaryView()
-      await user.click(screen.getByRole('button', { name: '📤 Deel als afbeelding' }))
+      await user.click(screen.getByRole('button', { name: '⬇ Download als afbeelding' }))
 
       await waitFor(() => expect(mockDomToBlob).toHaveBeenCalledTimes(1))
       const capturedNode = mockDomToBlob.mock.calls[0][0]

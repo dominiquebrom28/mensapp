@@ -2552,18 +2552,7 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
   const summaryRef=useRef(null);
   const [imageStatus,setImageStatus]=useState({state:"idle"});
   // Cheap, synchronous, no import: decides the button's label (and which
-  // branch it takes on click) without ever touching the capture library, so
-  // the capability check itself never forces the lazy chunk to load. A
-  // device that can share actual files (not just text/links) gets the
-  // button aimed at the native share sheet -- straight into WhatsApp, which
-  // is the real destination for this image on a phone. Everything else
-  // (most desktop browsers) falls back to a plain download.
-  const canShareImage=useMemo(()=>{
-    if(typeof navigator==="undefined"||typeof navigator.share!=="function"||typeof navigator.canShare!=="function")return false;
-    try{return navigator.canShare({files:[new File([""],"probe.png",{type:"image/png"})]});}
-    catch{return false;}
-  },[]);
-  // A DOM-capture library must NEVER be able to hang this button forever --
+   // A DOM-capture library must NEVER be able to hang this button forever --
   // "fails without erroring" is the exact class of bug this project keeps
   // getting bitten by. `withHardTimeout` is the backstop: if the capture
   // hasn't settled within CAPTURE_TIMEOUT_MS, the button recovers and shows
@@ -2680,23 +2669,22 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
       }
       if(!blob)throw new Error("modern-screenshot returned no blob");
       const filename=buildSummaryImageFilename(evt.name,evt.date);
-      const file=new File([blob],filename,{type:"image/png"});
-      if(canShareImage&&navigator.canShare?.({files:[file]})){
-        try{
-          await navigator.share({files:[file],title:evt.name||"Schema"});
-        }catch(shareErr){
-          // A user backing out of the native share sheet is a normal
-          // outcome, not a failure -- report nothing, just go back to idle.
-          if(shareErr?.name==="AbortError"){setImageStatus({state:"idle"});return;}
-          throw shareErr;
-        }
-      }else{
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement("a");
-        a.href=url;a.download=filename;
-        document.body.appendChild(a);a.click();a.remove();
-        setTimeout(()=>URL.revokeObjectURL(url),1000);
-      }
+      // Download, always -- the owner's explicit call (2026-09-03), replacing
+      // an earlier `navigator.share` path. One button, one behaviour, no
+      // branch that behaves differently depending on whose phone it is.
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url;a.download=filename;a.rel="noopener";
+      document.body.appendChild(a);a.click();a.remove();
+      // iOS Safari ignores the `download` attribute on a blob: URL -- the
+      // click does nothing at all, silently. Detected by capability, not by
+      // sniffing the user agent (which lies, and which every iPad has lied
+      // about since it started claiming to be a Mac): if the anchor doesn't
+      // support `download`, open the image in a new tab so it can be
+      // long-pressed and saved, rather than the button appearing to be dead.
+      const downloadSupported="download" in document.createElement("a");
+      if(!downloadSupported)window.open(url,"_blank","noopener");
+      setTimeout(()=>URL.revokeObjectURL(url),downloadSupported?1000:60000);
       setImageStatus({state:"idle"});
     }catch(err){
       // Real diagnosis, always -- the UI banner is necessarily generic (it
@@ -2908,7 +2896,7 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
               {!isEmpty&&(
                 <div style={{display:"grid",gap:6,justifyItems:"center",paddingTop:".2rem"}}>
                   <Btn onClick={shareOrDownloadSummary} disabled={imageStatus.state==="working"} variant="gold" size="md" style={{width:"100%",maxWidth:340}}>
-                    {imageStatus.state==="working"?"⏳ Bezig met afbeelding…":canShareImage?"📤 Deel als afbeelding":"⬇ Download als afbeelding"}
+                    {imageStatus.state==="working"?"⏳ Bezig met afbeelding…":"⬇ Download als afbeelding"}
                   </Btn>
                   <div aria-live="polite" style={{minHeight:"1.1em"}}>
                     {imageStatus.state==="error"&&(
