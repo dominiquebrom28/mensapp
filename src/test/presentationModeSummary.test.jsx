@@ -313,7 +313,7 @@ describe('PresentationMode summary slide: presenter mode', () => {
     expect(screen.queryByText(/still a secret/i)).not.toBeInTheDocument()
   })
 
-  it('a secret stop never revealed this session stays out of the list, shown only as a count -- never its activity or location', () => {
+  it('a secret stop never revealed this session renders inline, masked, in its own time slot -- never its activity or location (owner direction 2026-09-03: no more count bar)', () => {
     const evt = {
       id: 'evt-sum-hidden-1',
       name: 'Hidden Test',
@@ -331,7 +331,11 @@ describe('PresentationMode summary slide: presenter mode', () => {
     expect(screen.getByText('Public Lunch')).toBeInTheDocument()
     expect(screen.queryByText('TOP SECRET surprise')).not.toBeInTheDocument()
     expect(screen.queryByText('Undisclosed bunker')).not.toBeInTheDocument()
-    expect(screen.getByText(/1 stop still a secret/i)).toBeInTheDocument()
+    // No more count bar -- gone entirely.
+    expect(screen.queryByText(/stop still a secret/i)).not.toBeInTheDocument()
+    // Instead, the stop's own time slot is still there, masked inline.
+    expect(screen.getByText('20:00')).toBeInTheDocument()
+    expect(screen.getByText('Still a secret')).toBeInTheDocument()
   })
 })
 
@@ -595,8 +599,14 @@ describe('PresentationMode summary slide: a reveal is durable against an unrelat
     advanceFade()
 
     const summaryContainer = () => screen.getByText('📋 The Full Day').closest('div[style*="overflow-y"]')
+    // The revealed duplicate shows in full, exactly once -- never doubled
+    // with (or confused for) the still-held-back one.
     expect(within(summaryContainer()).getAllByText('Mystery Activity')).toHaveLength(1)
-    expect(within(summaryContainer()).getByText(/1 stop still a secret/i)).toBeInTheDocument()
+    // The held-back duplicate still gets its own row (same time slot),
+    // masked -- not silently merged away or dropped for being a content
+    // duplicate of the revealed one.
+    expect(within(summaryContainer()).getAllByText('20:00')).toHaveLength(2)
+    expect(within(summaryContainer()).getByText('Still a secret')).toBeInTheDocument()
   })
 })
 
@@ -619,7 +629,12 @@ describe('PresentationMode summary slide: solo mode', () => {
     expect(screen.getByText('📋 The Full Day')).toBeInTheDocument()
     expect(screen.getByText('Public One')).toBeInTheDocument()
     expect(screen.queryByText('Secret Two')).not.toBeInTheDocument()
-    expect(screen.getByText(/1 stop still a secret/i)).toBeInTheDocument()
+    // No more count bar -- the held-back stop renders inline instead,
+    // masked, in its own time slot (same rule for a viewer/solo browser as
+    // for the presenter -- owner was explicit this applies to everyone).
+    expect(screen.queryByText(/stop still a secret/i)).not.toBeInTheDocument()
+    expect(screen.getByText('12:00')).toBeInTheDocument()
+    expect(screen.getByText('Still a secret')).toBeInTheDocument()
     expect(screen.queryByText('→')).not.toBeInTheDocument()
     expect(fakeSupabase.channels.length).toBe(0)
   })

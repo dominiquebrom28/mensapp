@@ -132,7 +132,7 @@ describe('OverviewTab schedule Summary view (view toggle on the existing schedul
       localStorage.setItem('md-session', 'u-2')
     })
 
-    it("Summary view never renders the secret stop's activity, location, or note -- only an honest hidden-count line", async () => {
+    it("Summary view never renders the secret stop's activity, location, or note -- it renders inline instead, masked, in its own time slot (owner direction 2026-09-03: no more count bar)", async () => {
       const user = await openEventOverview()
       await user.click(screen.getByRole('button', { name: 'Summary' }))
 
@@ -150,8 +150,14 @@ describe('OverviewTab schedule Summary view (view toggle on the existing schedul
       expect(screen.queryByText('Onbekende bunker')).not.toBeInTheDocument()
       expect(screen.queryByText(/niet lekken/)).not.toBeInTheDocument()
 
-      // An honest count of what's hidden, instead.
-      expect(screen.getByText(/1 stop.*nog geheim/)).toBeInTheDocument()
+      // No more count bar -- it's gone entirely.
+      expect(screen.queryByText(/stop.*nog geheim/)).not.toBeInTheDocument()
+
+      // Instead, the secret stop's own time slot (20:00) is still there,
+      // masked inline: its real time, plus an honest "still a secret"
+      // marker -- never a silently missing row.
+      expect(screen.getByText('20:00')).toBeInTheDocument()
+      expect(screen.getByText('Nog geheim')).toBeInTheDocument()
 
       // The meenemen list is NOT secret -- a regular member sees it too.
       expect(screen.getByText(/Regenjas/)).toBeInTheDocument()

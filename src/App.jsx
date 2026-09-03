@@ -567,19 +567,47 @@ const scheduleDayTimeOrder=(a,b)=>((a.day??0)-(b.day??0))||padTimeForSort(a.time
 // place that filters, so a regression here fails a test instead of leaking
 // a surprise. An editor (can.editSchedule) gets every stop, secret or not,
 // exactly as the existing "Stops" view already behaves.
+//
+// Masking, not dropping (owner direction change, 2026-09-03): a secret stop
+// used to be filtered out of `days` entirely for a non-editor, with a
+// separate `hiddenCount` driving a "N stops still a secret" count bar.
+// Owner's call after seeing it in the group chat: the bar is redundant with
+// the per-stop lock badge and should go; a held-back stop should instead
+// render INLINE, in its correct time slot, with its time and a secret
+// marker but never its activity/location/note. So every stop now always
+// gets an entry in `days` -- `masked` (true only for a secret stop seen by
+// a non-editor) is what the caller renders a lock badge for instead of the
+// real activity/location, which are blanked at the source here rather than
+// trusted to stay blank in every render branch that touches this data.
+// `hiddenCount` is gone with it -- nothing needs a count once nothing is
+// dropped (see scheduleSummary.pure.test.js for the updated shape).
 const buildScheduleSummary=(schedule,dateStr,isEditor)=>{
   const sorted=[...schedule].sort(scheduleDayTimeOrder);
-  const hiddenCount=schedule.filter(s=>s.secret).length;
-  const visible=isEditor?sorted:sorted.filter(s=>!s.secret);
   const days=[];
-  visible.forEach(s=>{
+  sorted.forEach(s=>{
     const day=s.day??0;
     let group=days.find(g=>g.day===day);
     if(!group){group={day,label:dayHeadingLabel(dateStr,day),stops:[]};days.push(group);}
-    group.stops.push({time:s.time||"",activity:s.activity||"",location:s.location||"",secret:!!s.secret});
+    const secret=!!s.secret;
+    const masked=secret&&!isEditor;
+    group.stops.push({time:s.time||"",activity:masked?"":s.activity||"",location:masked?"":s.location||"",secret,masked});
   });
   days.sort((a,b)=>a.day-b.day);
-  return{days,hiddenCount};
+  return{days};
+};
+// Filename for the Summary view's shareable/downloadable PNG (owner
+// request: "make the summary downloadable as image(s)"). Pure and
+// side-effect free on purpose -- no Date.now()/today, the event's OWN date
+// only, so re-generating the same event's image twice always produces the
+// same name. Slugifies the event name (accents stripped, lowercased,
+// non-alphanumerics collapsed to single hyphens) so a name like "Mensdag
+// 2026: Côte d'Azur!" doesn't end up as an unusable filename on any OS.
+const buildSummaryImageFilename=(name,dateStr)=>{
+  const slug=(name||"").trim().toLowerCase()
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"mensdag";
+  const date=/^\d{4}-\d{2}-\d{2}/.test(dateStr||"")?dateStr.slice(0,10):"schema";
+  return`${slug}-${date}-summary.png`;
 };
 // Boundary adapter for the trailer feature (src/features/trailer/). The
 // trailer now plays the event's real, owner-produced video and ends on a
@@ -2512,6 +2540,178 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
   // (three tabs were deleted from this page already; this stays a toggle on
   // the block that's already here, not a new tab).
   const [scheduleView,setScheduleView]=useState("stops");
+  // Summary → image (owner request: "make the summary downloadable as
+  // image(s) for users" -- the Summary card above is already built to be
+  // screenshotted into the group chat; this makes that a real action).
+  // `summaryRef` points at the exact DOM node rendered below -- the same
+  // node a member already sees, filtered by the same `buildScheduleSummary`
+  // call, secret stops already masked for a non-editor. Capturing THAT
+  // node (never a hand-redrawn canvas copy of the layout) is what keeps the
+  // image honest: it can never drift from the page, and it can never leak
+  // more than the page already shows, because it IS the page.
+  const summaryRef=useRef(null);
+  const [imageStatus,setImageStatus]=useState({state:"idle"});
+  // Cheap, synchronous, no import: decides the button's label (and which
+  // branch it takes on click) without ever touching the capture library, so
+  // the capability check itself never forces the lazy chunk to load. A
+  // device that can share actual files (not just text/links) gets the
+  // button aimed at the native share sheet -- straight into WhatsApp, which
+  // is the real destination for this image on a phone. Everything else
+  // (most desktop browsers) falls back to a plain download.
+  const canShareImage=useMemo(()=>{
+    if(typeof navigator==="undefined"||typeof navigator.share!=="function"||typeof navigator.canShare!=="function")return false;
+    try{return navigator.canShare({files:[new File([""],"probe.png",{type:"image/png"})]});}
+    catch{return false;}
+  },[]);
+  // A DOM-capture library must NEVER be able to hang this button forever --
+  // "fails without erroring" is the exact class of bug this project keeps
+  // getting bitten by. `withHardTimeout` is the backstop: if the capture
+  // hasn't settled within CAPTURE_TIMEOUT_MS, the button recovers and shows
+  // a real, actionable error regardless of what the library is doing
+  // internally. The abandoned `domToBlob(...)` promise (the loser of the
+  // `Promise.race` below) is left to resolve/reject into the void -- that's
+  // safe on its own, with no extra bookkeeping needed: once a `Promise.race`
+  // has settled from one side, a later settlement of the other side is a
+  // spec-guaranteed no-op (nothing re-enters this function's `await`), and
+  // the button stays disabled for this entire call regardless, so there is
+  // no way for a second, overlapping call to exist for a stale one to
+  // clobber.
+  //
+  // This isn't hypothetical caution: `html-to-image` (this project's first
+  // choice here) was replaced by `modern-screenshot` specifically because
+  // of a confirmed, still-open upstream bug at capture time -- its
+  // `createImage()` chains `img.decode()` and never resolves OR rejects if
+  // `decode()` itself rejects (documented upstream, bubkoo/html-to-image
+  // issue/PR #589, "resolve createImage when decode() rejects instead of
+  // hanging forever" -- unmerged as of this writing), plus two independent
+  // 2025 reports of `toPng`/`toBlob` freezing the tab on ordinary DOM in
+  // current Chrome/Firefox (#544, #536). `modern-screenshot` is the
+  // actively maintained fork created to fix exactly this: its own media
+  // loader wraps `decode()` in try/catch (a rejection just logs a warning
+  // and proceeds, per its `src/utils.ts`) and ships a first-class `timeout`
+  // option of its own. That library-level `timeout` below is defence in
+  // depth, not a replacement for this one -- it only covers the media/font
+  // fetch step it knows about, not "the library hangs somewhere we didn't
+  // anticipate," which is exactly the failure mode being guarded against
+  // here.
+  const CAPTURE_TIMEOUT_MS=12000;
+  // Comfortable breathing room on all four sides of the EXPORTED image only
+  // (owner: "now the text is like right at the edge of the screenshot") --
+  // applied to a throwaway offscreen wrapper below, never to `summaryRef`
+  // itself, so the on-screen card's own spacing is untouched.
+  const IMAGE_PAD_PX=32;
+  const withHardTimeout=(promise,ms)=>Promise.race([
+    promise,
+    new Promise((_resolve,reject)=>setTimeout(()=>reject(new Error("capture-timeout")),ms)),
+  ]);
+  // `modern-screenshot` is imported here, inside the handler, never at
+  // module top-level -- this project ships only supabase/react/react-dom in
+  // its main chunk on purpose, and nobody who never taps this button should
+  // pay for a screenshot library. Font handling: Playfair Display/DM Sans
+  // are loaded via the `GS` block's `@import url(...)`, not a `<link>` --
+  // `domToBlob`'s font embedding (on by default, no separate call needed
+  // unlike the old library) walks `document.styleSheets`, resolves that
+  // `@import` via a detached stylesheet, and inlines the actual
+  // `@font-face` rules used by the captured node. Whole-node capture:
+  // rasterises the node's own scrollWidth/scrollHeight, not the viewport,
+  // so a schedule long enough to need scrolling on-screen still renders
+  // complete -- there is no `overflow:auto`/fixed-height wrapper around
+  // this card today (the one in this file with that shape is
+  // PresentationMode's closing slide, out of scope here) -- this comment is
+  // the guard against one ever being added around `summaryRef` without
+  // re-checking this.
+  const shareOrDownloadSummary=async()=>{
+    const node=summaryRef.current;
+    if(!node)return;
+    setImageStatus({state:"working"});
+    try{
+      const{domToBlob}=await import("modern-screenshot");
+      // Resolved to a real colour, not left as `var(--bg2)` -- the captured
+      // image must have a solid background of its own (a transparent PNG
+      // looks broken dropped into a chat), and the clone the library
+      // rasterises is not guaranteed to still see the page's own `:root`
+      // custom properties.
+      const bg=getComputedStyle(document.documentElement).getPropertyValue("--bg2").trim()||"#150e04";
+      // Capped at 2x: sharp enough for a phone screen/chat thumbnail
+      // without ballooning file size on a 3x-DPR phone for an image nobody
+      // is going to zoom into.
+      const scale=Math.min(typeof window!=="undefined"?(window.devicePixelRatio||1):1,2);
+      // Padding lives on a throwaway offscreen wrapper around a CLONE of
+      // `node`, never on `node` itself: the on-screen card's own spacing
+      // must stay exactly as designed, and the LIVE, React-owned node must
+      // never be detached from its real parent even briefly -- a realtime
+      // schedule update reconciling against it mid-capture (this capture
+      // can take a few seconds fetching fonts) while it's off in a wrapper
+      // elsewhere in the document would be exactly the kind of silent DOM
+      // corruption this app has been bitten by before. Cloning first is
+      // also not a new risk of its own: `domToBlob` already works by deep-
+      // cloning whatever node it's given internally, so capturing a
+      // wrapper around one extra, disposable clone is the same,
+      // already-proven-safe technique, one layer earlier. `position:fixed;
+      // left:-99999px` keeps it fully laid out (a real width/height,
+      // correctly-resolved fonts/computed styles) without ever being
+      // visible or affecting page scroll/layout.
+      //
+      // Bug (real-browser verification, 2026-09-03): `paddedNode` is
+      // `display:inline-block` with no width of its own, so it used to
+      // shrink-wrap to the clone's minimum content width (measured: a
+      // 795px on-screen card exported as a 341px-wide image) -- `node`
+      // itself is a CSS grid item that only reaches its real width because
+      // its actual on-screen parent constrains it; a detached clone has no
+      // such parent. Explicitly stamping the clone with `node`'s own
+      // measured width fixes that: the export now matches what's on
+      // screen, at any schedule length, rather than an arbitrary shrunk
+      // width.
+      const sourceWidth=node.getBoundingClientRect().width;
+      const clone=node.cloneNode(true);
+      if(sourceWidth)clone.style.width=`${sourceWidth}px`;
+      const paddedNode=document.createElement("div");
+      paddedNode.style.cssText=`display:inline-block;padding:${IMAGE_PAD_PX}px;background:${bg};position:fixed;left:-99999px;top:0;`;
+      paddedNode.appendChild(clone);
+      document.body.appendChild(paddedNode);
+      let blob;
+      try{
+        blob=await withHardTimeout(
+          domToBlob(paddedNode,{backgroundColor:bg,scale,timeout:CAPTURE_TIMEOUT_MS-2000}),
+          CAPTURE_TIMEOUT_MS,
+        );
+      }finally{
+        paddedNode.remove();
+      }
+      if(!blob)throw new Error("modern-screenshot returned no blob");
+      const filename=buildSummaryImageFilename(evt.name,evt.date);
+      const file=new File([blob],filename,{type:"image/png"});
+      if(canShareImage&&navigator.canShare?.({files:[file]})){
+        try{
+          await navigator.share({files:[file],title:evt.name||"Schema"});
+        }catch(shareErr){
+          // A user backing out of the native share sheet is a normal
+          // outcome, not a failure -- report nothing, just go back to idle.
+          if(shareErr?.name==="AbortError"){setImageStatus({state:"idle"});return;}
+          throw shareErr;
+        }
+      }else{
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");
+        a.href=url;a.download=filename;
+        document.body.appendChild(a);a.click();a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),1000);
+      }
+      setImageStatus({state:"idle"});
+    }catch(err){
+      // Real diagnosis, always -- the UI banner is necessarily generic (it
+      // can't show a raw stack trace to a lad in a group chat), so this is
+      // the ONLY place the actual failure -- a rejected/hung capture, a
+      // share-sheet error that wasn't a cancel, a module that failed to
+      // load -- is ever visible anywhere. A prior version of this handler
+      // had no such trail at all, which is exactly what turned one real
+      // failure into an extended, unnecessary hunt: the UI looked
+      // identical whether the capture had timed out, thrown, or never
+      // started, and there was nothing in devtools to tell those apart.
+      console.error("[shareOrDownloadSummary] image capture/share failed:",err);
+      setImageStatus({state:"error"});
+    }
+  };
   const statusOpts=isPast?["went","absent"]:["going","maybe","not coming"];
   const colorOf=s=>statusMap[s]?.color??"var(--muted)";
   const isAdmin=can.editEvent(currentUser);
@@ -2640,47 +2840,80 @@ const OverviewTab=({evt,onUpdate,isPast,currentUser,users=[],onSendNotif})=>{
         {scheduleView==="summary"&&(()=>{
           const summary=buildScheduleSummary(evt.schedule,evt.date,isScheduleEditor);
           const bring=Array.isArray(evt.bring)?evt.bring:[];
-          const isEmpty=summary.days.length===0&&summary.hiddenCount===0&&bring.length===0;
+          const isEmpty=summary.days.length===0&&bring.length===0;
           return(
             <div style={{display:"grid",gap:"1rem"}}>
-              {/* Self-contained header -- this card is the thing that gets
-                  screenshotted into a group chat, so it must carry its own
-                  event identity rather than relying on page chrome that
-                  won't be in the screenshot. */}
-              <div style={{textAlign:"center",paddingBottom:".7rem",borderBottom:"1px solid var(--border)"}}>
-                <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber2)",fontWeight:700}}>{evt.name}</div>
-                <div style={{fontSize:".76rem",color:"var(--muted)",marginTop:2}}>{formatEventDateRange(evt.date,evt.end_date)}{evt.location?` · ${evt.location}`:""}</div>
+              {/* `summaryRef` is exactly this node -- what gets rasterised
+                  into the shared/downloaded PNG below is the real, rendered
+                  DOM a member is already looking at, not a redrawn copy. The
+                  share/download button and its status line deliberately sit
+                  OUTSIDE this node (below), so they never appear in the
+                  image themselves. */}
+              <div ref={summaryRef} style={{display:"grid",gap:"1rem"}}>
+                {/* Self-contained header -- this card is the thing that gets
+                    screenshotted into a group chat, so it must carry its own
+                    event identity rather than relying on page chrome that
+                    won't be in the screenshot. */}
+                <div style={{textAlign:"center",paddingBottom:".7rem",borderBottom:"1px solid var(--border)"}}>
+                  <div style={{fontFamily:"var(--font-h)",fontSize:"1.1rem",color:"var(--amber2)",fontWeight:700}}>{evt.name}</div>
+                  <div style={{fontSize:".76rem",color:"var(--muted)",marginTop:2}}>{formatEventDateRange(evt.date,evt.end_date)}{evt.location?` · ${evt.location}`:""}</div>
+                </div>
+
+                {isEmpty&&(
+                  <div style={{textAlign:"center",padding:"1.5rem 1rem",color:"var(--muted)",fontSize:".82rem"}}>Nog niets om samen te vatten.</div>
+                )}
+
+                {summary.days.map(day=>(
+                  <div key={day.day} style={{display:"grid",gap:".3rem"}}>
+                    {summary.days.length>1&&<div style={{fontSize:".68rem",color:"var(--amber)",letterSpacing:".08em",fontWeight:700}}>{day.label}</div>}
+                    {/* Owner direction (2026-09-03): time is ALWAYS the
+                        first element in the row, in its own fixed-width
+                        column, so every row's time lines up -- the lock
+                        badge sits AFTER the time, where a normal row's
+                        activity would start, never in front of it (a lock
+                        prefix pushed the time out of its column for exactly
+                        the rows that were already the odd ones out). A
+                        masked stop's "🔒 Nog geheim" is one grouped
+                        inline-flex unit so it can never wrap apart into a
+                        lonely icon on its own line. */}
+                    {day.stops.map((s,i)=>(
+                      <div key={i} style={{display:"flex",gap:8,alignItems:"baseline",fontSize:".83rem",padding:"3px 0",borderBottom:"1px solid var(--border)"}}>
+                        {s.time&&<span style={{fontFamily:"var(--font-h)",color:"var(--amber)",fontWeight:700,flexShrink:0,minWidth:40}}>{s.time}</span>}
+                        {s.masked?(
+                          <span style={{display:"inline-flex",alignItems:"center",gap:6,color:"var(--muted)",fontStyle:"italic"}}>
+                            <span aria-hidden="true">🔒</span>Nog geheim
+                          </span>
+                        ):(
+                          <>
+                            {s.secret&&<span aria-hidden="true" style={{flexShrink:0}}>🔒</span>}
+                            <span style={{color:"var(--amber2)",fontWeight:600,flexShrink:0}}>{s.activity}</span>
+                            {s.location&&<span style={{color:"var(--muted)",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>· {s.location}</span>}
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+
+                {bring.length>0&&(
+                  <div>
+                    <div style={{fontSize:".68rem",color:"var(--amber)",letterSpacing:".08em",fontWeight:700,marginBottom:6}}>🎒 MEENEMEN</div>
+                    <div style={{display:"grid",gap:4}}>
+                      {bring.map((item,i)=><div key={i} style={{fontSize:".83rem",color:"var(--cream)"}}>• {item}</div>)}
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {isEmpty&&(
-                <div style={{textAlign:"center",padding:"1.5rem 1rem",color:"var(--muted)",fontSize:".82rem"}}>Nog niets om samen te vatten.</div>
-              )}
-
-              {summary.days.map(day=>(
-                <div key={day.day} style={{display:"grid",gap:".3rem"}}>
-                  {summary.days.length>1&&<div style={{fontSize:".68rem",color:"var(--amber)",letterSpacing:".08em",fontWeight:700}}>{day.label}</div>}
-                  {day.stops.map((s,i)=>(
-                    <div key={i} style={{display:"flex",gap:8,alignItems:"baseline",fontSize:".83rem",padding:"3px 0",borderBottom:"1px solid var(--border)"}}>
-                      {s.secret&&<span aria-hidden="true" style={{flexShrink:0}}>🔒</span>}
-                      {s.time&&<span style={{fontFamily:"var(--font-h)",color:"var(--amber)",fontWeight:700,flexShrink:0,minWidth:40}}>{s.time}</span>}
-                      <span style={{color:"var(--amber2)",fontWeight:600,flexShrink:0}}>{s.activity}</span>
-                      {s.location&&<span style={{color:"var(--muted)",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>· {s.location}</span>}
-                    </div>
-                  ))}
-                </div>
-              ))}
-
-              {summary.hiddenCount>0&&(
-                <div style={{textAlign:"center",padding:".6rem",background:"var(--bg3)",borderRadius:"var(--radius-sm)",border:"1px solid var(--border)"}}>
-                  <span style={{fontSize:".78rem",color:"var(--muted)"}}>🔒 {summary.hiddenCount} stop{summary.hiddenCount!==1?"s":""} nog geheim — wordt later onthuld</span>
-                </div>
-              )}
-
-              {bring.length>0&&(
-                <div>
-                  <div style={{fontSize:".68rem",color:"var(--amber)",letterSpacing:".08em",fontWeight:700,marginBottom:6}}>🎒 MEENEMEN</div>
-                  <div style={{display:"grid",gap:4}}>
-                    {bring.map((item,i)=><div key={i} style={{fontSize:".83rem",color:"var(--cream)"}}>• {item}</div>)}
+              {!isEmpty&&(
+                <div style={{display:"grid",gap:6,justifyItems:"center",paddingTop:".2rem"}}>
+                  <Btn onClick={shareOrDownloadSummary} disabled={imageStatus.state==="working"} variant="gold" size="md" style={{width:"100%",maxWidth:340}}>
+                    {imageStatus.state==="working"?"⏳ Bezig met afbeelding…":canShareImage?"📤 Deel als afbeelding":"⬇ Download als afbeelding"}
+                  </Btn>
+                  <div aria-live="polite" style={{minHeight:"1.1em"}}>
+                    {imageStatus.state==="error"&&(
+                      <span role="alert" style={{color:"var(--red)",fontSize:".78rem"}}>Kon de afbeelding niet maken — maak in plaats daarvan een screenshot.</span>
+                    )}
                   </div>
                 </div>
               )}
@@ -4193,18 +4426,30 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
              slides above. */
           <div style={{width:"100%",maxWidth:1000,height:"100%",overflowY:"auto",display:"grid",gap:isMobile?"1rem":"1.3rem",paddingBottom:"1.4rem"}}>
             {(()=>{
+              // Owner direction change (2026-09-03): the count bar
+              // ("N stops still a secret") is gone -- a held-back stop now
+              // renders inline, in its own time slot, masked (time + a
+              // secret marker, never activity/location/note). Explicitly
+              // requested for EVERYONE on this slide, not just the
+              // presenter: "i want them to see it inline but with
+              // 'secret'". Revealed-vs-held-back still comes from the exact
+              // same `secret && !revealedSecrets.includes(id)` check the
+              // per-stop slide's own `isHidden` uses (see this block's own
+              // docblock above for why that's load-bearing) -- a stop
+              // revealed this session shows in full here, one still held
+              // back shows masked, regardless of who's looking.
               const dayMeta=buildScheduleSummary(evt.schedule||[],evt.date,true).days.map(d=>({day:d.day,label:d.label}));
-              let stillHidden=0;
               const days=dayMeta.map(({day,label})=>{
                 const stops=order.map(ri=>allStops[ri]).filter(stop=>(stop.day??0)===day).map(stop=>{
                   const hidden=!!stop.secret&&!revealedSecrets.includes(stop.id);
-                  if(hidden)stillHidden++;
-                  return{time:stop.time||"",activity:stop.activity||"",location:stop.location||"",hidden};
-                }).filter(s=>!s.hidden);
+                  return hidden
+                    ?{time:stop.time||"",activity:"",location:"",hidden:true}
+                    :{time:stop.time||"",activity:stop.activity||"",location:stop.location||"",hidden:false};
+                });
                 return{day,label,stops};
               }).filter(day=>day.stops.length>0);
               const bring=Array.isArray(evt.bring)?evt.bring:[];
-              const isEmpty=days.length===0&&stillHidden===0&&bring.length===0;
+              const isEmpty=days.length===0&&bring.length===0;
               return(
                 <>
                   <div style={{textAlign:"center"}}>
@@ -4217,18 +4462,19 @@ const PresentationMode=({evt,onUpdate,isPresenter=true,onClose,currentLive=null,
                       {days.length>1&&<div style={{fontSize:".85rem",color:"var(--amber)",letterSpacing:".1em",textTransform:"uppercase",fontWeight:700}}>{day.label}</div>}
                       {day.stops.map((s,i)=>(
                         <div key={i} style={{display:"flex",gap:14,alignItems:"baseline",padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,.14)",flexWrap:"wrap"}}>
-                          {s.time&&<span style={{fontFamily:"var(--font-h)",color:"var(--amber)",fontWeight:700,fontSize:"1.15rem",minWidth:64,flexShrink:0}}>{s.time}</span>}
-                          <span style={{color:"#fff",fontWeight:700,fontSize:"1.15rem"}}>{s.activity}</span>
-                          {s.location&&<span style={{color:"rgba(255,255,255,.65)",fontSize:"1rem"}}>· {s.location}</span>}
+                          {s.time&&<span style={{fontFamily:"var(--font-h)",color:s.hidden?"rgba(224,85,85,.75)":"var(--amber)",fontWeight:700,fontSize:"1.15rem",minWidth:64,flexShrink:0}}>{s.time}</span>}
+                          {s.hidden?(
+                            <span style={{display:"flex",alignItems:"center",gap:8,color:"rgba(224,85,85,.75)",fontWeight:700,fontSize:"1.15rem"}}><span aria-hidden="true">🔒</span>Still a secret</span>
+                          ):(
+                            <>
+                              <span style={{color:"#fff",fontWeight:700,fontSize:"1.15rem"}}>{s.activity}</span>
+                              {s.location&&<span style={{color:"rgba(255,255,255,.65)",fontSize:"1rem"}}>· {s.location}</span>}
+                            </>
+                          )}
                         </div>
                       ))}
                     </div>
                   ))}
-                  {stillHidden>0&&(
-                    <div style={{textAlign:"center",padding:"1rem",background:"rgba(224,85,85,.12)",border:"1px solid rgba(224,85,85,.35)",borderRadius:12}}>
-                      <span style={{fontSize:"1.05rem",color:"var(--red)",fontWeight:700}}>🔒 {stillHidden} stop{stillHidden!==1?"s":""} still a secret</span>
-                    </div>
-                  )}
                   {bring.length>0&&(
                     <div style={{marginTop:isMobile?".4rem":".8rem"}}>
                       <div style={{fontSize:".85rem",color:"var(--amber)",letterSpacing:".1em",textTransform:"uppercase",fontWeight:700,marginBottom:".6rem"}}>🎒 Bring This</div>
